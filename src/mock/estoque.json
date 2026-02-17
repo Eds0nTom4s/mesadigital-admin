@@ -1,0 +1,122 @@
+[
+  {
+    "produtoId": 1,
+    "quantidadeAtual": 25,
+    "quantidadeMinima": 10,
+    "status": "OK"
+  },
+  {
+    "produtoId": 2,
+    "quantidadeAtual": 8,
+    "quantidadeMinima": 10,
+    "status": "BAIXO"
+  },
+  {
+    "produtoId": 3,
+    "quantidadeAtual": 15,
+    "quantidadeMinima": 8,
+    "status": "OK"
+  },
+  {
+    "produtoId": 4,
+    "quantidadeAtual": 0,
+    "quantidadeMinima": 5,
+    "status": "ESGOTADO"
+  },
+  {
+    "produtoId": 5,
+    "quantidadeAtual": 12,
+    "quantidadeMinima": 8,
+    "status": "OK"
+  },
+  {
+    "produtoId": 6,
+    "quantidadeAtual": 6,
+    "quantidadeMinima": 5,
+    "status": "OK"
+  },
+  {
+    "produtoId": 7,
+    "quantidadeAtual": 35,
+    "quantidadeMinima": 20,
+    "status": "OK"
+  },
+  {
+    "produtoId": 8,
+    "quantidadeAtual": 18,
+    "quantidadeMinima": 15,
+    "status": "OK"
+  },
+  {
+    "produtoId": 9,
+    "quantidadeAtual": 22,
+    "quantidadeMinima": 15,
+    "status": "OK"
+  },
+  {
+    "produtoId": 10,
+    "quantidadeAtual": 3,
+    "quantidadeMinima": 10,
+    "status": "BAIXO"
+  },
+  {
+    "produtoId": 11,
+    "quantidadeAtual": 45,
+    "quantidadeMinima": 30,
+    "status": "OK"
+  },
+  {
+    "produtoId": 12,
+    "quantidadeAtual": 28,
+    "quantidadeMinima": 20,
+    "status": "OK"
+  },
+  {
+    "produtoId": 13,
+    "quantidadeAtual": 120,
+    "quantidadeMinima": 50,
+    "status": "OK"
+  },
+  {
+    "produtoId": 14,
+    "quantidadeAtual": 95,
+    "quantidadeMinima": 50,
+    "status": "OK"
+  },
+  {
+    "produtoId": 15,
+    "quantidadeAtual": 15,
+    "quantidadeMinima": 12,
+    "status": "OK"
+  },
+  {
+    "produtoId": 16,
+    "quantidadeAtual": 8,
+    "quantidadeMinima": 12,
+    "status": "BAIXO"
+  },
+  {
+    "produtoId": 17,
+    "quantidadeAtual": 200,
+    "quantidadeMinima": 100,
+    "status": "OK"
+  },
+  {
+    "produtoId": 18,
+    "quantidadeAtual": 85,
+    "quantidadeMinima": 60,
+    "status": "OK"
+  },
+  {
+    "produtoId": 19,
+    "quantidadeAtual": 0,
+    "quantidadeMinima": 20,
+    "status": "ESGOTADO"
+  },
+  {
+    "produtoId": 20,
+    "quantidadeAtual": 250,
+    "quantidadeMinima": 100,
+    "status": "OK"
+  }
+]

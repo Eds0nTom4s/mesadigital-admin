@@ -64,6 +64,33 @@ const routes = [
         }
       },
       {
+        path: 'fundos/:id',
+        name: 'fundo-detalhe',
+        component: () => import('@/views/FundoDetalheView.vue'),
+        meta: {
+          title: 'Detalhes do Fundo',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'estoque',
+        name: 'Estoque',
+        component: () => import('@/views/EstoqueView.vue'),
+        meta: {
+          title: 'Gestão de Estoque',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'configuracoes-financeiras',
+        name: 'ConfiguracoesFinanceiras',
+        component: () => import('@/views/ConfiguracoesFinanceirasView.vue'),
+        meta: {
+          title: 'Configurações Financeiras',
+          requiresAuth: true
+        }
+      },
+      {
         path: 'usuarios',
         name: 'Usuarios',
         component: () => import('@/modules/usuarios/UsuariosView.vue'),

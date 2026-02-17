@@ -1,0 +1,202 @@
+[
+  {
+    "id": 1,
+    "fundoId": 1,
+    "tipo": "CREDITO",
+    "valor": 20000,
+    "origem": "CASH",
+    "motivo": "Carga inicial",
+    "operador": "Margarida Silva",
+    "dataHora": "2026-02-17T14:30:00"
+  },
+  {
+    "id": 2,
+    "fundoId": 1,
+    "tipo": "DEBITO",
+    "valor": 3250,
+    "origem": "SISTEMA",
+    "motivo": "Hambúrguer Clássico",
+    "operador": "Sistema",
+    "dataHora": "2026-02-17T14:45:00"
+  },
+  {
+    "id": 3,
+    "fundoId": 1,
+    "tipo": "DEBITO",
+    "valor": 1000,
+    "origem": "SISTEMA",
+    "motivo": "2x Água Mineral",
+    "operador": "Sistema",
+    "dataHora": "2026-02-17T14:50:00"
+  },
+  {
+    "id": 4,
+    "fundoId": 2,
+    "tipo": "CREDITO",
+    "valor": 10000,
+    "origem": "TPA",
+    "motivo": "Carga inicial via TPA",
+    "operador": "João Santos",
+    "dataHora": "2026-02-17T15:45:00"
+  },
+  {
+    "id": 5,
+    "fundoId": 2,
+    "tipo": "DEBITO",
+    "valor": 1080,
+    "origem": "SISTEMA",
+    "motivo": "Cerveja Super Bock",
+    "operador": "Sistema",
+    "dataHora": "2026-02-17T15:55:00"
+  },
+  {
+    "id": 6,
+    "fundoId": 3,
+    "tipo": "CREDITO",
+    "valor": 30000,
+    "origem": "GPO",
+    "motivo": "Carga via GPO",
+    "operador": "Ana Costa",
+    "dataHora": "2026-02-17T13:00:00"
+  },
+  {
+    "id": 7,
+    "fundoId": 3,
+    "tipo": "DEBITO",
+    "valor": 5000,
+    "origem": "SISTEMA",
+    "motivo": "Diversos consumos",
+    "operador": "Sistema",
+    "dataHora": "2026-02-17T13:30:00"
+  },
+  {
+    "id": 8,
+    "fundoId": 4,
+    "tipo": "CREDITO",
+    "valor": 15000,
+    "origem": "REF",
+    "motivo": "Carga via Referência",
+    "operador": "Pedro Alves",
+    "dataHora": "2026-02-17T14:15:00"
+  },
+  {
+    "id": 9,
+    "fundoId": 4,
+    "tipo": "DEBITO",
+    "valor": 2660,
+    "origem": "SISTEMA",
+    "motivo": "Francesinha Completa",
+    "operador": "Sistema",
+    "dataHora": "2026-02-17T14:30:00"
+  },
+  {
+    "id": 10,
+    "fundoId": 5,
+    "tipo": "CREDITO",
+    "valor": 100000,
+    "origem": "CASH",
+    "motivo": "Fundo para evento noite",
+    "operador": "Margarida Silva",
+    "dataHora": "2026-02-17T19:00:00"
+  },
+  {
+    "id": 11,
+    "fundoId": 5,
+    "tipo": "DEBITO",
+    "valor": 12400,
+    "origem": "SISTEMA",
+    "motivo": "Múltiplos pedidos",
+    "operador": "Sistema",
+    "dataHora": "2026-02-17T19:45:00"
+  },
+  {
+    "id": 12,
+    "fundoId": 6,
+    "tipo": "CREDITO",
+    "valor": 5000,
+    "origem": "CASH",
+    "motivo": "Carga inicial",
+    "operador": "João Santos",
+    "dataHora": "2026-02-17T12:00:00"
+  },
+  {
+    "id": 13,
+    "fundoId": 6,
+    "tipo": "DEBITO",
+    "valor": 5000,
+    "origem": "SISTEMA",
+    "motivo": "Consumos diversos",
+    "operador": "Sistema",
+    "dataHora": "2026-02-17T13:30:00"
+  },
+  {
+    "id": 14,
+    "fundoId": 7,
+    "tipo": "CREDITO",
+    "valor": 8000,
+    "origem": "TPA",
+    "motivo": "Carga inicial",
+    "operador": "Ana Costa",
+    "dataHora": "2026-02-17T11:30:00"
+  },
+  {
+    "id": 15,
+    "fundoId": 7,
+    "tipo": "DEBITO",
+    "valor": 5550,
+    "origem": "SISTEMA",
+    "motivo": "Pedidos da mesa",
+    "operador": "Sistema",
+    "dataHora": "2026-02-17T12:45:00"
+  },
+  {
+    "id": 16,
+    "fundoId": 8,
+    "tipo": "CREDITO",
+    "valor": 5000,
+    "origem": "CASH",
+    "motivo": "Carga via QR Code",
+    "operador": "Pedro Alves",
+    "dataHora": "2026-02-10T10:00:00"
+  },
+  {
+    "id": 17,
+    "fundoId": 9,
+    "tipo": "CREDITO",
+    "valor": 50000,
+    "origem": "CASH",
+    "motivo": "Fundo para evento",
+    "operador": "Margarida Silva",
+    "dataHora": "2026-02-16T15:00:00"
+  },
+  {
+    "id": 18,
+    "fundoId": 9,
+    "tipo": "DEBITO",
+    "valor": 50000,
+    "origem": "SISTEMA",
+    "motivo": "Consumos do evento",
+    "operador": "Sistema",
+    "dataHora": "2026-02-16T22:00:00"
+  },
+  {
+    "id": 19,
+    "fundoId": 10,
+    "tipo": "CREDITO",
+    "valor": 20000,
+    "origem": "GPO",
+    "motivo": "Carga via GPO",
+    "operador": "João Santos",
+    "dataHora": "2026-02-17T16:20:00"
+  },
+  {
+    "id": 20,
+    "fundoId": 10,
+    "tipo": "DEBITO",
+    "valor": 1100,
+    "origem": "SISTEMA",
+    "motivo": "Café Expresso",
+    "operador": "Sistema",
+    "dataHora": "2026-02-17T16:30:00"
+  }
+]
