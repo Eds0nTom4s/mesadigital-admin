@@ -34,7 +34,7 @@ onMounted(async () => {
     
     // Carrega valor mínimo
     const configResp = await fundoConsumoService.consultarValorMinimo()
-    valorMinimo.value = configResp.data.valorMinimo
+    valorMinimo.value = configResp.valorMinimo
     
     // Busca fundo por ID (usa clienteId temporariamente)
     const fundoResp = await fundoConsumoService.buscarFundoPorCliente(fundoId)

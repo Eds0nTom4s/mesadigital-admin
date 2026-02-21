@@ -1,0 +1,702 @@
+ALINHAMENTO FRONTEND-BACKEND: FUNDOS DE CONSUMO
+================================================
+
+Data: 21 de fevereiro de 2026
+Sistema: Restauração - Fundos Pré-Pagos
+Versão Backend: 1.0.0
+
+
+CONCEITO DE FUNDO DE CONSUMO
+==============================
+
+Fundo de Consumo é um sistema de PRÉ-PAGO onde:
+- Cliente carrega saldo ANTECIPADAMENTE via AppyPay
+- Pedidos debitam AUTOMATICAMENTE do saldo
+- Saldo NUNCA fica negativo
+- Histórico completo de transações (auditoria)
+
+
+ENTIDADES PRINCIPAIS
+=====================
+
+1. FUNDOCONSUMO
+-----------------
+Representa o saldo pré-pago do cliente
+
+Campos:
+- id: Long (PK)
+- cliente: Cliente (ONE-TO-ONE, obrigatório)
+- saldoAtual: BigDecimal (sempre >= 0)
+- ativo: Boolean (true = ativo, false = encerrado)
+- createdAt: LocalDateTime
+- updatedAt: LocalDateTime
+- version: Long (controle de concorrência otimista)
+
+Regras:
+✓ Um cliente tem UM fundo ativo por vez
+✓ Saldo não pode ficar negativo
+✓ Fundo encerrado (ativo=false) não permite movimentação
+
+
+2. TRANSACAOFUNDO
+-------------------
+Auditoria de TODA movimentação financeira do fundo
+
+Campos:
+- id: Long (PK)
+- fundoConsumo: FundoConsumo (FK obrigatório)
+- valor: BigDecimal (sempre positivo)
+- tipo: TipoTransacaoFundo (CREDITO, DEBITO, ESTORNO)
+- pedido: Pedido (FK opcional - vincula DEBITO/ESTORNO)
+- saldoAnterior: BigDecimal
+- saldoNovo: BigDecimal
+- observacoes: String
+- createdAt: LocalDateTime
+
+Tipos de Transação:
+- CREDITO: Recarga de saldo (aumenta)
+- DEBITO: Pagamento de pedido (diminui)
+- ESTORNO: Devolução por cancelamento (aumenta)
+
+
+ENDPOINTS REST
+==============
+
+BASE URL: /api/fundos
+AUTENTICAÇÃO: Bearer Token (JWT)
+
+
+1. CONSULTAR VALOR MÍNIMO (PÚBLICO)
+------------------------------------
+GET /api/fundos/config/valor-minimo
+
+Autenticação: NÃO (endpoint público)
+Permissões: Qualquer usuário (antes do login)
+
+Response 200:
+{
+  "success": true,
+  "message": "Valor mínimo consultado",
+  "data": {
+    "valorMinimo": 5000.00  // BigDecimal em AOA
+  }
+}
+
+Frontend: Use para validar formulário ANTES do login
+
+
+2. CRIAR FUNDO
+--------------
+POST /api/fundos
+
+Autenticação: SIM (Bearer Token)
+Permissões: Qualquer usuário autenticado
+
+Request Body:
+{
+  "clienteId": 1,
+  "saldoInicial": 10000.00,  // OBRIGATÓRIO, >= valorMinimo
+  "observacoes": "Primeira carga"  // OPCIONAL
+}
+
+Validações:
+✓ clienteId obrigatório
+✓ saldoInicial obrigatório e > 0
+✓ saldoInicial >= valorMinimo (5000.00 AOA)
+✓ Cliente não pode ter fundo ativo já existente
+
+Response 201 (Success):
+{
+  "success": true,
+  "message": "Fundo criado com sucesso",
+  "data": {
+    "id": 10,
+    "cliente": { "id": 1, "nome": "João" },
+    "saldoAtual": 10000.00,
+    "ativo": true,
+    "createdAt": "2026-02-21T10:00:00",
+    "updatedAt": "2026-02-21T10:00:00",
+    "version": 0
+  }
+}
+
+Response 400 (Erro):
+{
+  "success": false,
+  "message": "Saldo inicial deve ser no mínimo 5000.00 AOA. Valor informado: 3000.00 AOA",
+  "data": null
+}
+
+Response 400 (Cliente já tem fundo):
+{
+  "success": false,
+  "message": "Cliente já possui fundo de consumo ativo",
+  "data": null
+}
+
+
+3. BUSCAR FUNDO POR CLIENTE
+----------------------------
+GET /api/fundos/cliente/{clienteId}
+
+Autenticação: SIM
+Permissões: Cliente (próprio fundo) ou ADMIN/GERENTE
+
+Path Param:
+- clienteId: Long
+
+Response 200:
+{
+  "success": true,
+  "message": "Fundo encontrado",
+  "data": {
+    "id": 10,
+    "saldoAtual": 7500.00,
+    "ativo": true,
+    "createdAt": "2026-02-21T10:00:00",
+    "updatedAt": "2026-02-21T12:30:00",
+    "version": 5
+  }
+}
+
+Response 404:
+{
+  "success": false,
+  "message": "Fundo de consumo não encontrado para cliente: 999",
+  "data": null
+}
+
+
+4. RECARREGAR FUNDO (VIA APPYPAY)
+----------------------------------
+POST /api/fundos/{fundoId}/recarregar
+
+Autenticação: SIM
+Permissões: Cliente proprietário ou ADMIN/GERENTE
+
+Path Param:
+- fundoId: Long
+
+Request Body:
+{
+  "valor": 5000.00,  // OBRIGATÓRIO, > 0
+  "metodoPagamento": "GPO"  // "GPO" ou "REF"
+}
+
+Métodos de Pagamento:
+- GPO: Pagamento instantâneo via AppyPay (confirmação imediata)
+- REF: Referência bancária (confirmação via callback)
+
+Response 201:
+{
+  "success": true,
+  "message": "Pagamento criado com sucesso",
+  "data": {
+    "id": 123,
+    "transactionId": "TXN-20260221-123456",
+    "valor": 5000.00,
+    "metodoPagamento": "GPO",
+    "status": "PENDENTE",
+    "createdAt": "2026-02-21T15:00:00",
+    
+    // SE metodoPagamento = GPO:
+    "urlPagamento": "https://appypay.ao/pay/TXN-123456",
+    
+    // SE metodoPagamento = REF:
+    "entidade": "11604",
+    "referencia": "987654321"
+  }
+}
+
+IMPORTANTE - FLUXO DE PAGAMENTO:
+1. Frontend chama POST /api/fundos/{fundoId}/recarregar
+2. Backend cria registro Pagamento com status=PENDENTE
+3. Backend retorna URL AppyPay (GPO) ou Entidade/Referência (REF)
+4. Frontend redireciona usuário para AppyPay OU exibe Entidade/Referência
+5. Usuário paga via AppyPay
+6. AppyPay chama callback do backend
+7. Backend atualiza Pagamento (status=CONFIRMADO) e credita fundo
+8. Backend cria TransacaoFundo tipo=CREDITO
+
+
+5. CONSULTAR SALDO
+-------------------
+GET /api/fundos/{fundoId}/saldo
+
+Autenticação: SIM
+Permissões: Cliente proprietário ou ADMIN/GERENTE
+
+Response 200:
+{
+  "success": true,
+  "message": "Saldo consultado",
+  "data": 7500.00  // BigDecimal
+}
+
+
+6. LISTAR TRANSAÇÕES (HISTÓRICO)
+---------------------------------
+GET /api/fundos/{fundoId}/transacoes
+
+Autenticação: SIM
+Permissões: Cliente proprietário ou ADMIN/GERENTE
+
+Query Params (opcionais):
+- page: int (default 0)
+- size: int (default 20)
+- tipo: TipoTransacaoFundo (CREDITO, DEBITO, ESTORNO)
+
+Response 200:
+{
+  "success": true,
+  "message": "Transações listadas",
+  "data": [
+    {
+      "id": 1,
+      "valor": 10000.00,
+      "tipo": "CREDITO",
+      "saldoAnterior": 0.00,
+      "saldoNovo": 10000.00,
+      "observacoes": "Primeira carga",
+      "pedido": null,
+      "createdAt": "2026-02-21T10:00:00"
+    },
+    {
+      "id": 2,
+      "valor": 2500.00,
+      "tipo": "DEBITO",
+      "saldoAnterior": 10000.00,
+      "saldoNovo": 7500.00,
+      "observacoes": "Débito automático - Pedido #45",
+      "pedido": { "id": 45, "numero": "PED-001" },
+      "createdAt": "2026-02-21T12:30:00"
+    }
+  ]
+}
+
+
+ENUMS IMPORTANTES
+=================
+
+1. TipoTransacaoFundo
+----------------------
+CREDITO: "Crédito (Recarga)"
+DEBITO: "Débito (Pedido)"
+ESTORNO: "Estorno (Cancelamento)"
+
+Método auxiliar:
+- aumentaSaldo(): boolean (true para CREDITO e ESTORNO)
+
+
+2. MetodoPagamentoAppyPay
+---------------------------
+GPO: "Pagamento AppyPay" (instantâneo)
+REF: "Referência Bancária" (aguarda confirmação)
+
+Propriedades:
+- codigo: String
+- descricao: String
+- instantaneo: boolean
+
+
+VALIDAÇÕES E REGRAS DE NEGÓCIO
+================================
+
+1. CRIAR FUNDO
+--------------
+✓ saldoInicial >= 5000.00 AOA (valorMinimo)
+✓ Cliente não pode ter fundo ativo já existente
+✓ saldoInicial > 0
+✓ Cliente deve existir no banco
+
+Erro se violar:
+- HTTP 400 "Saldo inicial deve ser no mínimo 5000.00 AOA"
+- HTTP 400 "Cliente já possui fundo de consumo ativo"
+
+
+2. RECARREGAR FUNDO
+-------------------
+✓ valor > 0
+✓ Fundo deve estar ativo (ativo=true)
+✓ metodoPagamento válido (GPO ou REF)
+
+Erro se violar:
+- HTTP 400 "Valor de recarga deve ser maior que zero"
+- HTTP 400 "Fundo de consumo encerrado. Não é possível recarregar."
+
+
+3. DEBITAR PEDIDO (AUTOMÁTICO)
+-------------------------------
+✓ Saldo >= valor do pedido
+✓ Fundo deve estar ativo
+✓ Pedido não pode ter sido debitado anteriormente (idempotência)
+
+Erro se violar:
+- HTTP 400 "Saldo insuficiente. Saldo disponível: 1000.00 AOA. Valor solicitado: 2500.00 AOA"
+- HTTP 400 "Fundo de consumo encerrado. Não é possível debitar."
+
+
+CONCORRÊNCIA E SEGURANÇA
+=========================
+
+1. CONTROLE DE CONCORRÊNCIA
+----------------------------
+- Entidade FundoConsumo usa @Version (Optimistic Locking)
+- Transações financeiras com ISOLATION SERIALIZABLE
+- Debitos e recargos protegidos contra race conditions
+
+Erro de concorrência:
+- HTTP 409 "Conflito de versão. Operação já foi processada."
+
+
+2. IDEMPOTÊNCIA
+---------------
+- Mesma operação não executa duas vezes
+- DEBITO: Se pedido já foi debitado, retorna transação existente
+- Usa pedidoId como chave única
+
+
+3. AUDITORIA
+------------
+- Toda movimentação registrada em TransacaoFundo (imutável)
+- Campos: saldoAnterior, saldoNovo, observacoes
+- Relacionamento com Pedido (quando aplicável)
+
+
+FLUXO COMPLETO: CRIAR FUNDO E FAZER PEDIDO
+===========================================
+
+PASSO 1: Cliente consulta valor mínimo (ANTES DO LOGIN)
+---------------------------------------------------------
+GET /api/fundos/config/valor-minimo
+
+Response:
+{ "data": { "valorMinimo": 5000.00 } }
+
+
+PASSO 2: Cliente faz login
+---------------------------
+POST /api/auth/solicitar-otp
+Body: { "telefone": "+244925813939" }
+
+POST /api/auth/validar-otp
+Body: { "telefone": "+244925813939", "codigo": "123456" }
+
+Response:
+{ "token": "eyJhbGc...", "clienteId": 15 }
+
+
+PASSO 3: Cliente cria fundo
+----------------------------
+POST /api/fundos
+Headers: Authorization: Bearer eyJhbGc...
+Body: {
+  "clienteId": 15,
+  "saldoInicial": 10000.00,
+  "observacoes": "Primeira carga"
+}
+
+Response:
+{ "data": { "id": 20, "saldoAtual": 10000.00 } }
+
+
+PASSO 4: Cliente busca seu fundo
+---------------------------------
+GET /api/fundos/cliente/15
+Headers: Authorization: Bearer eyJhbGc...
+
+Response:
+{ "data": { "id": 20, "saldoAtual": 10000.00 } }
+
+
+PASSO 5: Cliente faz pedido
+----------------------------
+POST /api/pedidos
+Headers: Authorization: Bearer eyJhbGc...
+Body: {
+  "unidadeConsumoId": 5,  // Mesa ocupada
+  "tipoPagamento": "FUNDO_CONSUMO",
+  "itens": [
+    { "produtoId": 1, "quantidade": 2, "observacoes": "Sem cebola" }
+  ]
+}
+
+Backend faz AUTOMATICAMENTE:
+1. Calcula total do pedido (ex: 2500.00 AOA)
+2. Verifica saldo do fundo (10000.00 >= 2500.00) ✓
+3. Debita fundo: FundoConsumoService.debitar(15, pedidoId, 2500.00)
+4. Cria TransacaoFundo tipo=DEBITO
+5. Atualiza FundoConsumo.saldoAtual = 7500.00
+6. Marca Pedido.statusFinanceiro = PAGO
+
+Response:
+{
+  "data": {
+    "id": 45,
+    "numero": "PED-001",
+    "total": 2500.00,
+    "statusFinanceiro": "PAGO"
+  }
+}
+
+
+PASSO 6: Cliente consulta histórico
+------------------------------------
+GET /api/fundos/20/transacoes
+Headers: Authorization: Bearer eyJhbGc...
+
+Response:
+{
+  "data": [
+    {
+      "id": 1,
+      "tipo": "CREDITO",
+      "valor": 10000.00,
+      "saldoAnterior": 0.00,
+      "saldoNovo": 10000.00,
+      "observacoes": "Primeira carga",
+      "createdAt": "2026-02-21T10:00:00"
+    },
+    {
+      "id": 2,
+      "tipo": "DEBITO",
+      "valor": 2500.00,
+      "saldoAnterior": 10000.00,
+      "saldoNovo": 7500.00,
+      "observacoes": "Débito automático - Pedido #45",
+      "pedido": { "id": 45 },
+      "createdAt": "2026-02-21T12:30:00"
+    }
+  ]
+}
+
+
+ERROS COMUNS E SOLUÇÕES
+========================
+
+1. "Saldo inicial deve ser no mínimo 5000.00 AOA"
+--------------------------------------------------
+CAUSA: Frontend enviou saldoInicial < 5000.00
+SOLUÇÃO: Validar no frontend ANTES de enviar (usar /config/valor-minimo)
+
+
+2. "Cliente já possui fundo de consumo ativo"
+----------------------------------------------
+CAUSA: Cliente tentou criar segundo fundo
+SOLUÇÃO: Verificar se cliente tem fundo ativo antes de exibir formulário
+GET /api/fundos/cliente/{clienteId} → se 200, já tem fundo
+
+
+3. "Saldo insuficiente"
+-----------------------
+CAUSA: Pedido > saldoAtual do fundo
+SOLUÇÃO: Exibir saldo atual e sugerir recarga
+GET /api/fundos/{fundoId}/saldo → exibir em tempo real
+
+
+4. "Fundo de consumo não encontrado"
+-------------------------------------
+CAUSA: clienteId não tem fundo criado
+SOLUÇÃO: Redirecionar para página de criar fundo
+
+
+5. "Forbidden" ao acessar /api/fundos/*
+----------------------------------------
+CAUSA: Token JWT ausente ou inválido
+SOLUÇÃO: Verificar se Authorization: Bearer {token} está no header
+
+
+TYPESCRIPT INTERFACES (SUGESTÃO)
+==================================
+
+// interfaces/fundo.ts
+
+export interface FundoConsumo {
+  id: number;
+  saldoAtual: number;
+  ativo: boolean;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+
+export interface TransacaoFundo {
+  id: number;
+  valor: number;
+  tipo: 'CREDITO' | 'DEBITO' | 'ESTORNO';
+  saldoAnterior: number;
+  saldoNovo: number;
+  observacoes: string;
+  pedido?: { id: number; numero: string };
+  createdAt: string;
+}
+
+export interface CriarFundoRequest {
+  clienteId: number;
+  saldoInicial: number;
+  observacoes?: string;
+}
+
+export interface RecarregarFundoRequest {
+  valor: number;
+  metodoPagamento: 'GPO' | 'REF';
+}
+
+export interface ValorMinimoResponse {
+  valorMinimo: number;
+}
+
+export interface ApiResponse<T> {
+  success: boolean;
+  message: string;
+  data: T;
+}
+
+
+EXEMPLO DE SERVICE (AXIOS)
+============================
+
+// services/fundoConsumoService.ts
+
+import axios from 'axios';
+
+const API_BASE = '/api/fundos';
+
+export const fundoConsumoService = {
+  
+  // Consultar valor mínimo (público)
+  async getValorMinimo(): Promise<number> {
+    const { data } = await axios.get<ApiResponse<ValorMinimoResponse>>(
+      `${API_BASE}/config/valor-minimo`
+    );
+    return data.data.valorMinimo;
+  },
+  
+  // Criar fundo
+  async criarFundo(request: CriarFundoRequest): Promise<FundoConsumo> {
+    const { data } = await axios.post<ApiResponse<FundoConsumo>>(
+      API_BASE,
+      request
+    );
+    return data.data;
+  },
+  
+  // Buscar por cliente
+  async buscarPorCliente(clienteId: number): Promise<FundoConsumo> {
+    const { data } = await axios.get<ApiResponse<FundoConsumo>>(
+      `${API_BASE}/cliente/${clienteId}`
+    );
+    return data.data;
+  },
+  
+  // Recarregar
+  async recarregar(
+    fundoId: number,
+    request: RecarregarFundoRequest
+  ): Promise<Pagamento> {
+    const { data } = await axios.post<ApiResponse<Pagamento>>(
+      `${API_BASE}/${fundoId}/recarregar`,
+      request
+    );
+    return data.data;
+  },
+  
+  // Consultar saldo
+  async consultarSaldo(fundoId: number): Promise<number> {
+    const { data } = await axios.get<ApiResponse<number>>(
+      `${API_BASE}/${fundoId}/saldo`
+    );
+    return data.data;
+  },
+  
+  // Listar transações
+  async listarTransacoes(fundoId: number): Promise<TransacaoFundo[]> {
+    const { data } = await axios.get<ApiResponse<TransacaoFundo[]>>(
+      `${API_BASE}/${fundoId}/transacoes`
+    );
+    return data.data;
+  }
+};
+
+
+CONFIGURAÇÃO DO AXIOS
+======================
+
+// axiosConfig.ts
+
+import axios from 'axios';
+
+axios.defaults.baseURL = 'http://localhost:8080';
+
+// Interceptor para adicionar token automaticamente
+axios.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Interceptor para tratar erros
+axios.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Token inválido ou expirado
+      localStorage.removeItem('token');
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
+
+
+CHECKLIST DE IMPLEMENTAÇÃO FRONTEND
+=====================================
+
+[ ] Criar interfaces TypeScript (FundoConsumo, TransacaoFundo, etc.)
+[ ] Configurar Axios com baseURL e interceptors
+[ ] Implementar fundoConsumoService.ts
+[ ] Criar página de criação de fundo (validar saldoInicial >= valorMinimo)
+[ ] Criar página de recarga (GPO ou REF)
+[ ] Exibir saldo atual em tempo real
+[ ] Exibir histórico de transações (tabela paginada)
+[ ] Validar saldo antes de permitir pedidos
+[ ] Tratar erro "Saldo insuficiente" com sugestão de recarga
+[ ] Implementar integração com AppyPay (redirecionamento GPO)
+[ ] Exibir Entidade/Referência para pagamento REF
+
+
+PRÓXIMOS PASSOS
+================
+
+1. Frontend deve implementar telas:
+   - Criar Fundo (formulário com saldoInicial)
+   - Recarregar Fundo (escolher GPO ou REF)
+   - Histórico de Transações (tabela)
+   - Exibir saldo em dashboard
+
+2. Testar fluxo completo:
+   - Criar fundo → Fazer pedido → Verificar débito automático
+
+3. Implementar notificações:
+   - "Saldo baixo" quando < 1000 AOA
+   - "Recarga confirmada" via WebSocket (futuro)
+
+
+DÚVIDAS E SUPORTE
+==================
+
+- Documentação Swagger: http://localhost:8080/swagger-ui.html
+- Logs do backend: /tmp/app.log
+- Testes HTTP: api-tests.http (seção FUNDOS DE CONSUMO)
+
+Em caso de erro, verificar:
+1. Token JWT está válido?
+2. ClienteId existe e tem fundo ativo?
+3. Saldo suficiente para operação?
+4. Endpoint público está acessível sem autenticação?
+
+
+FIM DO DOCUMENTO
+================

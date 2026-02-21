@@ -1,6 +1,6 @@
 /**
- * Serviço de Pedidos - Visão Balcão
- * Integração específica para gestão de pedidos no balcão
+ * Serviço de Pedidos - Conforme PROMPT_ALINHAMENTO_FRONTEND_CORRIGIDO.txt
+ * Gestão completa de Pedidos e SubPedidos
  */
 
 import api from './api'
@@ -10,21 +10,18 @@ export const pedidosBalcaoService = {
    * Criar pedido para uma unidade de consumo existente
    * POST /api/pedidos
    * 
-   * DÉBITO AUTOMÁTICO (tipoPagamento = PRE_PAGO):
-   * - Backend valida saldo suficiente no Fundo do Cliente
-   * - Debita automaticamente do fundo
-   * - Retorna pedido com statusFinanceiro = PAGO
-   * 
-   * PÓS-PAGO (tipoPagamento = POS_PAGO):
-   * - Requer role GERENTE ou ADMIN
-   * - Valida se pós-pago está ativo globalmente
-   * - Cria pedido com statusFinanceiro = NAO_PAGO
-   * - Validar limite pós-pago do cliente
+   * Backend automaticamente:
+   * - Cria Pedido
+   * - Agrupa itens por TipoPreparo do produto
+   * - Cria SubPedidos (um por Cozinha)
+   * - Cria ItemPedidos associados aos SubPedidos
+   * - Calcula totais
+   * - Processa pagamento (se FUNDO_CONSUMO)
    * 
    * @param {Object} dados
    * @param {number} dados.unidadeConsumoId - ID da unidade de consumo
    * @param {Array} dados.itens - Array [{produtoId, quantidade, observacoes?}]
-   * @param {string} dados.tipoPagamento - PRE_PAGO (default) ou POS_PAGO
+   * @param {string} dados.tipoPagamento - FUNDO_CONSUMO (default) ou POS_PAGO
    * @param {string} dados.observacoes - Observações opcionais
    */
   async criar(dados) {
@@ -33,52 +30,65 @@ export const pedidosBalcaoService = {
   },
 
   /**
-   * Listar pedidos de uma unidade de consumo
-   * ALTERNATIVA: Usar dados que vêm em GET /api/unidades-consumo/{id}
-   * OU filtrar no frontend após obter todos os pedidos
+   * Buscar pedido ATIVO de uma unidade de consumo
+   * GET /api/pedidos/unidade-consumo/{unidadeConsumoId}/ativo
    * 
-   * Backend não possui endpoint específico GET /api/pedidos/conta/{id}
+   * Retorna o pedido ativo (status != FINALIZADO && status != CANCELADO)
+   * com todos os SubPedidos, ItemPedidos e dados de Cozinha
    */
-  async getByUnidadeConsumoId(unidadeConsumoId) {
-    // Opção 1: Buscar unidade completa (inclui pedidos)
-    const response = await api.get(`/unidades-consumo/${unidadeConsumoId}`)
-    return { data: response.data.data?.pedidos || [] }
-  },
-
-  /**
-   * Confirmar pagamento de pedido pós-pago
-   * PUT /api/pedidos/{id}/confirmar-pagamento
-   * 
-   * IMPORTANTE:
-   * - Apenas para pedidos com tipoPagamento = POS_PAGO
-   * - Requer role GERENTE ou ADMIN
-   * - Marca statusFinanceiro = PAGO
-   * - Sem body no request
-   * 
-   * @param {number} id - ID do pedido
-   */
-  async confirmarPagamento(id) {
-    const response = await api.put(`/pedidos/${id}/confirmar-pagamento`)
+  async getPedidoAtivoUnidade(unidadeConsumoId) {
+    const response = await api.get(`/pedidos/unidade-consumo/${unidadeConsumoId}/ativo`)
     return response.data
   },
 
   /**
-   * Cancelar pedido (com motivo)
-   * PUT /api/pedidos/{id}/cancelar
-   */
-  async cancelar(id, motivo) {
-    const response = await api.put(`/pedidos/${id}/cancelar`, null, {
-      params: { motivo }
-    })
-    return response.data
-  },
-
-  /**
-   * Obter detalhes completos do pedido
+   * Buscar detalhes completos do pedido
    * GET /api/pedidos/{id}
+   * 
+   * Inclui SubPedidos com ItemPedidos e dados de Cozinha
    */
   async getById(id) {
     const response = await api.get(`/pedidos/${id}`)
+    return response.data
+  },
+
+  /**
+   * Finalizar pedido
+   * POST /api/pedidos/{id}/finalizar
+   * 
+   * Backend valida:
+   * - Todos SubPedidos estão ENTREGUE
+   * - Pedido ainda não está FINALIZADO
+   * - Atualiza StatusPedido para FINALIZADO
+   */
+  async finalizar(id) {
+    const response = await api.post(`/pedidos/${id}/finalizar`)
+    return response.data
+  },
+
+  /**
+   * Cancelar pedido
+   * POST /api/pedidos/{id}/cancelar
+   * 
+   * @param {number} id - ID do pedido
+   * @param {string} motivo - Motivo do cancelamento
+   */
+  async cancelar(id, motivo) {
+    const response = await api.post(`/pedidos/${id}/cancelar`, { motivo })
+    return response.data
+  },
+
+  /**
+   * Processar pagamento de pedido
+   * POST /api/pagamentos
+   * 
+   * @param {Object} dados
+   * @param {number} dados.pedidoId - ID do pedido (OBRIGATÓRIO)
+   * @param {string} dados.metodoPagamento - DINHEIRO, CARTAO, etc
+   * @param {number} dados.valorPago - Valor pago
+   */
+  async processarPagamento(dados) {
+    const response = await api.post('/pagamentos', dados)
     return response.data
   }
 }

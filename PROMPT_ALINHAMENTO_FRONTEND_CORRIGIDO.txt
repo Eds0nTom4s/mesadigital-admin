@@ -1,0 +1,539 @@
+================================================================================
+PROMPT DE ALINHAMENTO — FRONTEND
+MÓDULO / PÁGINA DE PEDIDOS (VISÃO BALCÃO / GERENTE)
+================================================================================
+
+Data: 21 de Fevereiro de 2026
+Versão: 2.0 - Alinhado com Backend Real
+
+
+CONTEXTO GERAL
+================================================================================
+
+Estamos a construir uma PLATAFORMA OPERACIONAL DE CONSUMO,
+não um simples sistema de pedidos.
+
+O frontend deve refletir fielmente o MODELO DE DOMÍNIO já implementado no backend,
+onde:
+- Estado é consequência de regras (StatusPedido é DERIVADO dos SubPedidos)
+- Pedido é um agregado (contém SubPedidos e ItemPedidos)
+- SubPedidos representam unidades reais de produção (uma por Cozinha)
+- Pagamento é um eixo separado do fluxo operacional (StatusFinanceiroPedido)
+
+A UI NÃO define regras de negócio.
+A UI apenas PROJETA o estado do domínio.
+
+
+================================================================================
+1. CONCEITO CENTRAL DA PÁGINA DE PEDIDOS
+================================================================================
+
+A página de pedidos representa:
+→ UMA UNIDADE DE CONSUMO ATIVA (mesa, balcão, QR, delivery futuro)
+
+Ela deve permitir:
+- Visualizar o estado atual do consumo
+- Criar pedidos
+- Acompanhar SubPedidos por Cozinha
+- Entender claramente o estado operacional e financeiro
+
+NÃO é uma tela de "checkout".
+É um PAINEL OPERACIONAL DE CONSUMO.
+
+
+================================================================================
+2. ENTIDADES DO DOMÍNIO QUE O FRONTEND PRECISA RESPEITAR
+================================================================================
+
+O frontend deve trabalhar com as seguintes entidades EXATAMENTE como estão no backend:
+
+✅ UnidadeDeConsumo
+   - Mesa, balcão, quarto, área de evento
+   - Tem status: DISPONIVEL, OCUPADA, AGUARDANDO_PAGAMENTO, FINALIZADA
+
+✅ Pedido
+   - Agregado principal
+   - Contém múltiplos SubPedidos
+   - Tem StatusPedido: CRIADO, EM_ANDAMENTO, FINALIZADO, CANCELADO
+   - Tem StatusFinanceiroPedido: NAO_PAGO, PAGO, ESTORNADO
+
+✅ SubPedido
+   - Unidade operacional real
+   - SEMPRE associado a UMA Cozinha
+   - Tem StatusSubPedido: CRIADO, PENDENTE, EM_PREPARACAO, PRONTO, ENTREGUE, CANCELADO
+   - Estados independentes (permite trabalho paralelo)
+
+✅ ItemPedido
+   - Produto específico dentro de um SubPedido
+   - Quantidade, preço unitário, subtotal
+   - Relacionado ao Produto
+
+✅ Cozinha
+   - Unidade de produção (não usar "UnidadeDeProducao")
+   - Tem TipoCozinha: PRINCIPAL, GRILL, SUSHI, BAR, CONFEITARIA, etc
+   - Recebe SubPedidos para preparação
+
+✅ Cliente
+   - Associado à UnidadeDeConsumo quando ocupada
+   - Tem FundoConsumo (pré-pago) opcional
+
+
+IMPORTANTE:
+O frontend NÃO cria SubPedido diretamente.
+Ele cria um Pedido, e o backend deriva os SubPedidos automaticamente baseado 
+no TipoPreparo dos produtos (QUENTE → Cozinha, BAR → Bar, etc).
+
+
+================================================================================
+3. FLUXO MENTAL CORRETO PARA O FRONTEND
+================================================================================
+
+O frontend deve pensar assim:
+
+1. Existe uma UnidadeDeConsumo ativa (status = OCUPADA)
+
+2. Essa unidade pode ter:
+   - 0 ou N Pedidos no histórico
+   - 0 ou 1 Pedido ATIVO (status != FINALIZADO && status != CANCELADO)
+
+3. Um Pedido ATIVO:
+   - Tem StatusPedido (operacional): CRIADO | EM_ANDAMENTO | FINALIZADO
+   - Tem StatusFinanceiroPedido (financeiro): NAO_PAGO | PAGO | ESTORNADO
+   - É composto por 1 ou mais SubPedidos
+
+4. Cada SubPedido:
+   - Pertence a UMA Cozinha específica
+   - Tem status INDEPENDENTE dos outros SubPedidos
+   - Contém 1 ou mais ItemPedidos
+
+5. StatusPedido é CALCULADO pelo backend:
+   - Todos SubPedidos CRIADO/PENDENTE → CRIADO
+   - Qualquer SubPedido EM_PREPARACAO/PRONTO → EM_ANDAMENTO
+   - Todos SubPedidos ENTREGUE → FINALIZADO
+   - Todos SubPedidos CANCELADO → CANCELADO
+
+A UI deve SEMPRE refletir essa hierarquia.
+
+
+================================================================================
+4. ORGANIZAÇÃO VISUAL DA PÁGINA DE PEDIDOS
+================================================================================
+
+A página deve ser organizada em BLOCOS CONCEITUAIS:
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ A) CONTEXTO DO CONSUMO                                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│ 🪑 Mesa 15 (Salão Principal)                    Status: OCUPADA             │
+│ 👤 Cliente: João Pedro Afonso                                               │
+│ 💳 Tipo: Pré-pago com Fundo                                                 │
+│ 💰 Saldo Disponível: 8.500,00 AOA                                           │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ B) PEDIDO ATIVO                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│ 📋 Pedido: PED-20260221-001                                                 │
+│                                                                             │
+│ Status Operacional: 🔄 EM_ANDAMENTO                                         │
+│ Status Financeiro:  💳 PAGO (Fundo de Consumo)                              │
+│                                                                             │
+│ Total Pedido: 12.500,00 AOA                                                 │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ C) SUBPEDIDOS AGRUPADOS POR COZINHA                                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│ 🍳 COZINHA PRINCIPAL (PED-001-1)                                            │
+│    Status: EM_PREPARACAO                                                    │
+│    ├─ 1x Muamba de Galinha ..................... 8.500,00 AOA              │
+│    └─ 1x Arroz Branco .......................... 1.000,00 AOA              │
+│                                                                             │
+│ 🍹 BAR (PED-001-2)                                                          │
+│    Status: PRONTO                                                           │
+│    └─ 2x Cerveja Cuca .......................... 3.000,00 AOA              │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ D) AÇÕES PERMITIDAS (baseadas no estado)                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│ [+ Adicionar Produtos]  [📊 Ver Histórico]  [❌ Cancelar Pedido]            │
+│                                                                             │
+│ ⚠️ "Finalizar Pedido" desabilitado: SubPedido PED-001-1 ainda EM_PREPARACAO│
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+AGRUPAMENTO POR COZINHA:
+- Use subPedido.cozinha.nome (ex: "Cozinha Principal", "Bar", "Grill")
+- Use subPedido.cozinha.tipo (TipoCozinha enum) para ícones/cores
+- Não invente categorias que não existem no backend
+- Exemplo de mapeamento de ícones:
+  • PRINCIPAL → 🍳
+  • GRILL → 🔥
+  • BAR → 🍹
+  • SUSHI → 🍣
+  • CONFEITARIA → 🍰
+
+
+================================================================================
+5. REGRAS IMPORTANTES PARA O FRONTEND (NÃO NEGOCIÁVEIS)
+================================================================================
+
+✅ Nunca permitir "Conta sem Pedido"
+   → UnidadeDeConsumo só pode ter conta se houver Pedido associado
+
+✅ Nunca permitir pagamento sem Pedido
+   → Endpoint /api/pagamentos requer pedidoId obrigatório
+
+✅ Nunca permitir ações fora de contexto
+   → Exemplo: Não mostrar "Finalizar Pedido" se StatusPedido != EM_ANDAMENTO
+
+✅ Nunca inferir estado manualmente
+   → StatusPedido vem do backend (derivado dos SubPedidos)
+
+✅ Nunca "simular" mudança de status
+   → Toda mudança vem do backend via API
+
+✅ Nunca criar SubPedido manualmente
+   → Backend cria automaticamente ao receber Pedido
+
+✅ Respeitar estados terminais
+   → FINALIZADO e CANCELADO não permitem mais alterações
+
+✅ Validar disponibilidade de produtos
+   → Usar campo produto.ativo (não existe mais campo disponivel)
+
+
+================================================================================
+6. COMPORTAMENTO REATIVO DA UI
+================================================================================
+
+A UI deve ser REATIVA a eventos do backend via WebSocket:
+
+CONEXÃO WEBSOCKET:
+- Endpoint: ws://localhost:8080/api/ws
+- Protocolo: STOMP over WebSocket
+- Fallback: SockJS
+
+TÓPICOS A SUBSCREVER:
+
+1) /topic/pedido/{pedidoId}
+   → Recebe atualizações do Pedido
+   → Atualiza StatusPedido, StatusFinanceiroPedido, total
+
+2) /topic/subpedido/{subPedidoId}
+   → Recebe atualizações de SubPedido específico
+   → Atualiza StatusSubPedido, timestamps
+
+3) /topic/atendente/unidade/{unidadeId}
+   → Recebe notificações quando SubPedido fica PRONTO
+   → Alert visual/sonoro para buscar na cozinha
+
+4) /topic/cozinha/{cozinhaId}
+   → (Opcional) Para tela de cozinha
+   → Novos SubPedidos chegando
+
+EXEMPLO DE INTEGRAÇÃO:
+```javascript
+stompClient.subscribe('/topic/pedido/123', (message) => {
+    const notificacao = JSON.parse(message.body);
+    // Atualizar UI:
+    // - Status do pedido
+    // - Status dos SubPedidos
+    // - Total atualizado
+    atualizarPedidoNaUI(notificacao);
+});
+
+stompClient.subscribe('/topic/atendente/unidade/5', (message) => {
+    const notificacao = JSON.parse(message.body);
+    if (notificacao.statusSubPedido === 'PRONTO') {
+        // Mostrar alerta: "SubPedido PED-001-2 pronto para retirada!"
+        mostrarAlertaSubPedidoPronto(notificacao);
+    }
+});
+```
+
+A UI não pergunta "o que fazer".
+Ela pergunta "qual é o estado atual" e reage a mudanças.
+
+
+================================================================================
+7. CHAMADAS API NECESSÁRIAS
+================================================================================
+
+CRIAR PEDIDO:
+POST /api/pedidos
+{
+  "unidadeConsumoId": 15,
+  "tipoPagamento": "FUNDO_CONSUMO",
+  "observacoes": "Sem cebola",
+  "itens": [
+    {
+      "produtoId": 1,
+      "quantidade": 1,
+      "observacoes": "Bem passado"
+    },
+    {
+      "produtoId": 5,
+      "quantidade": 2
+    }
+  ]
+}
+
+Backend automaticamente:
+- Cria Pedido
+- Agrupa itens por TipoPreparo do produto
+- Cria SubPedidos (um por Cozinha)
+- Cria ItemPedidos associados aos SubPedidos
+- Calcula totais
+- Processa pagamento (se FUNDO_CONSUMO)
+
+
+BUSCAR PEDIDO ATIVO DA UNIDADE:
+GET /api/pedidos/unidade-consumo/{unidadeConsumoId}/ativo
+
+Retorna:
+{
+  "id": 123,
+  "numero": "PED-20260221-001",
+  "status": "EM_ANDAMENTO",
+  "statusFinanceiro": "PAGO",
+  "total": 12500.00,
+  "subPedidos": [
+    {
+      "id": 201,
+      "numero": "PED-001-1",
+      "status": "EM_PREPARACAO",
+      "cozinha": {
+        "id": 1,
+        "nome": "Cozinha Principal",
+        "tipo": "PRINCIPAL"
+      },
+      "itens": [
+        {
+          "produto": {
+            "id": 1,
+            "nome": "Muamba de Galinha",
+            "preco": 8500.00
+          },
+          "quantidade": 1,
+          "subtotal": 8500.00
+        }
+      ]
+    },
+    {
+      "id": 202,
+      "numero": "PED-001-2",
+      "status": "PRONTO",
+      "cozinha": {
+        "id": 2,
+        "nome": "Bar",
+        "tipo": "BAR"
+      },
+      "itens": [...]
+    }
+  ]
+}
+
+
+FINALIZAR PEDIDO (quando todos SubPedidos ENTREGUE):
+POST /api/pedidos/{id}/finalizar
+
+Backend valida:
+- Todos SubPedidos estão ENTREGUE
+- Pedido ainda não está FINALIZADO
+- Atualiza StatusPedido para FINALIZADO
+
+
+PROCESSAR PAGAMENTO:
+POST /api/pagamentos
+{
+  "pedidoId": 123,
+  "metodoPagamento": "DINHEIRO",
+  "valorPago": 15000.00
+}
+
+
+================================================================================
+8. PREPARAÇÃO PARA DELIVERY (SEM IMPLEMENTAR)
+================================================================================
+
+Mesmo sem implementar delivery agora, a UI deve:
+
+✅ Não assumir que consumo é sempre presencial
+   → TipoUnidadeConsumo já tem valor VIRTUAL preparado
+
+✅ Não acoplar layout a mesa física
+   → Usar "Unidade de Consumo" como termo genérico
+
+✅ Usar termos neutros nos labels
+   → "Pedido", "Cliente", "Endereço de Consumo"
+
+✅ Estar preparada para campos futuros:
+   → enderecoEntrega (quando TipoUnidadeConsumo = VIRTUAL)
+   → tempoEstimado (cálculo de rota)
+   → statusEntrega (para delivery)
+
+✅ TipoPreparo já tem valor ENTREGA
+   → Produtos classificados como ENTREGA serão roteados diferente
+
+Nada na UI deve impedir esse crescimento.
+
+
+================================================================================
+9. MUDANÇAS RECENTES NA API (21/02/2026)
+================================================================================
+
+⚠️ BREAKING CHANGE - Campo disponivel REMOVIDO:
+
+ANTES (NÃO USAR MAIS):
+produto.disponivel ❌
+
+AGORA:
+produto.ativo ✅
+produto.tipoPreparo ✅ (QUENTE, FRIO, BAR, BEBIDA, SOBREMESA, ENTREGA)
+
+IMPACTO NO FRONTEND:
+- Remover checkbox "Disponível" dos formulários
+- Adicionar select "Tipo de Preparo" (obrigatório)
+- Usar produto.ativo para mostrar status
+- Disponibilidade real é calculada dinamicamente pelo backend
+
+Ver documento completo: RELATORIO_MUDANCAS_API_PRODUTOS.md
+
+
+================================================================================
+10. ESTADOS E TRANSIÇÕES (MÁQUINA DE ESTADOS)
+================================================================================
+
+SUBPEDIDO (Gerenciado pela Cozinha/Bar):
+CRIADO → PENDENTE → EM_PREPARACAO → PRONTO → ENTREGUE ✅
+                                           → CANCELADO ❌
+
+PEDIDO (Derivado automaticamente):
+CRIADO → EM_ANDAMENTO → FINALIZADO ✅
+                      → CANCELADO ❌
+
+UNIDADE DE CONSUMO:
+DISPONIVEL → OCUPADA → AGUARDANDO_PAGAMENTO → FINALIZADA → DISPONIVEL
+
+STATUS FINANCEIRO (Independente):
+NAO_PAGO → PAGO ✅
+        → ESTORNADO ❌
+
+
+================================================================================
+11. REGRAS DE VALIDAÇÃO (FRONTEND)
+================================================================================
+
+ANTES DE CRIAR PEDIDO:
+✅ UnidadeDeConsumo deve estar OCUPADA
+✅ Deve ter Cliente associado
+✅ Não pode ter outro Pedido ATIVO
+✅ Produtos devem estar ATIVOS (ativo = true)
+✅ Se FUNDO_CONSUMO, validar saldo suficiente
+
+ANTES DE FINALIZAR PEDIDO:
+✅ Todos SubPedidos devem estar ENTREGUE
+✅ Pedido deve estar EM_ANDAMENTO
+✅ StatusFinanceiroPedido deve estar PAGO (ou pós-pago)
+
+ANTES DE CANCELAR PEDIDO:
+✅ Pedido não pode estar FINALIZADO
+✅ Requer confirmação do usuário
+✅ Informa que todos SubPedidos serão cancelados
+
+
+================================================================================
+12. FILOSOFIA FINAL
+================================================================================
+
+O frontend NÃO é protagonista.
+O DOMÍNIO é o protagonista.
+
+A melhor UI será aquela que:
+- Some quando o domínio está claro
+- Não inventa comportamento
+- Apenas traduz o estado real do sistema
+- Reflete fielmente as entidades do backend
+
+Se a UI parece simples,
+é porque o domínio está correto.
+
+
+================================================================================
+RESULTADO ESPERADO
+================================================================================
+
+Uma página de pedidos que:
+
+✅ Funciona para restaurante, bar, discoteca
+✅ Funciona com pré e pós-pago
+✅ Funciona com POS por operador
+✅ Funciona hoje sem delivery
+✅ Funciona amanhã com delivery
+✅ Não precisa ser reescrita para escalar
+✅ Usa EXATAMENTE os mesmos nomes de entidades do backend
+✅ Respeita a máquina de estados do domínio
+✅ Reage a eventos WebSocket em tempo real
+
+Este frontend é parte de uma PLATAFORMA,
+não de um cliente específico.
+
+
+================================================================================
+CHECKLIST DE IMPLEMENTAÇÃO
+================================================================================
+
+ESTRUTURA DE DADOS:
+☐ Criar interfaces TypeScript mapeando entidades do backend
+☐ UnidadeDeConsumo, Pedido, SubPedido, ItemPedido, Cozinha
+☐ StatusPedido, StatusSubPedido, StatusFinanceiroPedido (enums)
+☐ TipoCozinha, TipoUnidadeConsumo, TipoPagamentoPedido (enums)
+
+CONEXÃO WEBSOCKET:
+☐ Implementar conexão STOMP com endpoint /api/ws
+☐ Subscrever em /topic/pedido/{id}
+☐ Subscrever em /topic/atendente/unidade/{id}
+☐ Tratar reconexão automática
+☐ Mostrar indicador de conexão
+
+COMPONENTES UI:
+☐ Componente: Contexto do Consumo (UnidadeDeConsumo + Cliente + Saldo)
+☐ Componente: Pedido Ativo (Status + Total)
+☐ Componente: Lista de SubPedidos Agrupados por Cozinha
+☐ Componente: Ações Contextuais (baseadas no estado)
+☐ Componente: Alerta de SubPedido Pronto (notificação)
+
+CHAMADAS API:
+☐ GET /api/unidades-consumo/{id}
+☐ GET /api/pedidos/unidade-consumo/{id}/ativo
+☐ POST /api/pedidos (criar novo pedido)
+☐ POST /api/pedidos/{id}/finalizar
+☐ POST /api/pagamentos (processar pagamento)
+☐ GET /api/produtos (listar produtos ativos com tipoPreparo)
+
+VALIDAÇÕES:
+☐ Validar estado antes de permitir ações
+☐ Validar saldo de fundo antes de criar pedido pré-pago
+☐ Impedir finalizar pedido com SubPedido não entregue
+☐ Mostrar mensagens de erro claras do backend
+
+TESTES:
+☐ Criar pedido com múltiplos produtos (diferentes TipoPreparo)
+☐ Verificar agrupamento correto por Cozinha
+☐ Testar WebSocket: receber notificação de mudança de status
+☐ Testar fluxo completo: criar → preparar → entregar → finalizar
+
+
+================================================================================
+FIM DO DOCUMENTO
+================================================================================

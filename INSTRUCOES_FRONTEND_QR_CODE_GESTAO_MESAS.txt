@@ -1,0 +1,923 @@
+================================================================================
+INSTRUÇÕES FRONTEND - QR CODE E GESTÃO DE MESAS
+================================================================================
+Data: 21 de Fevereiro de 2026
+Sistema: Gestão de Restauração
+Módulo: QR Code + Visão de Mesas
+
+================================================================================
+1. ENDPOINTS QR CODE
+================================================================================
+
+1.1. GERAR QR CODE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+POST /api/qrcode
+Authorization: Bearer {token}
+Roles: ATENDENTE, GERENTE, ADMIN
+
+REQUEST:
+{
+  "tipo": "MESA",                    // MESA | ENTREGA | PAGAMENTO
+  "unidadeDeConsumoId": 10,          // Obrigatório para tipo MESA
+  "pedidoId": null,                  // Obrigatório para ENTREGA/PAGAMENTO
+  "validadeMinutos": 1440,           // Opcional (default: 60 min)
+  "metadados": null                  // Opcional
+}
+
+RESPONSE (201 Created):
+{
+  "success": true,
+  "message": "QR Code gerado com sucesso",
+  "data": {
+    "id": 1,
+    "token": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",    // ← Apenas token
+    "tipo": "MESA",
+    "status": "ATIVO",
+    "expiraEm": "2026-02-22T13:00:00",
+    "unidadeDeConsumoId": 10,
+    "unidadeDeConsumoNome": "Mesa 15",
+    "url": "http://localhost:8080/api/qrcode/validar/a1b2c3d4...",
+    "valido": true,
+    "expirado": false,
+    "criadoEm": "2026-02-21T13:00:00",
+    "criadoPor": "admin"
+  }
+}
+
+IMPORTANTE: Response NÃO contém imagem base64 (performance)
+Payload: ~200 bytes apenas
+
+TIPOS DE QR CODE:
+- MESA: QR Code permanente de mesa (validade longa, renovável)
+- ENTREGA: QR Code para confirmação de entrega de SubPedido
+- PAGAMENTO: QR Code para pagamento de pedido específico
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.2. BUSCAR QR CODE DA UNIDADE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GET /api/qrcode/unidade-consumo/{id}
+Authorization: Bearer {token}
+
+RESPONSE:
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "token": "a1b2c3d4...",
+      "tipo": "MESA",
+      "status": "ATIVO",
+      "url": "http://localhost:8080/api/qrcode/validar/a1b2c3d4..."
+    }
+  ]
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.3. OBTER IMAGEM PNG (ENDPOINT SEPARADO)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GET /api/qrcode/imagem/{token}
+
+RESPONSE: image/png (300x300 px, ~5KB)
+Content-Type: image/png
+Cache-Control: public, max-age=86400
+
+USAR NO HTML (lazy loading automático):
+<img src="/api/qrcode/imagem/{token}" alt="QR Code" loading="lazy" />
+
+Download para impressão (500x500 px, alta resolução):
+GET /api/qrcode/imagem/{token}/print
+
+VANTAGENS DESTA ABORDAGEM:
+✓ Response leve (~200 bytes vs 7KB+ se fosse base64)
+✓ Cache HTTP automático (navegador + CDN)
+✓ Lazy loading (só carrega se visível)
+✓ Múltiplos tamanhos disponíveis
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.4. VALIDAR QR CODE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GET /api/qrcode/validar/{token}
+
+RESPONSE:
+{
+  "success": true,
+  "data": {
+    "valido": true,
+    "mensagem": "QR Code válido",
+    "qrCode": { ... }
+  }
+}
+
+Se inválido:
+{
+  "valido": false,
+  "mensagem": "QR Code expirado",
+  "motivoInvalido": "EXPIRADO"  // NAO_ENCONTRADO | EXPIRADO | USADO | CANCELADO
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.5. RENOVAR QR CODE (APENAS MESA)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+POST /api/qrcode/renovar/{token}
+Authorization: Bearer {token}
+
+Estende validade por mais 60 minutos (ou padrão configurado)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.6. CANCELAR QR CODE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DELETE /api/qrcode/{token}
+Authorization: Bearer {token}
+Roles: GERENTE, ADMIN
+
+================================================================================
+2. CENÁRIOS DE USO DO QR CODE
+================================================================================
+
+2.1. QR CODE DE MESA (PERMANENTE)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OBJETIVO:
+- Cliente escaneia QR Code fixo na mesa
+- Acessa cardápio digital
+- Faz pedidos diretamente (self-service)
+
+FLUXO:
+1. Gerente gera QR Code para mesa
+2. Imprime e cola na mesa física
+3. Cliente escaneia → redireciona para cardápio
+4. Cliente cria conta/login → vincula à mesa
+5. Cliente faz pedidos sem chamar atendente
+
+IMPLEMENTAÇÃO:
+// Ao criar unidade de consumo, gerar QR Code automaticamente
+const criarMesaComQrCode = async (data) => {
+  // 1. Criar unidade
+  const unidade = await api.post('/api/unidades-consumo', data)
+  
+  // 2. Gerar QR Code (retorna apenas token, NÃO imagem)
+  const qrCode = await api.post('/api/qrcode', {
+    tipo: 'MESA',
+    unidadeDeConsumoId: unidade.data.data.id,
+    validadeMinutos: 525600  // 1 ano
+  })
+  
+  const token = qrCode.data.data.token  // ← Apenas string UUID
+  
+  // 3. Atualizar unidade com token
+  await api.put(`/api/unidades-consumo/${unidade.data.data.id}`, {
+    qrCode: token
+  })
+  
+  // 4. URL da imagem (carregamento separado, lazy)
+  const imagemUrl = `/api/qrcode/imagem/${token}`
+  
+  return { unidade, qrCode: { ...qrCode.data.data, imagemUrl } }
+}
+           │  [Renovar] [Baixar] │
+│ │ <img src=   │                     │
+│ │ "/api/qr... │                     │
+│ └─────────────┘                     │
+│ Token: a1b2c3d4...                  │
+│ Expira: 22/02/2027 13:00            │
+└─────────────────────────────────────┘
+
+CÓDIGO HTML:
+<img 
+  src={`/api/qrcode/imagem/${token}`}
+  alt="QR Code Mesa 15"
+  loading="lazy"
+  width="300"
+  height="300"
+/>
+│ │   IMAGEM    │                     │
+│ └─────────────┘                     │
+│ Token: a1b2c3d4...                  │
+│ Expira: 22/02/2027 13:00            │
+└─────────────────────────────────────┘
+
+2.2. QR CODE DE ENTREGA (USO ÚNICO)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OBJETIVO:
+- Atendente escaneia para confirmar entrega de SubPedido
+- Garante que item foi entregue na mesa correta
+- Rastreabilidade (quem/quando entregou)
+
+FLUXO:
+1. SubPedido fica PRONTO na cozinha
+2. Sistema gera QR Code de entrega (válido 15 min)
+3. Atendente pega pedido + escaneia QR Code
+4. Sistema marca SubPedido como ENTREGUE
+5. Registra quem entregou
+
+IMPLEMENTAÇÃO:
+// Ao SubPedido ficar PRONTO
+const gerarQrCodeEntrega = async (subPedidoId) => {
+  const qrCode = await api.post('/api/qrcode', {
+    tipo: 'ENTREGA',
+    pedidoId: subPedidoId,
+    validadeMinutos: 15
+  })
+  
+  // Exibir modal com QR Code para atendente escanear
+  return qrCode.data.data
+}
+
+// Ao escanear
+const confirmarEntrega = async (token) => {
+  // Valida QR Code
+  const validacao = await api.get(`/api/qrcode/validar/${token}`)
+  
+  if (!validacao.data.data.valido) {
+    alert('QR Code inválido ou expirado')
+    return
+  }
+  
+  // Marca como usado
+  await api.post(`/api/qrcode/usar/${token}`)
+  
+  // Atualiza status SubPedido
+  const pedidoId = validacao.data.data.qrCode.pedidoId
+  await api.put(`/api/subpedidos/${pedidoId}/entregar`)
+}
+
+2.3. QR CODE DE PAGAMENTO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OBJETIVO:
+- Cliente escaneia para pagar conta
+- Redireciona para gateway de pagamento
+- Confirmação automática após pagamento
+
+FLUXO:
+1. Cliente solicita conta
+2. Sistema gera QR Code com link de pagamento
+3. Cliente escaneia → redireciona para AppyPay
+4. Cliente paga
+5. Webhook atualiza status do pedido
+
+IMPLEMENTAÇÃO:
+const gerarQrCodePagamento = async (pedidoId) => {
+  const qrCode = await api.post('/api/qrcode', {
+    tipo: 'PAGAMENTO',
+    pedidoId: pedidoId,
+    validadeMinutos: 60
+  })
+  
+  // URL já contém link para pagamento
+  return qrCode.data.data
+}
+
+================================================================================
+3. PÁGINA DE GESTÃO DE MESAS
+================================================================================
+
+3.1. LAYOUT - VISÃO GERAL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ENDPOINT PRINCIPAL:
+GET /api/unidades-consumo/minhas
+
+Retorna todas as mesas da UnidadeAtendimento do usuário logado
+
+LAYOUT:
+┌────────────────────────────────────────────────────────────────────────┐
+│ Gestão de Mesas - Restaurante Principal                               │
+│ 12 mesas abertas | 8 mesas livres                                     │
+├────────────────────────────────────────────────────────────────────────┤
+│ [Filtros]  Status: [Todas ▼]  Tipo: [Todas ▼]  [🔍 Buscar...]        │
+├────────────────────────────────────────────────────────────────────────┤
+│                                                                        │
+│  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐         │
+│  │ Mesa 10  [•]   │  │ Mesa 15  [•]   │  │ Mesa 20  [○]   │         │
+│  │ João Silva     │  │ Maria Santos   │  │ DISPONÍVEL     │         │
+│  │ 25.000,00 Kz   │  │ 30.000,00 Kz   │  │                │         │
+│  │ 2 pedido(s)    │  │ 1 pedido(s)    │  │ 4 pessoas      │         │
+│  │ [Abrir]        │  │ [Abrir]        │  │ [Ocupar]       │         │
+│  └────────────────┘  └────────────────┘  └────────────────┘         │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+CORES DOS BADGES:
+[•] Verde   - OCUPADA
+[•] Amarelo - AGUARDANDO_PAGAMENTO  
+[•] Cinza   - FINALIZADA
+[○] Azul    - DISPONÍVEL
+
+3.2. CARDS DE MESA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MESA OCUPADA:
+{
+  "id": 10,
+  "referencia": "Mesa 10",
+  "status": "OCUPADA",
+  "tipo": "MESA_FISICA",
+  "numero": 10,
+  "capacidade": 4,
+  "cliente": {
+    "id": 50,
+    "nome": "João Silva",
+    "telefone": "+244923456789",
+    "email": "joao@email.com"
+  },
+  "pedidos": [
+    {
+      "id": 101,
+      "status": "EM_ANDAMENTO",
+      "total": 15000.00,
+      "criadoEm": "2026-02-21T12:00:00"
+    },
+    {
+      "id": 102,
+      "status": "FINALIZADO",
+      "total": 10000.00,
+      "criadoEm": "2026-02-21T12:30:00"
+    }
+  ],
+  "total": 25000.00,
+  "abertaEm": "2026-02-21T11:30:00"
+}
+
+MESA DISPONÍVEL:
+{
+  "id": 20,
+  "referencia": "Mesa 20",
+  "status": "DISPONIVEL",
+  "capacidade": 4,
+  "cliente": null,
+  "pedidos": [],
+  "total": 0.00
+}
+
+================================================================================
+4. MODAL DE DETALHES DA MESA
+================================================================================
+
+4.1. ABERTURA DO MODAL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TRIGGER: Clicar no card da mesa ocupada
+
+ENDPOINTS NECESSÁRIOS:
+1. GET /api/unidades-consumo/{id} - Detalhes da mesa
+2. GET /api/fundos/cliente/{clienteId} - Fundo de consumo
+3. GET /api/config/pos-pago - Configuração global de pós-pago
+
+4.2. LAYOUT DO MODAL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┌──────────────────────────────────────────────────────────────────────┐
+│ Mesa 10 - Salão Principal                                      [X]   │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│ ┌─ CLIENTE ──────────────────────────────────────────────────────┐  │
+│ │ Nome: João Silva                                               │  │
+│ │ Telefone: +244 923 456 789                                     │  │
+│ │ Email: joao@email.com                                          │  │
+│ │ Cliente desde: 15/01/2026                                      │  │
+│ └────────────────────────────────────────────────────────────────┘  │
+│                                                                      │
+│ ┌─ FUNDO DE CONSUMO ─────────────────────────────────────────────┐  │
+│ │ Saldo Disponível: 50.000,00 Kz            [💰 Recarregar]     │  │
+│ │ Modo: PRÉ-PAGO (Débito Automático)                            │  │
+│ │ Total Recarregado: 100.000,00 Kz                              │  │
+│ │ Total Consumido: 50.000,00 Kz                                 │  │
+│ └────────────────────────────────────────────────────────────────┘  │
+│                                                                      │
+│ ┌─ CONTA DA MESA ────────────────────────────────────────────────┐  │
+│ │ Total Consumido: 25.000,00 Kz                                  │  │
+│ │ Total Pago: 25.000,00 Kz                                       │  │
+│ │ Total Pendente: 0,00 Kz                                        │  │
+│ │ Aberta desde: 21/02/2026 11:30 (1h 30min)                     │  │
+│ └────────────────────────────────────────────────────────────────┘  │
+│                                                                      │
+│ ┌─ HISTÓRICO DE PEDIDOS ─────────────────────────────────────────┐  │
+│ │                                                                 │  │
+│ │ [Todos] [Abertos] [Finalizados] [Cancelados]                  │  │
+│ │                                                                 │  │
+│ │ ┌─────────────────────────────────────────────────────────┐   │  │
+│ │ │ Pedido #101 | 21/02 12:00 | EM_ANDAMENTO    | 15.000 Kz│   │  │
+│ │ │ • 2x Bife Grelhado (Em preparação)                      │   │  │
+│ │ │ • 1x Batata Frita (Pronto para entrega)                 │   │  │
+│ │ │ Status Financeiro: PAGO (PRÉ-PAGO)                      │   │  │
+│ │ │ [Ver Detalhes]                                           │   │  │
+│ │ └─────────────────────────────────────────────────────────┘   │  │
+│ │                                                                 │  │
+│ │ <img src="/api/qrcode/imagem/{token}"                         │  │
+│ │      loading="lazy" width="300" height="300" />               │  │
+│ │                                                                 │  │
+│ │ [Renovar] [Baixar 500x500] [Cancelar]                   │   │  │
+│ │ │ [Ver Detalhes]                                           │   │  │
+│ │ └─────────────────────────────────────────────────────────┘   │  │
+│ │                                                                 │  │
+│ └─────────────────────────────────────────────────────────────────┘  │
+│                                                                      │
+│ ┌─ QR CODE DA MESA ──────────────────────────────────────────────┐  │
+│ │ ┌───────────┐                                                   │  │
+│ │ │ QR  CODE  │  [Renovar] [Baixar para Impressão] [Cancelar]   │  │
+│ │ │  IMAGEM   │                                                   │  │
+│ │ └───────────┘                                                   │  │
+│ │ Expira: 22/02/2027 13:00                                       │  │
+│ └────────────────────────────────────────────────────────────────┘  │
+│                                                                      │
+│ [Novo Pedido] [Fechar Mesa] [Imprimir Conta]             [Fechar] │
+└──────────────────────────────────────────────────────────────────────┘
+
+4.3. DADOS DO MODAL - ESTRUTURA COMPLETA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const carregarDetalhesMesa = async (mesaId) => {
+  // 1. Detalhes da mesa
+  const mesa = await api.get(`/api/unidades-consumo/${mesaId}`)
+  
+  // 2. Fundo de consumo do cliente
+  const clienteId = mesa.data.data.cliente.id
+  const fundo = await api.get(`/api/fundos/cliente/${clienteId}`)
+  
+  // 3. QR Code da mesa
+  const qrCodes = await api.get(`/api/qrcode/unidade-consumo/${mesaId}`)
+  
+  return {
+    mesa: mesa.data.data,
+    fundo: fundo.data.data,
+    qrCode: qrCodes.data.data[0] // Primeiro QR Code ativo
+  }
+}
+
+ESTRUTURA FUNDO DE CONSUMO:
+{
+  "id": 1,
+  "cliente": {
+    "id": 50,
+    "nome": "João Silva"
+  },
+  "saldo": 50000.00,
+  "totalRecarregado": 100000.00,
+  "totalConsumido": 50000.00,
+  "ativo": true,
+  "criadoEm": "2026-01-15T10:00:00",
+  "version": 5
+}
+
+4.4. CÁLCULOS NO FRONTEND
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Total consumido da mesa
+const totalConsumido = mesa.pedidos.reduce((acc, p) => acc + p.total, 0)
+
+// Total pago (apenas pedidos com statusFinanceiro = PAGO)
+const totalPago = mesa.pedidos
+  .filter(p => p.statusFinanceiro === 'PAGO')
+  .reduce((acc, p) => acc + p.total, 0)
+
+// Total pendente
+const totalPendente = totalConsumido - totalPago
+
+// Modo de pagamento (verifica primeiro pedido)
+const modo = mesa.pedidos[0]?.tipoPagamento === 'PRE_PAGO' 
+  ? 'PRÉ-PAGO (Débito Automático)' 
+  : 'PÓS-PAGO (Pagar no Final)'
+
+// Tempo aberto
+const tempoAberto = calcularTempoDecorrido(mesa.abertaEm, new Date())
+
+4.5. DETECÇÃO DE MODO PRÉ-PAGO vs PÓS-PAGO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+REGRA:
+- PRÉ-PAGO: Cliente TEM Fundo de Consumo ativo
+- PÓS-PAGO: Cliente NÃO TEM Fundo de Consumo (paga no final)
+
+const detectarModo = (fundo) => {
+  if (!fundo || !fundo.ativo) {
+    return {
+      modo: 'PÓS-PAGO',
+      descricao: 'Pagamento manual no final',
+      icon: '💳',
+      color: 'orange'
+    }
+  }
+  
+  return {
+    modo: 'PRÉ-PAGO',
+    descricao: 'Débito automático do Fundo de Consumo',
+    icon: '💰',
+    color: 'green'
+  }
+}
+
+EXIBIÇÃO:
+┌─────────────────────────────────────────┐
+│ 💰 PRÉ-PAGO (Débito Automático)         │
+│ Saldo: 50.000,00 Kz                     │
+│ [Recarregar Fundo]                      │
+└─────────────────────────────────────────┘
+
+ou
+
+┌─────────────────────────────────────────┐
+│ 💳 PÓS-PAGO (Pagamento Manual)          │
+│ Total a Pagar: 25.000,00 Kz             │
+│ [Processar Pagamento]                   │
+└─────────────────────────────────────────┘
+
+================================================================================
+5. INTEGRAÇÃO COMPLETA - FLUXO DE TRABALHO
+================================================================================
+
+5.1. CRIAR MESA COM QR CODE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const criarMesa = async (dadosMesa) => {
+  try {
+    // 1. Criar unidade de consumo
+    const unidadeResponse = await api.post('/api/unidades-consumo', {
+      referencia: dadosMesa.referencia,
+      tipo: 'MESA_FISICA',
+      numero: dadosMesa.numero,
+      capacidade: dadosMesa.capacidade,
+      telefoneCliente: dadosMesa.telefoneCliente,
+      unidadeAtendimentoId: dadosMesa.unidadeAtendimentoId,
+      atendenteId: getUserId() // Se criada manualmente
+    })
+    
+    const unidade = unidadeResponse.data.data
+    
+    // 2. Gerar QR Code (permanente, 1 ano)
+    const qrCodeResponse = await api.post('/api/qrcode', {
+      tipo: 'MESA',
+      unidadeDeConsumoId: unidade.id,
+      validadeMinutos: 525600 // 365 dias
+    })
+    
+    const qrCode = qrCodeResponse.data.data
+    
+    // 3. Baixar imagem para impressão
+    const imagemUrl = `/api/qrcode/imagem/${qrCode.token}/print`
+    
+    // 4. Exibir sucesso com QR Code
+    showSuccessModal({
+      titulo: `Mesa ${unidade.referencia} criada!`,
+      mensagem: 'QR Code gerado com sucesso',
+      qrCodeImagem: imagemUrl,
+      acoes: [
+        { label: 'Baixar QR Code', action: () => downloadQrCode(imagemUrl) },
+        { label: 'Imprimir', action: () => printQrCode(imagemUrl) },
+        { label: 'Fechar', action: () => closeModal() }
+      ]
+    })
+    
+    // 5. Atualizar lista de mesas
+    await refreshMesas()
+    
+    return { unidade, qrCode }
+    
+  } catch (error) {
+    showError('Erro ao criar mesa: ' + error.message)
+  }
+}
+
+5.2. ABRIR MODAL DE DETALHES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const abrirDetalhes Mesa = async (mesaId) => {
+  showLoading()
+  
+  try {
+    // Buscar todos os dados em paralelo
+    const [mesaRes, qrCodesRes] = await Promise.all([
+      api.get(`/api/unidades-consumo/${mesaId}`),
+      api.get(`/api/qrcode/unidade-consumo/${mesaId}`)
+    ])
+    
+    const mesa = mesaRes.data.data
+    const qrCode = qrCodesRes.data.data[0]
+    
+    // Buscar fundo de consumo se cliente tem
+    let fundo = null
+    if (mesa.cliente?.id) {
+      const fundoRes = await api.get(`/api/fundos/cliente/${mesa.cliente.id}`)
+      fundo = fundoRes.data.data
+    }
+    
+    // Calcular totais
+    const totalConsumido = calcularTotalConsumido(mesa.pedidos)
+    const totalPago = calcularTotalPago(mesa.pedidos)
+    const totalPendente = totalConsumido - totalPago
+    
+    // Detectar modo
+    const modo = detectarModo(fundo)
+    
+    // Abrir modal
+    showModal('DetalheMesaModal', {
+      mesa,
+      fundo,
+      qrCode,
+      totais: { totalConsumido, totalPago, totalPendente },
+      modo
+    })
+    
+  } catch (error) {
+    showError('Erro ao carregar detalhes da mesa')
+  } finally {
+    hideLoading()
+  }
+}
+
+5.3. RECARREGAR FUNDO DE CONSUMO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const recarregarFundo = async (fundoId, valor) => {
+  try {
+    // Inicia recarga via AppyPay
+    const response = await api.post(`/api/fundos/${fundoId}/recarregar`, {
+      valor: valor,
+      metodo: 'GPO' // ou 'REF'
+    })
+    
+    const pagamento = response.data.data
+    
+    // Redireciona para AppyPay ou exibe referência
+    if (pagamento.metodo === 'GPO') {
+      window.open(pagamento.urlPagamento, '_blank')
+    } else {
+      showReferenciaPagamento(pagamento.referencia)
+    }
+    
+    // Aguarda webhook confirmar pagamento
+    // Frontend deve fazer polling ou usar WebSocket
+    
+  } catch (error) {
+    showError('Erro ao recarregar fundo')
+  }
+}
+
+5.4. FECHAR MESA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const fecharMesa = async (mesaId) => {
+  try {
+    // Validar: todos pedidos pagos?
+    const mesa = await api.get(`/api/unidades-consumo/${mesaId}`)
+    const totalPendente = calcularTotalPendente(mesa.data.data.pedidos)
+    
+    if (totalPendente > 0) {
+      const confirmar = await showConfirm(
+        'Existe valor pendente de ' + formatMoney(totalPendente) + '. Confirma fechamento?'
+      )
+      if (!confirmar) return
+    }
+    
+    // Fechar
+    await api.put(`/api/unidades-consumo/${mesaId}/fechar`)
+    
+    showSuccess('Mesa fechada com sucesso')
+    closeModal()
+    await refreshMesas()
+    
+  } catch (error) {
+    showError('Erro ao fechar mesa')
+  }
+}
+
+================================================================================
+6. COMPONENTES UI SUGERIDOS
+================================================================================
+
+6.1. CARD DE MESA (COMPONENTE)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+<CardMesa>
+  Props:
+  - mesa: UnidadeConsumoResponse
+  - onOpen: () => void
+  
+  Estado:
+  - badge: status da mesa (cor e texto)
+  - cliente: nome ou "DISPONÍVEL"
+  - total: valor consumido ou capacidade
+  - pedidos: contador de pedidos
+  
+  Ações:
+  - onClick → abrirDetalhesMesa()
+  - Botão "Ocupar" (se disponível)
+  - Botão "Abrir" (se ocupada)
+
+6.2. MODAL DE DETALHES (COMPONENTE)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+<ModalDetalhesMesa>
+  Props:
+  - mesaId: Long
+  - onClose: () => void
+  
+  Seções:
+  1. InfoCliente
+  2. InfoFundoConsumo (se PRE_PAGO)
+  3. ContaMesa (totais)
+  4. HistoricoPedidos (lista com filtros)
+  5. QrCodeMesa (imagem + ações)
+  
+  Ações:
+  - Novo Pedido
+  - Fechar Mesa
+  - Imprimir Conta
+  - Recarregar Fundo
+
+6.3. FILTROS (COMPONENTE)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+<FiltrosMesas>
+  Props:
+  - onChange: (filters) => void
+  
+  Filtros:
+  - Status: Todas | Ocupadas | Disponíveis | Aguardando Pagamento
+  - Tipo: Todas | Mesa | Quarto | Área Evento | Lounge | Virtual
+  - Busca: Por referência ou nome do cliente
+  
+  Estado:
+  - filtrosAtivos: objeto com filtros selecionados
+
+================================================================================
+7. WEBSOCKET - ATUALIZAÇÕES EM TEMPO REAL
+================================================================================
+
+7.1. TÓPICOS RELEVANTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CONECTAR:
+const socket = new SockJS('http://localhost:8080/api/ws')
+const stompClient = Stomp.over(socket)
+
+INSCREVER-SE:
+// Notificações de pedidos da unidade de atendimento
+stompClient.subscribe('/topic/atendente/unidade/1', (message) => {
+  const notificacao = JSON.parse(message.body)
+  
+  if (notificacao.tipo === 'SUBPEDIDO_PRONTO') {
+    // Atualizar card da mesa
+    refreshMesa(notificacao.unidadeDeConsumoId)
+    showToast('Pedido pronto na Mesa ' + notificacao.mesaNumero)
+  }
+  
+  if (notificacao.tipo === 'NOVO_PEDIDO') {
+    // Nova mesa ocupada
+    refreshMesas()
+  }
+})
+
+7.2. EVENTOS IMPORTANTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- MESA_OCUPADA: Nova mesa aberta
+- NOVO_PEDIDO: Cliente fez pedido
+- SUBPEDIDO_PRONTO: Item pronto para entrega
+- SUBPEDIDO_ENTREGUE: Item entregue
+- PAGAMENTO_RECEBIDO: Pagamento confirmado
+- MESA_FECHADA: Mesa liberada
+
+================================================================================
+8. PERMISSÕES POR ROLE
+================================================================================
+
+8.1. ADMIN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Ver TODAS as mesas (visão global)
+✓ Abrir detalhes de qualquer mesa
+✓ Criar/editar/excluir mesas
+✓ Gerar/renovar/cancelar QR Codes
+✓ Fechar qualquer mesa
+✓ Processar pagamentos
+
+8.2. GERENTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Ver mesas da SUA UnidadeAtendimento
+✓ Abrir detalhes de mesas da sua unidade
+✓ Criar/editar mesas da sua unidade
+✓ Gerar/renovar QR Codes
+✓ Fechar mesas da sua unidade
+✓ Processar pagamentos
+
+8.3. ATENDENTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Ver mesas da SUA UnidadeAtendimento
+✓ Abrir detalhes (somente leitura)
+✓ Criar novas mesas
+✓ Confirmar entregas (QR Code)
+✗ NÃO pode fechar mesas
+✗ NÃO pode cancelar QR Codes
+
+8.4. CLIENTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Ver apenas SUA mesa ativa
+✓ Fazer pedidos
+✓ Ver histórico de pedidos
+✓ Ver saldo do fundo
+✗ NÃO pode ver outras mesas
+
+================================================================================
+9. VALIDAÇÕES E REGRAS DE NEGÓCIO
+================================================================================
+
+9.1. CRIAR MESA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Referência é obrigatória
+✓ Telefone do cliente é obrigatório (formato: +244XXXXXXXXX)
+✓ UnidadeAtendimentoId é obrigatória
+✓ Cliente pode ter apenas UMA mesa ativa por vez
+✓ Status inicial sempre = OCUPADA
+
+9.2. FECHAR MESA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Verificar se há valor pendente
+✓ Confirmar com usuário se há pendências
+✓ Todos pedidos devem estar FINALIZADOS
+✓ Status deve ser AGUARDANDO_PAGAMENTO ou OCUPADA
+✓ Após fechar: status = FINALIZADA
+
+9.3. GERAR QR CODE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Tipo MESA: unidadeDeConsumoId é obrigatório
+✓ Tipo ENTREGA/PAGAMENTO: pedidoId é obrigatório
+✓ Validade padrão: 60 minutos (tipo MESA)
+✓ Validade padrão: 15 minutos (tipo ENTREGA)
+✓ Validade padrão: 60 minutos (tipo PAGAMENTO)
+✓ Apenas um QR Code ATIVO por mesa
+
+================================================================================
+10. TRATAMENTO DE ERROS
+================================================================================
+
+400 - "Cliente já possui uma unidade ativa"
+      → Informar que cliente precisa fechar mesa anterior
+
+400 - "QR Code já existe para esta unidade"
+      → Usar endpoint de renovação em vez de criar novo
+
+404 - "Unidade de consumo não encontrada"
+      → Mesa pode ter sido fechada/excluída
+
+404 - "QR Code não encontrado"
+      → Token inválido ou QR Code expirado
+
+400 - "QR Code expirado"
+      → Renovar QR Code ou gerar novo
+
+401 - "Usuário não autenticado"
+      → Redirecionar para login
+
+403 - "Sem permissão para acessar esta mesa"
+      → GERENTE tentando acessar mesa de outra unidade
+
+================================================================================
+11. CHECKLIST DE IMPLEMENTAÇÃO
+================================================================================
+
+PÁGINA DE GESTÃO:
+□ Serviço de API (mesasService.js, qrcodeService.js)
+□ Componente de listagem (GestaoMesasView.vue)
+□ Card de mesa (CardMesa.vue)
+□ Filtros (FiltrosMesas.vue)
+□ Detecção de role (ADMIN vs GERENTE)
+□ Endpoint correto (/minhas vs /todas)
+
+MODAL DE DETALHES:
+□ Modal de detalhes (ModalDetalhesMesa.vue)
+□ Seção de cliente (InfoCliente.vue)
+□ Seção de fundo (InfoFundoConsumo.vue)
+□ Seção de conta (ContaMesa.vue)
+□ Histórico de pedidos (HistoricoPedidos.vue)
+□ QR Code display (QrCodeDisplay.vue)
+□ Integração com fundos API
+□ Detecção PRÉ-PAGO vs PÓS-PAGO
+
+QR CODE:
+□ Gerar QR Code ao criar mesa
+□ Exibir imagem do QR Code
+□ Baixar para impressão (500x500)
+□ Renovar QR Code expirado
+□ Cancelar QR Code
+
+WEBSOCKET:
+□ Conexão com /api/ws
+□ Inscrição em tópicos relevantes
+□ Atualização automática de cards
+□ Notificações toast
+
+TESTES:
+□ Criar mesa com QR Code
+□ Abrir modal de detalhes
+□ Ver histórico de pedidos
+□ Calcular totais corretamente
+□ Fechar mesa
+□ Renovar QR Code
+□ Filtrar mesas
+
+================================================================================
+FIM DO DOCUMENTO
+================================================================================

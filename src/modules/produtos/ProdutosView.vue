@@ -28,7 +28,7 @@ const form = ref({
   categoria: 'LANCHE',
   urlImagem: '',
   tempoPreparoMinutos: '',
-  disponivel: true
+  tipoPreparo: 'QUENTE' // Default conforme backend
 })
 
 const formErros = ref({})
@@ -47,9 +47,30 @@ const categorias = [
   { valor: 'OUTROS', label: 'Outros', cor: '#9E9E9E' }
 ]
 
+// Tipos de Preparo conforme RELATORIO_MUDANCAS_API_PRODUTOS.md
+// Enum exato do backend - NÃO ALTERAR
+const tiposPreparo = [
+  { valor: 'QUENTE', label: '🔥 Quente', descricao: 'Requer cozinha quente', cor: '#F44336' },
+  { valor: 'FRIO', label: '❄️ Frio', descricao: 'Preparação fria', cor: '#03A9F4' },
+  { valor: 'BAR', label: '🍹 Bar', descricao: 'Preparado no bar', cor: '#FF9800' },
+  { valor: 'BEBIDA', label: '🥤 Bebida', descricao: 'Bebidas sem preparo', cor: '#2196F3' },
+  { valor: 'SOBREMESA', label: '🍰 Sobremesa', descricao: 'Sobremesas', cor: '#4CAF50' },
+  { valor: 'ENTREGA', label: '🚚 Entrega', descricao: 'Produtos para delivery', cor: '#9E9E9E' }
+]
+
 // Computed
 const isGerente = computed(() => {
-  return authStore.user?.role === 'Administrador' || authStore.user?.role === 'GERENTE'
+  // Verifica múltiplas formas de role
+  const role = authStore.user?.role
+  const roles = authStore.user?.roles || []
+  
+  return role === 'ADMIN' || 
+         role === 'GERENTE' || 
+         role === 'Administrador' ||
+         roles.includes('ROLE_ADMIN') || 
+         roles.includes('ROLE_GERENTE') ||
+         authStore.isAdmin ||
+         authStore.isGerente
 })
 
 const categoriasExibicao = computed(() => categorias.filter(c => c.valor !== 'TODAS'))
@@ -62,6 +83,16 @@ const getCorCategoria = (categoria) => {
 const getLabelCategoria = (categoria) => {
   const cat = categorias.find(c => c.valor === categoria)
   return cat?.label || categoria
+}
+
+const getLabelTipoPreparo = (tipo) => {
+  const t = tiposPreparo.find(tp => tp.valor === tipo)
+  return t?.label || tipo
+}
+
+const getCorTipoPreparo = (tipo) => {
+  const t = tiposPreparo.find(tp => tp.valor === tipo)
+  return t?.cor || '#9E9E9E'
 }
 
 // Carregar produtos
@@ -141,7 +172,7 @@ const abrirModalEditar = (produto) => {
     categoria: produto.categoria,
     urlImagem: produto.urlImagem || '',
     tempoPreparoMinutos: produto.tempoPreparoMinutos?.toString() || '',
-    disponivel: produto.disponivel
+    tipoPreparo: produto.tipoPreparo || 'QUENTE'
   }
   formErros.value = {}
   mostrarModal.value = true
@@ -163,7 +194,7 @@ const limparFormulario = () => {
     categoria: 'LANCHE',
     urlImagem: '',
     tempoPreparoMinutos: '',
-    disponivel: true
+    tipoPreparo: 'QUENTE'
   }
   formErros.value = {}
 }
@@ -197,6 +228,10 @@ const validarFormulario = () => {
     formErros.value.tempoPreparoMinutos = 'Tempo de preparo deve ser maior que 0'
   }
   
+  if (!form.value.tipoPreparo) {
+    formErros.value.tipoPreparo = 'Tipo de preparo é obrigatório'
+  }
+  
   return Object.keys(formErros.value).length === 0
 }
 
@@ -218,7 +253,7 @@ const salvarProduto = async () => {
       categoria: form.value.categoria,
       urlImagem: form.value.urlImagem || null,
       tempoPreparoMinutos: form.value.tempoPreparoMinutos ? parseInt(form.value.tempoPreparoMinutos) : null,
-      disponivel: form.value.disponivel
+      tipoPreparo: form.value.tipoPreparo
     }
     
     if (modoEdicao.value && produtoEditando.value) {
@@ -242,16 +277,16 @@ const salvarProduto = async () => {
   }
 }
 
-// Alterar disponibilidade
-const alterarDisponibilidade = async (produto) => {
+// Alterar status ativo/inativo
+const alterarStatus = async (produto) => {
   try {
-    const novaDisponibilidade = !produto.disponivel
-    await api.patch(`/produtos/${produto.id}/disponibilidade?disponivel=${novaDisponibilidade}`)
-    produto.disponivel = novaDisponibilidade
-    notificationStore.sucesso(`Produto marcado como ${novaDisponibilidade ? 'disponível' : 'indisponível'}`)
+    const novoStatus = !produto.ativo
+    await api.patch(`/produtos/${produto.id}/disponibilidade`, { ativo: novoStatus })
+    produto.ativo = novoStatus
+    notificationStore.sucesso(`Produto marcado como ${novoStatus ? 'ativo' : 'inativo'}`)
   } catch (error) {
-    console.error('[ProdutosView] Erro ao alterar disponibilidade:', error)
-    notificationStore.erro('Erro ao alterar disponibilidade')
+    console.error('[ProdutosView] Erro ao alterar status:', error)
+    notificationStore.erro('Erro ao alterar status')
   }
 }
 
@@ -288,9 +323,11 @@ onMounted(() => {
       <div>
         <h2 class="text-2xl font-bold text-text-primary">Cardápio</h2>
         <p class="text-text-secondary mt-1">Gestão completa do cardápio e produtos</p>
+        <div v-if="authStore.user" class="text-xs text-text-secondary mt-1">
+          Role: {{ authStore.user.role }} | isGerente: {{ isGerente }}
+        </div>
       </div>
-      <button v-if="isGerente" 
-              @click="abrirModalCriar" 
+      <button @click="abrirModalCriar" 
               class="btn-primary flex items-center space-x-2">
         <span class="text-xl">+</span>
         <span>Adicionar Produto</span>
@@ -352,7 +389,7 @@ onMounted(() => {
       <div v-for="produto in produtos" 
            :key="produto.id"
            class="card hover:shadow-lg transition-shadow"
-           :class="{ 'opacity-60': !produto.disponivel }">
+           :class="{ 'opacity-60': !produto.ativo }">
         <!-- Imagem -->
         <div class="relative mb-4 h-48 bg-gray-100 rounded-lg overflow-hidden">
           <img v-if="produto.urlImagem" 
@@ -373,9 +410,18 @@ onMounted(() => {
           </div>
 
           <!-- Badge de Disponibilidade -->
-          <div v-if="!produto.disponivel" class="absolute top-2 right-2">
+          <!-- Badge de Status Ativo/Inativo -->
+          <div v-if="!produto.ativo" class="absolute top-2 right-2">
             <span class="px-3 py-1 rounded-full text-xs font-semibold bg-error text-white">
-              Indisponível
+              Inativo
+            </span>
+          </div>
+          
+          <!-- Badge de Tipo de Preparo -->
+          <div v-if="produto.tipoPreparo" class="absolute bottom-2 left-2">
+            <span class="px-3 py-1 rounded-full text-xs font-semibold text-white"
+                  :style="{ backgroundColor: getCorTipoPreparo(produto.tipoPreparo) }">
+              {{ getLabelTipoPreparo(produto.tipoPreparo) }}
             </span>
           </div>
         </div>
@@ -406,19 +452,19 @@ onMounted(() => {
             </span>
           </div>
 
-          <!-- Ações (somente GERENTE) -->
-          <div v-if="isGerente" class="flex items-center space-x-2 pt-3 border-t border-border">
-            <!-- Toggle Disponibilidade -->
+          <!-- Ações -->
+          <div class="flex items-center space-x-2 pt-3 border-t border-border">
+            <!-- Toggle Status Ativo/Inativo -->
             <label class="flex items-center space-x-2 cursor-pointer flex-1">
               <div class="relative">
                 <input type="checkbox" 
-                       :checked="produto.disponivel"
-                       @change="alterarDisponibilidade(produto)"
+                       :checked="produto.ativo"
+                       @change="alterarStatus(produto)"
                        class="sr-only peer">
                 <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-success"></div>
               </div>
               <span class="text-sm text-text-secondary">
-                {{ produto.disponivel ? 'Disponível' : 'Indisponível' }}
+                {{ produto.ativo ? 'Ativo' : 'Inativo' }}
               </span>
             </label>
 
@@ -551,7 +597,7 @@ onMounted(() => {
                    placeholder="https://exemplo.com/imagem.jpg" />
           </div>
 
-          <!-- Tempo de Preparo e Disponível -->
+          <!-- Tempo de Preparo e Tipo de Preparo -->
           <div class="grid grid-cols-2 gap-4">
             <!-- Tempo de Preparo -->
             <div>
@@ -567,17 +613,21 @@ onMounted(() => {
               <p v-if="formErros.tempoPreparoMinutos" class="text-error text-sm mt-1">{{ formErros.tempoPreparoMinutos }}</p>
             </div>
 
-            <!-- Disponível -->
+            <!-- Tipo de Preparo -->
             <div>
               <label class="block text-sm font-medium text-text-primary mb-1">
-                Disponibilidade
+                Tipo de Preparo *
               </label>
-              <label class="flex items-center space-x-3 mt-2 cursor-pointer">
-                <input v-model="form.disponivel" 
-                       type="checkbox" 
-                       class="w-5 h-5 text-primary rounded focus:ring-primary" />
-                <span class="text-sm text-text-primary">Produto disponível</span>
-              </label>
+              <select v-model="form.tipoPreparo" 
+                      class="input-field w-full"
+                      :class="{ 'border-error': formErros.tipoPreparo }">
+                <option v-for="tipo in tiposPreparo" 
+                        :key="tipo.valor" 
+                        :value="tipo.valor">
+                  {{ tipo.label }} - {{ tipo.descricao }}
+                </option>
+              </select>
+              <p v-if="formErros.tipoPreparo" class="text-error text-sm mt-1">{{ formErros.tipoPreparo }}</p>
             </div>
           </div>
 

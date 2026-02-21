@@ -29,10 +29,10 @@ const tipoFiltro = ref('TODOS')
 const statusFiltro = ref('TODOS')
 const busca = ref('')
 
-// Buscar fundo por telefone do cliente
+// Buscar fundo por ID do cliente
 const buscarPorCliente = async () => {
   if (!busca.value.trim()) {
-    notificationStore.aviso('Informe o telefone do cliente')
+    notificationStore.aviso('Informe o ID do cliente')
     return
   }
   
@@ -40,25 +40,28 @@ const buscarPorCliente = async () => {
     buscando.value = true
     error.value = null
     
-    // Busca por telefone normalizado (remove espaços, +, etc)
-    const telefone = busca.value.trim().replace(/\D/g, '')
-    
-    const response = await fundoConsumoService.buscarFundoPorCliente(telefone)
-    
-    // Adiciona à lista se não existir
-    const existe = fundos.value.find(f => f.id === response.data.id)
-    if (!existe) {
-      fundos.value.unshift(response.data)
+    const clienteId = parseInt(busca.value.trim())
+    if (isNaN(clienteId)) {
+      notificationStore.aviso('ID do cliente deve ser um número')
+      return
     }
     
-    notificationStore.sucesso(`Fundo encontrado: ${response.data.cliente.nome}`)
-    busca.value = '' // Limpa o campo após busca bem-sucedida
-  } catch (err) {
-    if (err.response?.status === 404) {
-      error.value = 'Cliente não possui fundo de consumo'
+    const fundo = await fundoConsumoService.buscarFundoPorCliente(clienteId)
+    
+    if (fundo) {
+      // Adiciona à lista se não existir
+      const existe = fundos.value.find(f => f.id === fundo.id)
+      if (!existe) {
+        fundos.value.unshift(fundo)
+      }
+      
+      notificationStore.sucesso(`Fundo encontrado!`)
+      busca.value = '' // Limpa o campo após busca bem-sucedida
     } else {
-      error.value = err.response?.data?.message || 'Erro ao buscar fundo'
+      notificationStore.aviso('Cliente não possui fundo de consumo')
     }
+  } catch (err) {
+    error.value = err.message || 'Erro ao buscar fundo'
     notificationStore.erro(error.value)
   } finally {
     buscando.value = false
@@ -130,22 +133,16 @@ const criandoFundo = ref(false)
 const valorMinimo = ref(5000)
 const formulario = ref({
   clienteId: '',
-  clienteNome: '',
-  clienteTelefone: '',
   saldoInicial: 5000,
-  metodoPagamento: 'DINHEIRO'
+  observacoes: ''
 })
 
 // Confirmação de criação de fundo
 const mostrarConfirmacaoCriar = ref(false)
 const confirmarCriacaoFundo = () => {
   // Valida campos primeiro
-  if (!formulario.value.clienteNome) {
-    notificationStore.aviso('Informe o nome do cliente')
-    return
-  }
-  if (!formulario.value.clienteTelefone) {
-    notificationStore.aviso('Informe o telefone do cliente')
+  if (!formulario.value.clienteId) {
+    notificationStore.aviso('Informe o ID do cliente')
     return
   }
   if (formulario.value.saldoInicial < valorMinimo.value) {
@@ -161,7 +158,7 @@ const confirmarCriacaoFundo = () => {
 const abrirModal = async () => {
   try {
     const resp = await fundoConsumoService.consultarValorMinimo()
-    valorMinimo.value = resp.data.valorMinimo
+    valorMinimo.value = resp.valorMinimo
     formulario.value.saldoInicial = valorMinimo.value
     modalAberto.value = true
   } catch (err) {
@@ -174,27 +171,22 @@ const criarFundo = async () => {
   try {
     criandoFundo.value = true
     
-    // Cria fundo via API
-    // NOTA: No painel administrativo, pagamento é presencial (DINHEIRO/TPA)
-    // Backend deve registrar como pagamento confirmado imediatamente
+    // Cria fundo via API - conforme INTEGRACAO_FRONTEND_FUNDO_CONSUMO.txt
     const resp = await fundoConsumoService.criarFundo({
-      clienteId: formulario.value.clienteId || null,
-      clienteNome: formulario.value.clienteNome,
-      clienteTelefone: formulario.value.clienteTelefone,
+      clienteId: formulario.value.clienteId,
       saldoInicial: formulario.value.saldoInicial,
-      metodoPagamento: formulario.value.metodoPagamento
+      observacoes: formulario.value.observacoes || 'Carga inicial'
     })
     
     // Sucesso
-    const metodo = formulario.value.metodoPagamento === 'DINHEIRO' ? 'em dinheiro' : 'via TPA'
     notificationStore.sucesso(
-      `Fundo criado com sucesso! Pagamento ${metodo} de ${formatCurrency(formulario.value.saldoInicial)} registrado.`
+      `Fundo criado com sucesso! Saldo inicial: ${formatCurrency(formulario.value.saldoInicial)}`
     )
     modalAberto.value = false
     mostrarConfirmacaoCriar.value = false
     
-    // Adiciona à lista local (quando backend tiver listagem, recarregar)
-    fundos.value.push(resp.data)
+    // Adiciona à lista local
+    fundos.value.unshift(resp)
     
   } catch (err) {
     const msg = err.response?.data?.message || err.message
@@ -208,10 +200,8 @@ const fecharModal = () => {
   modalAberto.value = false
   formulario.value = {
     clienteId: '',
-    clienteNome: '',
-    clienteTelefone: '',
     saldoInicial: valorMinimo.value,
-    metodoPagamento: 'GPO'
+    observacoes: ''
   }
 }
 // Modal de recarga
@@ -220,7 +210,7 @@ const fundoSelecionado = ref(null)
 const recargando = ref(false)
 const formularioRecarga = ref({
   valor: 5000,
-  metodoPagamento: 'DINHEIRO'
+  metodoPagamento: 'GPO'
 })
 
 const abrirModalRecarga = (fundo) => {
@@ -239,21 +229,29 @@ const recarregarFundo = async () => {
       return
     }
     
-    await fundoConsumoService.recarregarFundo(
+    const pagamento = await fundoConsumoService.recarregarFundo(
       fundoSelecionado.value.id,
-      formularioRecarga.value.valor,
-      formularioRecarga.value.metodoPagamento
+      {
+        valor: formularioRecarga.value.valor,
+        metodoPagamento: formularioRecarga.value.metodoPagamento
+      }
     )
     
-    const metodo = formularioRecarga.value.metodoPagamento === 'DINHEIRO' ? 'em dinheiro' : 'via TPA'
-    notificationStore.sucesso(
-      `Recarga realizada com sucesso! Pagamento ${metodo} de ${formatCurrency(formularioRecarga.value.valor)}`
-    )
-    
-    // Atualiza saldo local
-    fundoSelecionado.value.saldoAtual += formularioRecarga.value.valor
+    // Pagamento criado com status PENDENTE
+    if (formularioRecarga.value.metodoPagamento === 'GPO') {
+      // Redireciona para AppyPay
+      notificationStore.sucesso('Redirecionando para pagamento AppyPay...')
+      window.open(pagamento.urlPagamento, '_blank')
+    } else if (formularioRecarga.value.metodoPagamento === 'REF') {
+      // Exibe referência bancária
+      notificationStore.sucesso(
+        `Referência gerada! Entidade: ${pagamento.entidade} | Referência: ${pagamento.referencia}`
+      )
+    }
     
     modalRecargaAberto.value = false
+    
+    // Nota: Saldo será atualizado automaticamente após confirmação do pagamento via callback
   } catch (err) {
     notificationStore.erro('Erro ao recarregar fundo: ' + (err.response?.data?.message || err.message))
   } finally {
@@ -266,7 +264,7 @@ const fecharModalRecarga = () => {
   fundoSelecionado.value = null
   formularioRecarga.value = {
     valor: valorMinimo.value,
-    metodoPagamento: 'DINHEIRO'
+    metodoPagamento: 'GPO'
   }
 }</script>
 
@@ -427,46 +425,19 @@ const fecharModalRecarga = () => {
 
         <!-- Body -->
         <div class="p-6 space-y-4">
-          <!-- Cliente ID (opcional) -->
+          <!-- ID do Cliente -->
           <div>
             <label class="block text-sm font-medium text-text-primary mb-2">
-              ID do Cliente (opcional)
+              ID do Cliente <span class="text-error">*</span>
             </label>
             <input 
-              v-model="formulario.clienteId" 
-              type="text" 
+              v-model.number="formulario.clienteId" 
+              type="number" 
               class="input-field w-full"
-              placeholder="Deixe em branco para novo cliente"
-            />
-          </div>
-
-          <!-- Nome do Cliente -->
-          <div>
-            <label class="block text-sm font-medium text-text-primary mb-2">
-              Nome do Cliente <span class="text-error">*</span>
-            </label>
-            <input 
-              v-model="formulario.clienteNome" 
-              type="text" 
-              class="input-field w-full"
-              placeholder="Ex: João Silva"
+              placeholder="Ex: 123"
               required
             />
-          </div>
-
-          <!-- Telefone -->
-          <div>
-            <label class="block text-sm font-medium text-text-primary mb-2">
-              Telefone <span class="text-error">*</span>
-            </label>
-            <input 
-              v-model="formulario.clienteTelefone" 
-              type="tel" 
-              class="input-field w-full"
-              placeholder="+244925813939"
-              required
-            />
-            <p class="text-xs text-text-secondary mt-1">Formato: +244XXXXXXXXX</p>
+            <p class="text-xs text-text-secondary mt-1">ID numérico do cliente no sistema</p>
           </div>
 
           <!-- Saldo Inicial -->
@@ -487,23 +458,17 @@ const fecharModalRecarga = () => {
             </p>
           </div>
 
-          <!-- Método de Pagamento -->
+          <!-- Observações -->
           <div>
             <label class="block text-sm font-medium text-text-primary mb-2">
-              Método de Pagamento Presencial
+              Observações
             </label>
-            <select v-model="formulario.metodoPagamento" class="input-field w-full">
-              <option value="DINHEIRO">Dinheiro</option>
-              <option value="TPA">TPA - Terminal de Pagamento Automático</option>
-            </select>
-            <p class="text-xs text-text-secondary mt-1">
-              <template v-if="formulario.metodoPagamento === 'DINHEIRO'">
-                Pagamento em dinheiro vivo (Kwanzas)
-              </template>
-              <template v-else>
-                Pagamento via máquina de cartão (débito/crédito)
-              </template>
-            </p>
+            <textarea 
+              v-model="formulario.observacoes" 
+              class="input-field w-full"
+              rows="3"
+              placeholder="Informações adicionais (opcional)"
+            />
           </div>
         </div>
 
@@ -568,18 +533,18 @@ const fecharModalRecarga = () => {
           <!-- Método de Pagamento -->
           <div>
             <label class="block text-sm font-medium text-text-primary mb-2">
-              Método de Pagamento Presencial
+              Método de Pagamento AppyPay
             </label>
             <select v-model="formularioRecarga.metodoPagamento" class="input-field w-full">
-              <option value="DINHEIRO">Dinheiro</option>
-              <option value="TPA">TPA - Terminal de Pagamento Automático</option>
+              <option value="GPO">GPO - Pagamento Instantâneo</option>
+              <option value="REF">REF - Referência Bancária</option>
             </select>
             <p class="text-xs text-text-secondary mt-1">
-              <template v-if="formularioRecarga.metodoPagamento === 'DINHEIRO'">
-                Pagamento em dinheiro vivo (Kwanzas)
+              <template v-if="formularioRecarga.metodoPagamento === 'GPO'">
+                Redirecionamento para AppyPay (confirmação instantânea)
               </template>
               <template v-else>
-                Pagamento via máquina de cartão (débito/crédito)
+                Gera referência para pagamento bancário (aguarda confirmação)
               </template>
             </p>
           </div>
@@ -616,7 +581,7 @@ const fecharModalRecarga = () => {
     <ConfirmDialog
       :is-open="mostrarConfirmacaoCriar"
       title="Confirmar Criação de Fundo"
-      :message="`Deseja criar um fundo de ${formatCurrency(formulario.saldoInicial)} para ${formulario.clienteNome}? O pagamento ${formulario.metodoPagamento === 'DINHEIRO' ? 'em dinheiro' : 'via TPA'} será registrado imediatamente.`"
+      :message="`Deseja criar um fundo de ${formatCurrency(formulario.saldoInicial)} para o cliente #${formulario.clienteId}?`"
       variant="info"
       confirm-text="Criar Fundo"
       cancel-text="Cancelar"

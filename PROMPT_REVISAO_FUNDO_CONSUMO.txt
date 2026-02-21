@@ -1,0 +1,526 @@
+PROMPT DE REVISÃO: FUNDOS DE CONSUMO
+=====================================
+
+Data: 21 de fevereiro de 2026
+Objetivo: Revisar implementação completa do sistema de Fundos de Consumo (pré-pago)
+Escopo: Backend Java Spring Boot
+
+
+CONTEXTO
+========
+
+Você é um especialista em Domain-Driven Design (DDD), sistemas financeiros e Spring Boot.
+Sua missão é revisar a implementação do módulo de Fundos de Consumo para garantir:
+
+1. **Corretude**: Lógica de negócio sem falhas
+2. **Segurança**: Transações financeiras protegidas
+3. **Concorrência**: Race conditions prevenidos
+4. **Auditoria**: Rastreabilidade completa
+5. **Performance**: Otimizações aplicadas
+6. **Padrões DDD**: Princípios respeitados
+
+
+DESCRIÇÃO DO SISTEMA
+=====================
+
+**Fundo de Consumo** é um sistema de pagamento PRÉ-PAGO onde:
+- Cliente carrega saldo ANTECIPADAMENTE (via AppyPay)
+- Pedidos debitam AUTOMATICAMENTE do saldo
+- Saldo NUNCA fica negativo
+- Histórico completo de movimentações (TransacaoFundo)
+
+
+ENTIDADES ENVOLVIDAS
+=====================
+
+1. **FundoConsumo**: Representa o saldo do cliente
+   - Campos: id, cliente (ONE-TO-ONE), saldoAtual, ativo, version
+   - Invariantes: saldoAtual >= 0, cliente tem UM fundo ativo
+
+2. **TransacaoFundo**: Auditoria de movimentações
+   - Campos: id, fundoConsumo, valor, tipo (CREDITO/DEBITO/ESTORNO), pedido, saldoAnterior, saldoNovo
+   - Imutável: Nunca é alterada após criação
+
+3. **Pedido**: Vinculado a DEBITO e ESTORNO
+   - Campo tipoPagamento: FUNDO_CONSUMO
+
+
+OPERAÇÕES PRINCIPAIS
+====================
+
+1. **criarFundo(clienteId, saldoInicial, observacoes)**
+   - Valida saldoInicial >= valorMinimo (5000 AOA)
+   - Verifica cliente não tem fundo ativo
+   - Cria FundoConsumo com ativo=true
+   - Cria TransacaoFundo tipo=CREDITO (carga inicial)
+
+2. **recarregar(clienteId, valor, observacoes)**
+   - Valida valor > 0
+   - Busca fundo ativo (com @Version para lock otimista)
+   - Credita saldo: saldoAtual += valor
+   - Cria TransacaoFundo tipo=CREDITO
+
+3. **debitar(clienteId, pedidoId, valor)**
+   - IDEMPOTÊNCIA: Verifica se pedido já foi debitado
+   - Valida valor > 0
+   - Busca fundo ativo
+   - Valida saldo suficiente: saldoAtual >= valor
+   - Debita saldo: saldoAtual -= valor
+   - Cria TransacaoFundo tipo=DEBITO (vincula pedidoId)
+
+4. **estornar(clienteId, pedidoId)**
+   - Busca TransacaoFundo tipo=DEBITO do pedido
+   - Valida pedido foi cancelado
+   - Credita saldo: saldoAtual += valorOriginal
+   - Cria TransacaoFundo tipo=ESTORNO
+
+
+PONTOS CRÍTICOS A REVISAR
+===========================
+
+1. CONCORRÊNCIA
+---------------
+✓ FundoConsumo usa @Version (Optimistic Locking)?
+✓ Transações financeiras com ISOLATION SERIALIZABLE?
+✓ Métodos criarFundo, recarregar, debitar são @Transactional?
+✓ Race condition de "saldo suficiente" está protegida?
+
+EXEMPLO DE RACE CONDITION:
+Thread A: lê saldo=1000, calcula novo=500
+Thread B: lê saldo=1000, calcula novo=200
+Thread A: salva saldo=500
+Thread B: salva saldo=200 (SOBRESCREVE! saldo errado!)
+
+SOLUÇÃO: @Version ou PESSIMISTIC_WRITE
+
+
+2. IDEMPOTÊNCIA
+---------------
+✓ debitar(pedidoId) executa apenas UMA vez por pedido?
+✓ Usa findByPedidoIdAndTipo(pedidoId, DEBITO) antes de debitar?
+✓ Retorna transação existente se já foi debitado?
+
+EXEMPLO:
+if (transacaoExistente.isPresent()) {
+    log.info("Pedido {} já foi debitado", pedidoId);
+    return transacaoExistente.get();
+}
+
+
+3. VALIDAÇÕES
+-------------
+✓ saldoInicial >= valorMinimo?
+✓ valor > 0 em todas operações?
+✓ saldoAtual >= valor antes de debitar?
+✓ fundo.ativo == true antes de movimentar?
+✓ cliente existe antes de criar fundo?
+
+EXEMPLO:
+if (!fundo.getAtivo()) {
+    throw new BusinessException("Fundo encerrado");
+}
+
+
+4. AUDITORIA
+------------
+✓ TransacaoFundo criada para TODA movimentação?
+✓ Campos saldoAnterior e saldoNovo preenchidos?
+✓ TransacaoFundo é imutável (sem setters)?
+✓ Relacionamento com Pedido presente em DEBITO/ESTORNO?
+
+EXEMPLO:
+TransacaoFundo transacao = TransacaoFundo.builder()
+    .fundoConsumo(fundo)
+    .valor(valor)
+    .tipo(TipoTransacaoFundo.DEBITO)
+    .pedido(pedido)
+    .saldoAnterior(fundo.getSaldoAtual())
+    .saldoNovo(fundo.getSaldoAtual().subtract(valor))
+    .observacoes("Débito automático - Pedido #" + pedidoId)
+    .build();
+
+
+5. TESTES
+---------
+✓ Teste unitário: debitar com saldo suficiente?
+✓ Teste unitário: debitar com saldo insuficiente (deve lançar exceção)?
+✓ Teste unitário: idempotência (chamar debitar 2x retorna mesma transação)?
+✓ Teste integração: race condition (2 threads debitando simultaneamente)?
+✓ Teste E2E: criar fundo → fazer pedido → verificar débito automático?
+
+
+6. EXCEPTIONS
+-------------
+✓ SaldoInsuficienteException com mensagem clara?
+✓ BusinessException para regras de negócio?
+✓ ResourceNotFoundException para entidades não encontradas?
+
+EXEMPLO:
+if (!fundo.temSaldoSuficiente(valor)) {
+    throw new SaldoInsuficienteException(
+        fundo.getSaldoAtual(), 
+        valor
+    );
+}
+
+
+7. LOGS
+-------
+✓ Log de entrada em operações críticas?
+✓ Log de valores antes/depois?
+✓ Log de exceções capturadas?
+
+EXEMPLO:
+log.info("Debitando {} AOA do fundo do cliente {} para pedido {}", 
+    valor, clienteId, pedidoId);
+log.info("Débito concluído. Saldo anterior: {} AOA, Saldo novo: {} AOA", 
+    saldoAnterior, saldoNovo);
+
+
+8. CONFIGURAÇÕES
+----------------
+✓ valorMinimo configurável via application.properties?
+✓ Valor padrão sensato (5000 AOA)?
+
+EXEMPLO:
+@ConfigurationProperties(prefix = "restaurante.fundo-consumo")
+public class FundoConsumoProperties {
+    private BigDecimal valorMinimoInicial = new BigDecimal("5000.00");
+}
+
+
+9. ENDPOINTS REST
+-----------------
+✓ Validações com @Valid e @NotNull?
+✓ Resposta padronizada (ApiResponse<T>)?
+✓ HTTP status corretos (201 para criação, 200 para consulta)?
+✓ Endpoint /config/valor-minimo é público (permitAll)?
+
+EXEMPLO:
+@PostMapping
+public ResponseEntity<ApiResponse<FundoConsumo>> criarFundo(
+    @Valid @RequestBody CriarFundoRequest request
+) {
+    FundoConsumo fundo = fundoConsumoService.criarFundo(
+        request.getClienteId(), 
+        request.getSaldoInicial(),
+        request.getObservacoes()
+    );
+    return ResponseEntity
+        .status(HttpStatus.CREATED)
+        .body(ApiResponse.success("Fundo criado com sucesso", fundo));
+}
+
+
+10. SEGURANÇA
+-------------
+✓ Endpoints protegidos com @PreAuthorize?
+✓ Cliente só acessa próprio fundo?
+✓ ADMIN/GERENTE podem acessar qualquer fundo?
+
+EXEMPLO:
+@GetMapping("/cliente/{clienteId}")
+@PreAuthorize("hasRole('ADMIN') or @securityService.isOwner(#clienteId)")
+public ResponseEntity<ApiResponse<FundoConsumo>> buscarPorCliente(
+    @PathVariable Long clienteId
+) { ... }
+
+
+PERGUNTAS ESPECÍFICAS PARA REVISÃO
+====================================
+
+1. FundoConsumo.java
+--------------------
+- Campo saldoAtual tem @Column(precision=10, scale=2)?
+- Campo ativo tem @Column(nullable=false)?
+- Método temSaldoSuficiente(valor) está correto?
+- Método debitar(valor) valida valor > 0?
+- Método creditar(valor) valida valor > 0?
+- @Version está presente para controle de concorrência?
+
+
+2. FundoConsumoService.java
+----------------------------
+- criarFundo() valida saldoInicial >= valorMinimo?
+- criarFundo() verifica cliente não tem fundo ativo?
+- criarFundo() é @Transactional(isolation = SERIALIZABLE)?
+- recarregar() valida fundo.ativo == true?
+- recarregar() cria TransacaoFundo tipo=CREDITO?
+- debitar() implementa idempotência (verifica transação existente)?
+- debitar() valida saldo suficiente ANTES de debitar?
+- debitar() é @Transactional(isolation = SERIALIZABLE)?
+- estornar() valida pedido foi cancelado?
+- Todos os métodos têm logs adequados?
+
+
+3. FundoConsumoRepository.java
+-------------------------------
+- findByClienteIdAndAtivoTrue() com índice no banco?
+- existsByClienteIdAndAtivoTrue() para validação rápida?
+- Método com @Lock(PESSIMISTIC_WRITE) para operações concorrentes?
+
+
+4. TransacaoFundoRepository.java
+---------------------------------
+- findByPedidoIdAndTipo() para idempotência?
+- Índices em fundoConsumo_id, pedido_id, tipo?
+
+
+5. FundoConsumoController.java
+-------------------------------
+- /config/valor-minimo retorna ValorMinimoResponse (não BigDecimal direto)?
+- Validações com @Valid em requests?
+- HTTP status corretos (201 para POST, 200 para GET)?
+- Respostas padronizadas com ApiResponse<T>?
+
+
+6. SecurityConfig.java
+----------------------
+- /api/fundos/config/valor-minimo está em permitAll()?
+- Outros endpoints /api/fundos/** requerem autenticação?
+
+
+7. Migrations
+-------------
+- Coluna saldo_atual com DEFAULT 0.00?
+- Coluna ativo com DEFAULT true?
+- Foreign key de cliente_id com UNIQUE (ONE-TO-ONE)?
+- Índices criados em cliente_id, ativo?
+
+
+8. Testes
+---------
+- FundoConsumoServiceTest.java existe?
+- Testa debitar com saldo suficiente?
+- Testa debitar com saldo insuficiente (exceção)?
+- Testa idempotência (chamar debitar 2x)?
+- Testa criar fundo com saldo < valorMinimo (exceção)?
+- Testa criar fundo quando já existe ativo (exceção)?
+
+
+CHECKLIST DE VERIFICAÇÃO
+=========================
+
+ARQUITETURA E DDD:
+[ ] Entidades seguem princípios DDD?
+[ ] Invariantes protegidos (saldoAtual >= 0)?
+[ ] Métodos de domínio (temSaldoSuficiente, debitar, creditar)?
+[ ] Agregados bem definidos (FundoConsumo é raiz)?
+
+CONCORRÊNCIA:
+[ ] @Version presente em FundoConsumo?
+[ ] @Transactional(isolation = SERIALIZABLE) em operações financeiras?
+[ ] Race conditions de saldo tratadas?
+[ ] Lock otimista funciona (teste com 2 threads)?
+
+IDEMPOTÊNCIA:
+[ ] debitar(pedidoId) não executa 2x?
+[ ] Verifica transação existente antes de criar nova?
+[ ] Retorna transação existente se já processada?
+
+VALIDAÇÕES:
+[ ] saldoInicial >= valorMinimo?
+[ ] valor > 0 em todas operações?
+[ ] saldoAtual >= valor antes de debitar?
+[ ] fundo.ativo == true antes de movimentar?
+
+AUDITORIA:
+[ ] TransacaoFundo criada para TODA movimentação?
+[ ] saldoAnterior e saldoNovo preenchidos?
+[ ] TransacaoFundo é imutável?
+[ ] Relacionamento com Pedido em DEBITO/ESTORNO?
+
+SEGURANÇA:
+[ ] Endpoints protegidos com autenticação?
+[ ] Cliente só acessa próprio fundo?
+[ ] /config/valor-minimo é público?
+
+TESTES:
+[ ] Testes unitários cobrindo cenários críticos?
+[ ] Testes de concorrência (race conditions)?
+[ ] Testes E2E (criar fundo → fazer pedido)?
+
+LOGS:
+[ ] Log de entrada em operações críticas?
+[ ] Log de valores antes/depois?
+[ ] Log de exceções?
+
+PERFORMANCE:
+[ ] Índices criados em colunas de busca?
+[ ] Queries otimizadas (sem N+1)?
+[ ] @Transactional(readOnly=true) em consultas?
+
+DOCUMENTAÇÃO:
+[ ] Swagger anotado com @Operation?
+[ ] README com exemplos de uso?
+[ ] Comentários em código complexo?
+
+
+EXEMPLOS DE CÓDIGO CORRETO
+============================
+
+1. CONTROLE DE CONCORRÊNCIA
+----------------------------
+
+// FundoConsumo.java
+@Entity
+@Data
+public class FundoConsumo extends BaseEntity {
+    @Version  // ✓ Lock otimista
+    private Long version;
+    
+    @Column(nullable = false, precision = 10, scale = 2)
+    private BigDecimal saldoAtual;
+}
+
+// FundoConsumoService.java
+@Transactional(isolation = Isolation.SERIALIZABLE)  // ✓ Isolamento máximo
+public TransacaoFundo debitar(Long clienteId, Long pedidoId, BigDecimal valor) {
+    // Operação financeira protegida
+}
+
+
+2. IDEMPOTÊNCIA
+---------------
+
+@Transactional(isolation = Isolation.SERIALIZABLE)
+public TransacaoFundo debitar(Long clienteId, Long pedidoId, BigDecimal valor) {
+    // ✓ Verifica se já foi debitado
+    var transacaoExistente = transacaoFundoRepository
+        .findByPedidoIdAndTipo(pedidoId, TipoTransacaoFundo.DEBITO);
+    
+    if (transacaoExistente.isPresent()) {
+        log.info("Pedido {} já foi debitado anteriormente", pedidoId);
+        return transacaoExistente.get();  // ✓ Retorna existente
+    }
+    
+    // Processa débito...
+}
+
+
+3. VALIDAÇÕES COMPLETAS
+------------------------
+
+@Transactional(isolation = Isolation.SERIALIZABLE)
+public FundoConsumo criarFundo(Long clienteId, BigDecimal saldoInicial, String obs) {
+    // ✓ Valida valor mínimo
+    if (saldoInicial.compareTo(valorMinimo) < 0) {
+        throw new BusinessException(String.format(
+            "Saldo inicial deve ser no mínimo %.2f AOA. Valor informado: %.2f AOA",
+            valorMinimo, saldoInicial
+        ));
+    }
+    
+    // ✓ Valida cliente existe
+    Cliente cliente = clienteRepository.findById(clienteId)
+        .orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado"));
+    
+    // ✓ Valida não existe fundo ativo
+    if (fundoConsumoRepository.existsByClienteIdAndAtivoTrue(clienteId)) {
+        throw new BusinessException("Cliente já possui fundo de consumo ativo");
+    }
+    
+    // Cria fundo...
+}
+
+
+4. AUDITORIA COMPLETA
+----------------------
+
+BigDecimal saldoAnterior = fundo.getSaldoAtual();
+fundo.debitar(valor);
+BigDecimal saldoNovo = fundo.getSaldoAtual();
+
+// ✓ Registra transação com todos os campos
+TransacaoFundo transacao = TransacaoFundo.builder()
+    .fundoConsumo(fundo)
+    .valor(valor)
+    .tipo(TipoTransacaoFundo.DEBITO)
+    .pedido(pedido)
+    .saldoAnterior(saldoAnterior)  // ✓
+    .saldoNovo(saldoNovo)          // ✓
+    .observacoes("Débito automático - Pedido #" + pedidoId)  // ✓
+    .build();
+
+transacaoFundoRepository.save(transacao);
+
+
+5. LOGS ADEQUADOS
+-----------------
+
+log.info("Debitando {} AOA do fundo do cliente {} para pedido {}", 
+    valor, clienteId, pedidoId);
+
+// Operação...
+
+log.info("Débito concluído. Saldo anterior: {} AOA, Saldo novo: {} AOA", 
+    saldoAnterior, saldoNovo);
+
+
+ARQUIVOS A REVISAR
+==================
+
+1. src/main/java/com/restaurante/model/entity/FundoConsumo.java
+2. src/main/java/com/restaurante/model/entity/TransacaoFundo.java
+3. src/main/java/com/restaurante/service/FundoConsumoService.java
+4. src/main/java/com/restaurante/repository/FundoConsumoRepository.java
+5. src/main/java/com/restaurante/repository/TransacaoFundoRepository.java
+6. src/main/java/com/restaurante/controller/FundoConsumoController.java
+7. src/main/java/com/restaurante/config/SecurityConfig.java
+8. src/main/java/com/restaurante/config/FundoConsumoProperties.java
+9. src/test/java/com/restaurante/service/FundoConsumoServiceTest.java
+10. src/main/resources/db/migration/V00X__criar_tabela_fundos_consumo.sql
+
+
+FORMATO DE SAÍDA DA REVISÃO
+============================
+
+Para cada arquivo revisado, forneça:
+
+1. APROVADO / APROVADO COM RESSALVAS / REPROVADO
+2. Pontos fortes identificados
+3. Problemas críticos encontrados (se houver)
+4. Sugestões de melhoria
+5. Código corrigido (se houver problemas)
+
+
+CRITÉRIOS DE APROVAÇÃO
+========================
+
+APROVADO:
+- Todas as validações implementadas
+- Concorrência protegida (@Version + SERIALIZABLE)
+- Idempotência garantida
+- Auditoria completa
+- Testes cobrindo cenários críticos
+
+APROVADO COM RESSALVAS:
+- Implementação funcional mas com melhorias possíveis
+- Logs insuficientes
+- Testes incompletos
+- Performance não otimizada
+
+REPROVADO:
+- Validações faltando (saldo negativo possível)
+- Race conditions não tratadas
+- Idempotência ausente
+- Auditoria incompleta
+- Segurança comprometida
+
+
+INÍCIO DA REVISÃO
+==================
+
+Por favor, revise TODOS os arquivos listados acima seguindo este prompt.
+Para cada arquivo, forneça análise detalhada com pontos fortes, problemas e correções.
+
+Foque especialmente em:
+1. Concorrência (race conditions)
+2. Idempotência (mesma operação não executa 2x)
+3. Validações (saldo nunca negativo)
+4. Auditoria (rastreabilidade completa)
+5. Segurança (endpoints protegidos)
+
+Use os exemplos de código correto fornecidos como referência.
+
+Boa revisão!

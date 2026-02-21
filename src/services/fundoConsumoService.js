@@ -20,7 +20,7 @@ import api from './api'
 export const consultarValorMinimo = async () => {
   try {
     const response = await api.get('/fundos/config/valor-minimo')
-    return response.data.data // Retorna BigDecimal
+    return response.data // Retorna o objeto completo com data
   } catch (error) {
     throw new Error(
       error.response?.data?.message || 'Erro ao consultar valor mínimo'

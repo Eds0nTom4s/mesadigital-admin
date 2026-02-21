@@ -61,11 +61,14 @@ export const produtosService = {
   },
 
   /**
-   * Atualizar disponibilidade
+   * Atualizar status ativo/inativo
    * PATCH /api/produtos/{id}/disponibilidade
+   * 
+   * NOTA: Endpoint mantém nome "disponibilidade" mas agora altera campo "ativo"
+   * conforme RELATORIO_MUDANCAS_API_PRODUTOS.md
    */
-  async atualizarDisponibilidade(id, disponivel) {
-    const response = await api.patch(`/produtos/${id}/disponibilidade`, { disponivel })
+  async atualizarStatus(id, ativo) {
+    const response = await api.patch(`/produtos/${id}/disponibilidade`, { ativo })
     return response.data
   }
 }

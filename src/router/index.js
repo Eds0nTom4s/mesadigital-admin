@@ -56,11 +56,11 @@ const routes = [
         }
       },
       {
-        path: 'unidades-consumo',
-        name: 'UnidadesConsumo',
-        component: () => import('@/modules/unidades-consumo/UnidadesConsumoView.vue'),
+        path: 'mesas',
+        name: 'Mesas',
+        component: () => import('@/modules/mesas/GestaoMesasView.vue'),
         meta: {
-          title: 'Gestão de Unidades de Consumo',
+          title: 'Gestão de Mesas',
           requiresAuth: true
         }
       },
@@ -106,6 +106,15 @@ const routes = [
         component: () => import('@/modules/usuarios/UsuariosView.vue'),
         meta: {
           title: 'Gestão de Usuários',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'configuracoes',
+        name: 'Configuracoes',
+        component: () => import('@/modules/configuracoes/ConfiguracoesView.vue'),
+        meta: {
+          title: 'Configurações do Sistema',
           requiresAuth: true
         }
       },

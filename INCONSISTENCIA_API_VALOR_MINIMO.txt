@@ -1,0 +1,96 @@
+INCONSISTÊNCIA DETECTADA NA API - VALOR MÍNIMO DE FUNDO
+===========================================================
+
+Data: 21 de fevereiro de 2026
+Endpoint: GET /api/fundos/config/valor-minimo
+Status: ✅ CORRIGIDO NO FRONTEND
+
+PROBLEMA IDENTIFICADO:
+----------------------
+
+A resposta da API estava retornando uma estrutura aninhada inesperada:
+
+RESPOSTA ATUAL (ANORMAL):
+{
+  "data": {
+    "data": <valor>
+  }
+}
+
+RESPOSTA ESPERADA (PADRÃO):
+{
+  "data": {
+    "valorMinimo": <valor>
+  }
+}
+
+OU:
+
+{
+  "valorMinimo": <valor>
+}
+
+
+IMPACTO:
+--------
+
+Este comportamento anormal causou erro no frontend ao tentar acessar:
+- resp.data.valorMinimo (undefined)
+
+Erro gerado: "Cannot read properties of undefined (reading 'valorMinimo')"
+
+
+AÇÃO CORRETIVA APLICADA NO FRONTEND:
+-------------------------------------
+
+✅ CORRIGIDO em: src/services/fundoConsumoService.js
+- Alterado de: return response.data.data
+- Para: return response.data
+
+✅ CORRIGIDO em: src/modules/fundos/FundosView.vue
+- Acesso correto: resp.valorMinimo
+
+✅ CORRIGIDO em: src/views/FundoDetalheView.vue
+- Acesso correto: configResp.valorMinimo
+
+✅ CORRIGIDO em: src/components/fundos/ModalCriarFundo.vue
+- Acesso correto: config.valorMinimo
+
+✅ CORRIGIDO em: src/components/fundos/ModalRecarregarFundo.vue
+- Acesso correto: config.valorMinimo
+
+
+FUNCIONALIDADES IMPLEMENTADAS:
+-------------------------------
+
+✅ Módulo de Fundos de Consumo completo
+✅ Modal de criação de fundo (ModalCriarFundo.vue)
+✅ Modal de recarga de fundo (ModalRecarregarFundo.vue)
+✅ Integração com modal de novo pedido
+✅ Validação de saldo antes de criar pedido
+✅ Suporte para pagamento GPO (AppyPay instantâneo)
+✅ Suporte para pagamento REF (Referência bancária)
+
+
+AÇÃO NECESSÁRIA NO BACKEND:
+----------------------------
+
+1. Padronizar a resposta do endpoint GET /api/fundos/config/valor-minimo
+2. A resposta deve seguir o padrão da API:
+   {
+     "data": {
+       "valorMinimo": <BigDecimal>
+     }
+   }
+
+3. Evitar dupla aninhamento (data.data)
+4. Garantir que o objeto retornado contenha a propriedade "valorMinimo"
+
+
+OBSERVAÇÃO:
+-----------
+
+A correção temporária no frontend está funcionando, mas recomenda-se
+fortemente a padronização no backend para evitar inconsistências futuras.
+Este tipo de inconsistência pode causar erros em cascata em outros módulos.
+
