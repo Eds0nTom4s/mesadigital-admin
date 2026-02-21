@@ -1,7 +1,0 @@
-{
-  "fundoMinimo": 5000,
-  "permitirSaldoNegativo": false,
-  "diasExpiracaoFundo": 7,
-  "avisoExpiracaoRecibo": true,
-  "permitirEstorno": true
-}

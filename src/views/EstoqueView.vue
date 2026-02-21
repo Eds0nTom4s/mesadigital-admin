@@ -5,33 +5,27 @@ import ProdutoCard from '@/components/shared/ProdutoCard.vue'
 /**
  * EstoqueView - Visualização de estoque de produtos
  * 
- * Exibe todos os produtos com informações de estoque
- * Permite filtrar por categoria e status
- * Somente leitura - gestão será implementada futuramente
+ * AGUARDANDO IMPLEMENTAÇÃO NO BACKEND
+ * Backend não possui endpoints de produtos/estoque ainda
+ * Esta view será implementada quando o backend disponibilizar:
+ * - GET /api/produtos
+ * - GET /api/estoque
  */
 
 const produtos = ref([])
 const estoque = ref([])
-const loading = ref(true)
+const loading = ref(false)
+const error = ref('Funcionalidade de estoque ainda não disponível no backend')
 
 // Filtros
 const categoriaFiltro = ref('TODAS')
 const statusFiltro = ref('TODOS')
 const busca = ref('')
 
-// Carrega dados mockados
+// Carrega dados via API (quando backend disponibilizar)
 onMounted(async () => {
-  try {
-    const produtosResponse = await fetch('/src/mock/produtos.json')
-    produtos.value = await produtosResponse.json()
-    
-    const estoqueResponse = await fetch('/src/mock/estoque.json')
-    estoque.value = await estoqueResponse.json()
-  } catch (error) {
-    console.error('Erro ao carregar dados:', error)
-  } finally {
-    loading.value = false
-  }
+  // TODO: Implementar quando backend tiver endpoints de produtos
+  console.warn('Backend precisa implementar GET /api/produtos e GET /api/estoque')
 })
 
 // Combina produtos com estoque

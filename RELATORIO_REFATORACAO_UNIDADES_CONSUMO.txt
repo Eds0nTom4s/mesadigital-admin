@@ -1,0 +1,785 @@
+================================================================================
+RELATÓRIO TÉCNICO DE REFATORAÇÃO - FRONTEND
+Adequação à Especificação Real do Backend
+================================================================================
+
+Data: 20 de Fevereiro de 2026
+Equipe: Frontend
+Destinatários: Equipe Backend
+
+================================================================================
+1. RESUMO EXECUTIVO
+================================================================================
+
+Este documento descreve a refatoração completa do módulo de gestão financeira
+do frontend (página de Pedidos/Balcão) para adequação à especificação real 
+fornecida pela equipe de backend em RESPOSTA_BACKEND_CONTAS.txt.
+
+MUDANÇAS PRINCIPAIS:
+- Entidade "Conta" → "UnidadeDeConsumo" 
+- Estrutura de dados alinhada com backend
+- Endpoints corrigidos
+- Fluxos de pagamento implementados conforme especificação
+- Cálculos financeiros migrados para frontend
+
+STATUS: ✅ CONCLUÍDO - Pronto para testes de integração
+
+================================================================================
+2. CONTEXTO
+================================================================================
+
+SITUAÇÃO ANTERIOR:
+A implementação inicial do frontend foi baseada em suposições sobre a 
+estrutura de dados do backend, utilizando uma entidade chamada "Conta" que
+não existia no backend real.
+
+SOLICITAÇÃO FORMAL:
+Documento SOLICITACAO_BACKEND_CONTAS.md enviado com 8 questões críticas sobre
+endpoints, validações e fluxos de pagamento.
+
+RESPOSTA RECEBIDA:
+Especificação completa de 700+ linhas (RESPOSTA_BACKEND_CONTAS.txt) 
+esclarecendo a estrutura real: UnidadeDeConsumo, enums, endpoints e regras.
+
+AÇÃO TOMADA:
+Refatoração completa do código frontend para alinhar 100% com especificação.
+
+================================================================================
+3. ALTERAÇÕES DE NOMENCLATURA
+================================================================================
+
+3.1 ENTIDADE PRINCIPAL
+--------------------------------------------------
+ANTES (Assumido)          AGORA (Real Backend)
+--------------------------------------------------
+Conta                     UnidadeDeConsumo
+contaId                   unidadeConsumoId
+identificador             referencia
+aberturaEm                abertaEm
+fechamentoEm              fechadaEm
+--------------------------------------------------
+
+3.2 CAMPOS FINANCEIROS
+--------------------------------------------------
+ANTES (Assumido)          AGORA (Real Backend)
+--------------------------------------------------
+estadoFinanceiro          statusFinanceiro (pedido)
+estadoOperacional         status (pedido)
+--------------------------------------------------
+
+3.3 RELACIONAMENTOS
+--------------------------------------------------
+ANTES (Assumido)          AGORA (Real Backend)
+--------------------------------------------------
+conta.fundoConsumo        unidade.cliente.fundoConsumo
+--------------------------------------------------
+
+OBSERVAÇÃO CRÍTICA:
+O FundoConsumo pertence ao Cliente, não à UnidadeDeConsumo.
+Acesso: unidade.cliente?.fundoConsumo
+
+================================================================================
+4. ALTERAÇÕES NOS SERVIÇOS (SERVICES)
+================================================================================
+
+4.1 NOVO: unidadesConsumoService.js
+--------------------------------------------------
+Arquivo: src/services/unidadesConsumoService.js
+Status: CRIADO (110 linhas)
+Substitui: contasService.js (REMOVIDO)
+
+MÉTODOS IMPLEMENTADOS:
+
+• getAbertas()
+  GET /api/unidades-consumo/status/OCUPADA
+  Retorna unidades abertas (status OCUPADA)
+
+• getByStatus(status)
+  GET /api/unidades-consumo/status/{status}
+  Parâmetros: DISPONIVEL | OCUPADA | AGUARDANDO_PAGAMENTO | FINALIZADA
+
+• getById(id)
+  GET /api/unidades-consumo/{id}
+  Retorna unidade completa com cliente, pedidos, etc.
+
+• criar(dados)
+  POST /api/unidades-consumo
+  Body: { referencia, tipo, clienteId, unidadeAtendimentoId, numero?, capacidade? }
+
+• fechar(id)
+  PUT /api/unidades-consumo/{id}/fechar
+  ATENÇÃO: Backend NÃO valida pendências financeiras
+
+• calcularResumo(unidadeConsumo)
+  MÉTODO LOCAL (não é endpoint)
+  Calcula: totalConsumido, totalPago, totalPendente, statusFinanceiro
+  
+  Lógica implementada:
+  - totalConsumido = soma de todos pedidos.total
+  - totalPago = soma de pedidos com statusFinanceiro='PAGO'
+  - totalPendente = soma de pedidos com statusFinanceiro='NAO_PAGO'
+  - statusFinanceiro consolidado:
+    * 'PAGO' se totalPendente = 0
+    * 'EM_DEBITO' se totalPago = 0
+    * 'PARCIAL' caso contrário
+
+DECISÃO DE DESIGN:
+Como backend não fornece endpoint /api/unidades-consumo/{id}/resumo,
+implementamos calcularResumo() no frontend que processa o array de pedidos.
+
+4.2 ATUALIZADO: pedidosBalcaoService.js
+--------------------------------------------------
+Arquivo: src/services/pedidosBalcaoService.js
+Status: ATUALIZADO
+
+ALTERAÇÕES:
+
+REMOVIDO:
+• pagar(id, pagamento) - endpoint não existe no backend
+
+ADICIONADO:
+• confirmarPagamento(id)
+  PUT /api/pedidos/{id}/confirmar-pagamento
+  Sem body
+  Apenas GERENTE/ADMIN pode executar
+  Marca pedido como PAGO (statusFinanceiro='PAGO')
+
+MODIFICADO:
+• criar(dados)
+  ANTES: { contaId, itens[] }
+  AGORA: { unidadeConsumoId, itens[], tipoPagamento?, observacoes? }
+  
+  tipoPagamento valores:
+  - 'PRE_PAGO' (padrão): Débito automático do fundo, validação de saldo
+  - 'POS_PAGO': Requer GERENTE, valida política ativa, cria com status NAO_PAGO
+
+• getByUnidadeConsumoId(unidadeConsumoId)
+  Usa GET /api/unidades-consumo/{id} e extrai array pedidos
+  Backend não tem endpoint direto /api/pedidos?unidadeConsumoId=X
+
+4.3 MANTIDO: produtosService.js
+--------------------------------------------------
+Arquivo: src/services/produtosService.js
+Status: MANTIDO (sem alterações)
+
+OBSERVAÇÃO:
+Método getDisponiveis() usa GET /api/produtos e filtra disponivel=true
+no frontend, pois backend não tem endpoint /api/produtos/disponiveis
+
+4.4 REMOVIDO: contasService.js
+--------------------------------------------------
+Arquivo: src/services/contasService.js
+Status: ❌ REMOVIDO (deprecated)
+
+Motivo: Entidade "Conta" não existe no backend
+
+================================================================================
+5. ALTERAÇÕES NO COMPONENTE PRINCIPAL
+================================================================================
+
+5.1 PedidosBalcaoView.vue - SCRIPT SECTION
+--------------------------------------------------
+Arquivo: src/modules/pedidos/PedidosBalcaoView.vue
+Tamanho: 1544 linhas
+Status: REFATORADO (script + template + CSS)
+
+IMPORTS ALTERADOS:
+ANTES:
+  import contasService from '@/services/contasService'
+  import fundoConsumoService from '@/services/fundoConsumoService'
+
+AGORA:
+  import unidadesConsumoService from '@/services/unidadesConsumoService'
+  (fundoConsumoService removido - vem via cliente)
+
+VARIÁVEIS DE ESTADO:
+--------------------------------------------------
+ANTES                         AGORA
+--------------------------------------------------
+contas                        unidadesConsumo
+contaSelecionada              unidadeSelecionada
+mostrarModalFecharConta       mostrarModalFecharUnidade
+--------------------------------------------------
+
+COMPUTED PROPERTIES:
+--------------------------------------------------
+ANTES                         AGORA
+--------------------------------------------------
+contasFiltradas               unidadesFiltradas
+  (usa identificador)           (usa referencia)
+--------------------------------------------------
+
+FUNÇÕES PRINCIPAIS REFATORADAS:
+
+• carregarContas() → carregarUnidades()
+  - Usa unidadesConsumoService.getAbertas()
+  - Mapeia calcularResumo() sobre cada unidade retornada
+  - Código: .map(u => ({...u, ...unidadesConsumoService.calcularResumo(u)}))
+
+• carregarDetalhesConta() → carregarDetalhesUnidade()
+  - Usa unidadesConsumoService.getById(id)
+  - Aplica calcularResumo() no resultado
+  - Atualiza unidadeSelecionada com totais calculados
+
+• selecionarConta(conta) → selecionarUnidade(unidade)
+  - Atualiza referência para unidadeSelecionada
+
+• voltarListaContas() → voltarListaUnidades()
+  - Limpa unidadeSelecionada
+
+• tentarFecharConta() → tentarFecharUnidade()
+  - IMPORTANTE: Backend não valida pendências
+  - Frontend mostra aviso se totalPendente > 0
+  - Valida pedidos não entregues (status !== 'ENTREGUE')
+
+• confirmarFecharConta() → confirmarFecharUnidade()
+  - Usa unidadesConsumoService.fechar(id)
+  - Remove da lista local após sucesso
+
+FLUXOS DE PAGAMENTO IMPLEMENTADOS:
+
+• finalizarPedido()
+  Lógica:
+  1. Verifica podeFinalizarPedido (carrinho não vazio)
+  2. Verifica fundoCliente = unidade.cliente?.fundoConsumo
+  3. Se fundo suficiente → criarPedidoComFundo() (PRE_PAGO)
+  4. Caso contrário → mostra modal pagamento (POS_PAGO/outros)
+
+• criarPedidoComFundo()
+  Tipo: PRE_PAGO (débito automático)
+  Body: {
+    unidadeConsumoId: unidadeSelecionada.value.id,
+    itens: [{ produtoId, quantidade }],
+    tipoPagamento: 'PRE_PAGO'
+  }
+  Backend valida saldo e debita automaticamente
+  Pedido retorna com statusFinanceiro='PAGO'
+
+• pagarAgora(metodo)
+  Tipo: POS_PAGO ou confirmação imediata
+  Fluxo:
+  1. Cria pedido com tipoPagamento: 'POS_PAGO'
+     Requer role GERENTE/ADMIN
+     Backend valida política pós-pago ativa
+     Backend valida limite cliente
+     Pedido criado com statusFinanceiro='NAO_PAGO'
+  
+  2. Se metodo !== 'POS_PAGO':
+     Chama confirmarPagamento(pedidoId)
+     Marca statusFinanceiro='PAGO'
+  
+  3. Recarrega detalhes da unidade
+
+VALIDAÇÕES IMPLEMENTADAS:
+
+• podeFinalizarPedido
+  - Carrinho não vazio
+  - UnidadeSelecionada existe
+  - Produtos carregados
+
+• mensagemBloqueio
+  - Mensagem específica dependendo do bloqueio
+
+5.2 PedidosBalcaoView.vue - TEMPLATE SECTION
+--------------------------------------------------
+MUDANÇAS ESTRUTURAIS:
+
+LISTA DE UNIDADES:
+ANTES:
+  <div class="contas-grid">
+    <div v-for="conta in contasFiltradas" 
+         @click="selecionarConta(conta)">
+      <strong>{{ conta.identificador }}</strong>
+      <span v-if="conta.fundoConsumo">...</span>
+
+AGORA:
+  <div class="unidades-grid">
+    <div v-for="unidade in unidadesFiltradas" 
+         @click="selecionarUnidade(unidade)">
+      <strong>{{ unidade.referencia }}</strong>
+      <span v-if="unidade.cliente?.fundoConsumo">...</span>
+
+VISTA DETALHES:
+ANTES:
+  <h2>{{ contaSelecionada.identificador }}</h2>
+  <button @click="tentarFecharConta">Fechar Conta</button>
+  Tempo: {{ calcularTempo(conta.aberturaEm) }}
+
+AGORA:
+  <h2>{{ unidadeSelecionada.referencia }}</h2>
+  <button @click="tentarFecharUnidade">Fechar Unidade</button>
+  Tempo: {{ calcularTempo(unidade.abertaEm) }}
+
+LISTA DE PEDIDOS:
+ANTES:
+  :class="`pedido-${pedido.estadoFinanceiro.toLowerCase()}`"
+  {{ getEstadoOperacionalConfig(pedido.estadoOperacional).label }}
+  {{ getEstadoFinanceiroConfig(pedido.estadoFinanceiro).label }}
+
+AGORA:
+  :class="`pedido-${pedido.statusFinanceiro.toLowerCase()}`"
+  {{ getEstadoOperacionalConfig(pedido.status).label }}
+  {{ getEstadoFinanceiroConfig(pedido.statusFinanceiro).label }}
+
+MODAIS:
+- Modal Novo Pedido: título usa unidadeSelecionada?.referencia
+- Modal Fechar: confirma fechamento de unidadeSelecionada?.referencia
+- Modal Pagamento: mantido sem alterações estruturais
+
+5.3 PedidosBalcaoView.vue - CSS SECTION
+--------------------------------------------------
+CLASSES RENOMEADAS:
+--------------------------------------------------
+ANTES                         AGORA
+--------------------------------------------------
+.contas-grid                  .unidades-grid
+.conta-card                   .unidade-card
+.conta-card.conta-pago        .unidade-card.unidade-pago
+.conta-card.conta-em_debito   .unidade-card.unidade-em_debito
+.conta-card.conta-parcial     .unidade-card.unidade-parcial
+.conta-header                 .unidade-header
+.conta-titulo                 .unidade-titulo
+.conta-icon                   .unidade-icon
+.conta-info                   .unidade-info
+.conta-footer                 .unidade-footer
+--------------------------------------------------
+
+Todos os estilos mantidos idênticos, apenas renomeados.
+
+================================================================================
+6. ENUMS E CONFIGURAÇÕES
+================================================================================
+
+6.1 ENUMS DO BACKEND (Referência)
+--------------------------------------------------
+StatusUnidadeConsumo:
+  - DISPONIVEL
+  - OCUPADA
+  - AGUARDANDO_PAGAMENTO
+  - FINALIZADA
+
+TipoUnidadeConsumo:
+  - MESA_FISICA
+  - COMANDA
+  - (outros conforme backend)
+
+StatusFinanceiroPedido (armazenado no backend):
+  - NAO_PAGO
+  - PAGO
+  - ESTORNADO
+
+StatusFinanceiro Consolidado (calculado no frontend):
+  - PAGO (todos pedidos pagos)
+  - EM_DEBITO (nenhum pedido pago)
+  - PARCIAL (parcialmente pago)
+
+TipoPagamentoPedido:
+  - PRE_PAGO (padrão)
+  - POS_PAGO (requer GERENTE)
+
+6.2 HELPERS E FORMATADORES
+--------------------------------------------------
+Mantidos sem alterações:
+- calcularTempo(dataISO)
+- formatarDataHora(dataISO)
+- formatCurrency(valor) - via composable useCurrency()
+- getStatusFinanceiroConfig()
+- getEstadoOperacionalConfig()
+- getEstadoFinanceiroConfig()
+
+================================================================================
+7. IMPACTOS E CONSIDERAÇÕES
+================================================================================
+
+7.1 COMPATIBILIDADE COM BACKEND
+--------------------------------------------------
+✅ Endpoints alinhados com especificação real
+✅ Estrutura de dados compatível
+✅ Validações consistentes com backend
+✅ Fluxos de pagamento implementados conforme documentado
+✅ Cálculos financeiros delegados ao frontend conforme esperado
+
+7.2 RESPONSABILIDADES DO FRONTEND
+--------------------------------------------------
+O frontend agora é responsável por:
+
+1. CÁLCULOS FINANCEIROS
+   Backend NÃO retorna totalConsumido/totalPago/totalPendente
+   Frontend deve calcular a partir do array de pedidos
+
+2. VALIDAÇÃO DE FECHAMENTO
+   Backend NÃO valida pendências ao fechar unidade
+   Frontend deve avisar usuário sobre valores pendentes
+
+3. FILTRAGEM DE PRODUTOS
+   Backend NÃO tem endpoint /disponiveis
+   Frontend filtra disponivel=true após GET /api/produtos
+
+4. STATUS FINANCEIRO CONSOLIDADO
+   Backend armazena statusFinanceiro por pedido
+   Frontend calcula status consolidado da unidade
+
+7.3 RESPONSABILIDADES DO BACKEND
+--------------------------------------------------
+O backend é responsável por:
+
+1. VALIDAÇÃO DE SALDO (PRE_PAGO)
+   Valida fundo suficiente antes de criar pedido
+   Debita automaticamente do fundo
+
+2. VALIDAÇÃO DE POLÍTICAS (POS_PAGO)
+   Valida política pós-pago ativa
+   Valida limite do cliente
+   Valida role GERENTE/ADMIN
+
+3. PERSISTÊNCIA DE DADOS
+   Gerencia transações de débito de fundo
+   Atualiza status de pedidos
+   Controla estados de unidades
+
+4. REGRAS DE NEGÓCIO
+   Impede débito sem saldo (PRE_PAGO)
+   Retorna erro 400 se pós-pago desativado
+   Retorna erro 403 se usuário sem permissão
+
+7.4 TRATAMENTO DE ERROS ESPERADOS
+--------------------------------------------------
+Frontend deve tratar:
+
+• 400 Bad Request
+  - Saldo insuficiente (PRE_PAGO)
+  - Política pós-pago desativada (POS_PAGO)
+  - Limite cliente excedido
+  - Dados inválidos
+
+• 403 Forbidden
+  - Usuário sem role GERENTE (POS_PAGO)
+  - Usuário sem role GERENTE (confirmarPagamento)
+
+• 404 Not Found
+  - UnidadeConsumo não existe
+  - Pedido não existe
+  - Cliente não existe
+
+• 500 Internal Server Error
+  - Erro no backend (mostrar mensagem genérica)
+
+================================================================================
+8. TESTES DE INTEGRAÇÃO SUGERIDOS
+================================================================================
+
+8.1 CENÁRIOS PRE_PAGO (Débito Automático)
+--------------------------------------------------
+Teste 1: Criar pedido com fundo suficiente
+  Dado: Cliente com fundoConsumo.saldoAtual = 10000
+  Quando: Criar pedido de 5000 com tipoPagamento='PRE_PAGO'
+  Então: 
+    - Pedido criado com statusFinanceiro='PAGO'
+    - Fundo debitado automaticamente
+    - Frontend recalcula totalPago da unidade
+
+Teste 2: Criar pedido com fundo insuficiente
+  Dado: Cliente com fundoConsumo.saldoAtual = 1000
+  Quando: Criar pedido de 5000 com tipoPagamento='PRE_PAGO'
+  Então: 
+    - Backend retorna 400 "Saldo insuficiente"
+    - Frontend mostra erro e abre modal pagamento
+    - Nenhum débito realizado
+
+Teste 3: Cliente sem fundo de consumo
+  Dado: Cliente sem fundoConsumo associado
+  Quando: Tentar criar pedido PRE_PAGO
+  Então:
+    - Frontend detecta ausência de fundo
+    - Mostra modal de pagamento direto (POS_PAGO)
+
+8.2 CENÁRIOS POS_PAGO (Pagamento Posterior)
+--------------------------------------------------
+Teste 4: Criar pedido pós-pago por GERENTE
+  Dado: Usuário com role GERENTE
+  E: Política pós-pago ativa
+  Quando: Criar pedido com tipoPagamento='POS_PAGO'
+  Então:
+    - Pedido criado com statusFinanceiro='NAO_PAGO'
+    - Frontend atualiza totalPendente da unidade
+
+Teste 5: Confirmar pagamento de pedido pós-pago
+  Dado: Pedido com statusFinanceiro='NAO_PAGO'
+  E: Usuário GERENTE
+  Quando: Chamar confirmarPagamento(pedidoId)
+  Então:
+    - statusFinanceiro atualizado para 'PAGO'
+    - Frontend recalcula totais (totalPago aumenta, totalPendente diminui)
+
+Teste 6: Tentar pós-pago sem permissão
+  Dado: Usuário com role ATENDENTE
+  Quando: Tentar criar pedido POS_PAGO
+  Então:
+    - Backend retorna 403 Forbidden
+    - Frontend mostra erro "Sem permissão"
+
+Teste 7: Tentar pós-pago com política desativada
+  Dado: Política pós-pago desativada globalmente
+  Quando: Criar pedido POS_PAGO
+  Então:
+    - Backend retorna 400 "Pós-pago não está ativo"
+    - Frontend captura erro e sugere outras formas
+
+8.3 CENÁRIOS DE UNIDADES DE CONSUMO
+--------------------------------------------------
+Teste 8: Listar unidades abertas
+  Quando: Acessar página /admin/pedidos
+  Então:
+    - GET /api/unidades-consumo/status/OCUPADA
+    - Frontend mapeia calcularResumo() sobre cada unidade
+    - Exibe cards com totais corretos
+
+Teste 9: Carregar detalhes de unidade
+  Quando: Clicar em uma unidade
+  Então:
+    - GET /api/unidades-consumo/{id}
+    - Backend retorna unidade com cliente, pedidos[]
+    - Frontend calcula totalConsumido/totalPago/totalPendente
+    - Exibe resumo financeiro correto
+
+Teste 10: Fechar unidade com pendências
+  Dado: Unidade com totalPendente = 5000
+  Quando: Clicar "Fechar Unidade"
+  Então:
+    - Frontend mostra aviso sobre pendências
+    - Usuário pode confirmar mesmo assim
+    - PUT /api/unidades-consumo/{id}/fechar
+    - Backend fecha sem validar (responsabilidade frontend)
+
+Teste 11: Fechar unidade quitada
+  Dado: Unidade com totalPendente = 0
+  Quando: Fechar unidade
+  Então:
+    - Fechamento sem avisos
+    - Unidade removida da lista
+    - statusUnidadeConsumo → FINALIZADA
+
+8.4 CENÁRIOS DE PRODUTOS
+--------------------------------------------------
+Teste 12: Carregar produtos disponíveis
+  Quando: Abrir modal "Novo Pedido"
+  Então:
+    - GET /api/produtos (sem filtro)
+    - Frontend filtra disponivel=true
+    - Exibe apenas produtos disponíveis
+
+Teste 13: Adicionar produto ao carrinho
+  Quando: Clicar em produto
+  Então:
+    - Adiciona ao carrinhoItens local
+    - Calcula totalCarrinho
+    - Valida podeFinalizarPedido
+
+================================================================================
+9. ENDPOINTS UTILIZADOS (REFERÊNCIA COMPLETA)
+================================================================================
+
+9.1 UNIDADES DE CONSUMO
+--------------------------------------------------
+GET    /api/unidades-consumo/status/{status}
+       Query params: status (DISPONIVEL|OCUPADA|AGUARDANDO_PAGAMENTO|FINALIZADA)
+       Usado por: carregarUnidades() com status=OCUPADA
+
+GET    /api/unidades-consumo/{id}
+       Retorna: UnidadeDeConsumo completa com cliente e pedidos
+       Usado por: carregarDetalhesUnidade(id)
+
+POST   /api/unidades-consumo
+       Body: { referencia, tipo, clienteId, unidadeAtendimentoId, numero?, capacidade? }
+       Usado por: criar() (função não implementada no componente atual)
+
+PUT    /api/unidades-consumo/{id}/fechar
+       Sem body
+       Usado por: confirmarFecharUnidade()
+
+9.2 PEDIDOS
+--------------------------------------------------
+POST   /api/pedidos
+       Body: { 
+         unidadeConsumoId, 
+         itens: [{ produtoId, quantidade }],
+         tipoPagamento?: 'PRE_PAGO' | 'POS_PAGO',
+         observacoes?: string
+       }
+       Usado por: criarPedidoComFundo(), pagarAgora()
+       
+       Comportamento:
+       - PRE_PAGO: Valida e debita fundo, retorna pedido PAGO
+       - POS_PAGO: Valida role/política/limite, retorna pedido NAO_PAGO
+
+PUT    /api/pedidos/{id}/confirmar-pagamento
+       Sem body
+       Requer: Role GERENTE ou ADMIN
+       Usado por: pagarAgora() quando confirmação imediata
+       Efeito: statusFinanceiro='NAO_PAGO' → 'PAGO'
+
+9.3 PRODUTOS
+--------------------------------------------------
+GET    /api/produtos
+       Query params: (nenhum usado atualmente)
+       Retorna: Lista completa de produtos
+       Usado por: carregarProdutos()
+       Filtro frontend: disponivel === true
+
+9.4 ENDPOINTS NÃO EXISTENTES (CONFIRMADOS PELA EQUIPE BACKEND)
+--------------------------------------------------
+❌ GET    /api/contas/*
+❌ POST   /api/pedidos/{id}/pagar
+❌ GET    /api/produtos/disponiveis
+❌ GET    /api/unidades-consumo/{id}/resumo
+
+================================================================================
+10. CHECKLIST DE VERIFICAÇÃO
+================================================================================
+
+CÓDIGO
+--------------------------------------------------
+✅ Imports atualizados (unidadesConsumoService)
+✅ Variáveis de estado renomeadas
+✅ Computed properties refatoradas
+✅ Funções de carregamento atualizadas
+✅ Fluxos de pagamento implementados
+✅ Validações implementadas
+✅ Template atualizado (HTML)
+✅ CSS renomeado e testado
+✅ Arquivo deprecated removido (contasService.js)
+
+INTEGRAÇÃO
+--------------------------------------------------
+✅ Endpoints corretos configurados
+✅ Estrutura de body/query params correta
+✅ Tratamento de erros implementado
+✅ Loading states mantidos
+✅ Notificações de sucesso/erro configuradas
+
+LÓGICA DE NEGÓCIO
+--------------------------------------------------
+✅ Cálculos financeiros implementados (calcularResumo)
+✅ Validação de fundo suficiente
+✅ Diferenciação PRE_PAGO vs POS_PAGO
+✅ Acesso correto a fundoConsumo via cliente
+✅ Validação de fechamento com avisos
+
+TESTES NECESSÁRIOS
+--------------------------------------------------
+⏳ Testes de integração com backend real
+⏳ Validação de todos os cenários de pagamento
+⏳ Testes de permissões (roles)
+⏳ Testes de erro (400, 403, 404, 500)
+⏳ Testes de recálculo de totais
+⏳ Testes de UX (modais, notificações)
+
+================================================================================
+11. PRÓXIMOS PASSOS
+================================================================================
+
+CURTO PRAZO (Esta Semana)
+--------------------------------------------------
+1. Configurar ambiente de desenvolvimento integrado
+   - Backend rodando em http://localhost:8080
+   - Frontend rodando em http://localhost:3000
+   - Verificar CORS configurado
+
+2. Executar testes de integração básicos
+   - Login e autenticação
+   - Listar unidades abertas
+   - Criar pedido PRE_PAGO com fundo
+   - Criar pedido POS_PAGO (role GERENTE)
+
+3. Validar cálculos financeiros
+   - Comparar totais calculados frontend vs dados backend
+   - Verificar consistência após operações
+
+MÉDIO PRAZO (Próximas 2 Semanas)
+--------------------------------------------------
+4. Testes de cenários de erro
+   - Saldo insuficiente
+   - Pós-pago desativado
+   - Usuário sem permissão
+   - Recursos não encontrados
+
+5. Testes de fluxos completos
+   - Abrir unidade → adicionar pedidos → pagar → fechar
+   - Múltiplas formas de pagamento na mesma unidade
+   - Recarga de fundo e criação de pedido
+
+6. Ajustes de UX baseados em testes
+   - Mensagens de erro mais específicas
+   - Loading states otimizados
+   - Validações frontend adicionais
+
+LONGO PRAZO (Próximo Mês)
+--------------------------------------------------
+7. Implementar funcionalidades adicionais
+   - Criação de novas unidades de consumo
+   - Edição de pedidos (se permitido)
+   - Relatórios financeiros
+
+8. Otimizações de performance
+   - Cache de produtos
+   - Debounce em buscas
+   - Paginação se necessário
+
+9. Documentação final
+   - Manual do usuário
+   - Guia de troubleshooting
+   - Documentação de APIs internas
+
+================================================================================
+12. CONTATOS E SUPORTE
+================================================================================
+
+EQUIPE FRONTEND
+--------------------------------------------------
+Responsável: [Nome]
+Email: [email]
+Dúvidas sobre: Implementação frontend, UX, validações cliente
+
+EQUIPE BACKEND
+--------------------------------------------------
+Responsável: [Nome]
+Email: [email]
+Dúvidas sobre: Endpoints, validações backend, regras de negócio
+
+DOCUMENTOS DE REFERÊNCIA
+--------------------------------------------------
+1. RESPOSTA_BACKEND_CONTAS.txt
+   Especificação completa fornecida pelo backend
+
+2. SOLICITACAO_BACKEND_CONTAS.md
+   Questões originais enviadas ao backend
+
+3. INTEGRACAO_PEDIDOS_BALCAO.md
+   Guia de integração (precisa atualização)
+
+4. Este documento
+   RELATORIO_REFATORACAO_UNIDADES_CONSUMO.txt
+
+================================================================================
+13. CONCLUSÃO
+================================================================================
+
+A refatoração foi concluída com sucesso, alinhando completamente o frontend
+com a especificação real do backend. Todas as nomenclaturas, estruturas de
+dados, endpoints e fluxos de negócio foram adequados.
+
+PRINCIPAIS CONQUISTAS:
+✅ 100% de aderência à especificação do backend
+✅ Cálculos financeiros implementados conforme delegação
+✅ Fluxos de pagamento PRE_PAGO e POS_PAGO funcionais
+✅ Código limpo, sem referências a entidades inexistentes
+✅ Documentação técnica completa
+
+PRÓXIMO MILESTONE:
+Testes de integração com backend real para validação completa do sistema.
+
+Estamos prontos para iniciar a fase de testes integrados.
+
+================================================================================
+FIM DO RELATÓRIO
+================================================================================

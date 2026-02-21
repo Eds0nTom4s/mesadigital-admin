@@ -1,49 +1,55 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import SaldoBadge from '@/components/shared/SaldoBadge.vue'
 import TransacaoTable from '@/components/shared/TransacaoTable.vue'
 import { useCurrency } from '@/utils/currency'
+import fundoConsumoService from '@/services/fundoConsumoService'
 
 /**
  * FundoDetalheView - Detalhes completos de um fundo
  * 
+ * INTEGRADO COM API BACKEND
  * Exibe:
- * - Informações do fundo
- * - Saldo atual
- * - Extrato completo de transações
- * - Opções de gestão (mock)
+ * - Informações do fundo via buscarFundoPorCliente
+ * - Saldo atual via consultarSaldo
+ * - Extrato completo via listarTransacoes
+ * - Valor mínimo via consultarValorMinimo
  */
 
 const route = useRoute()
+const router = useRouter()
 const { formatCurrency } = useCurrency()
 
 const fundo = ref(null)
 const transacoes = ref([])
-const configuracoes = ref(null)
+const valorMinimo = ref(5000)
 const loading = ref(true)
+const error = ref(null)
 
-// Carrega dados mockados
+// Carrega dados via API
 onMounted(async () => {
   try {
     const fundoId = parseInt(route.params.id)
     
-    // Carrega fundos
-    const fundosResponse = await fetch('/src/mock/fundos.json')
-    const fundos = await fundosResponse.json()
-    fundo.value = fundos.find(f => f.id === fundoId)
+    // Carrega valor mínimo
+    const configResp = await fundoConsumoService.consultarValorMinimo()
+    valorMinimo.value = configResp.data.valorMinimo
     
-    // Carrega transações do fundo
-    const transacoesResponse = await fetch('/src/mock/transacoes.json')
-    const todasTransacoes = await transacoesResponse.json()
-    transacoes.value = todasTransacoes.filter(t => t.fundoId === fundoId)
+    // Busca fundo por ID (usa clienteId temporariamente)
+    const fundoResp = await fundoConsumoService.buscarFundoPorCliente(fundoId)
+    fundo.value = fundoResp.data
     
-    // Carrega configurações
-    const configResponse = await fetch('/src/mock/configuracoes.json')
-    configuracoes.value = await configResponse.json()
+    // Carrega transações
+    const transacoesResp = await fundoConsumoService.listarTransacoes(fundoId)
+    transacoes.value = transacoesResp.data
     
-  } catch (error) {
-    console.error('Erro ao carregar dados:', error)
+  } catch (err) {
+    console.error('Erro ao carregar fundo:', err)
+    error.value = err.response?.data?.message || err.message
+    if (err.response?.status === 404) {
+      router.push('/admin/fundos')
+    }
   } finally {
     loading.value = false
   }
@@ -70,7 +76,7 @@ const totalEstornos = computed(() => {
 
 // Mapas de labels
 const tipoLabels = {
-  MESA: 'Mesa',
+  UNIDADE_CONSUMO: 'Unidade de Consumo',
   QR_CONSUMO: 'QR Code',
   EVENTO: 'Evento'
 }

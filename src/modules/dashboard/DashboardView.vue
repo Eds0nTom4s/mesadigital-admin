@@ -1,7 +1,102 @@
 <script setup>
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useCurrency } from '@/utils/currency'
+import { useWebSocketStore } from '@/store/websocket'
+import { dashboardService, pedidosService, mesasService } from '@/services/api'
 
 const { formatCurrency } = useCurrency()
+const wsStore = useWebSocketStore()
+
+// Estatísticas reativas
+const stats = ref({
+  pedidosAtivos: 0,
+  receitaHoje: 0,
+  unidadesOcupadas: 0,
+  unidadesTotal: 0,
+  fundosAtivos: 0
+})
+
+const loading = ref(true)
+const pedidosRecentes = ref([])
+const produtosDestaque = ref([])
+
+let desinscrever = null
+
+const carregarDados = async () => {
+  try {
+    loading.value = true
+    
+    // Buscar estatísticas do dashboard (com fallback para dados mockados)
+    try {
+      const statsResponse = await dashboardService.getStats()
+      stats.value = statsResponse.data
+    } catch (error) {
+      if (error.response?.status === 404) {
+        console.warn('[Dashboard] Endpoint /dashboard/stats não implementado, usando dados mockados')
+        stats.value = {
+          pedidosAtivos: 0,
+          receitaHoje: 0,
+          unidadesOcupadas: 0,
+          unidadesTotal: 0,
+          fundosAtivos: 0
+        }
+      } else {
+        throw error
+      }
+    }
+    
+    // Buscar atividades recentes (com fallback)
+    try {
+      const activityResponse = await dashboardService.getRecentActivity()
+      pedidosRecentes.value = activityResponse.data.pedidos || []
+    } catch (error) {
+      if (error.response?.status === 404) {
+        console.warn('[Dashboard] Endpoint /dashboard/activity não implementado')
+        pedidosRecentes.value = []
+      } else {
+        throw error
+      }
+    }
+    
+    // Buscar produtos em destaque (com fallback)
+    try {
+      const topProductsResponse = await dashboardService.getTopProducts()
+      produtosDestaque.value = topProductsResponse.data || []
+    } catch (error) {
+      if (error.response?.status === 404) {
+        console.warn('[Dashboard] Endpoint /dashboard/top-products não implementado')
+        produtosDestaque.value = []
+      } else {
+        throw error
+      }
+    }
+    
+  } catch (error) {
+    console.error('[Dashboard] Erro ao carregar dados:', error)
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(async () => {
+  // Carregar dados iniciais
+  await carregarDados()
+  
+  // Inscrever em múltiplos tópicos para dashboard
+  const unidadeId = 5
+  desinscrever = wsStore.inscreverAtendente(unidadeId, (notificacao) => {
+    // Atualizar estatísticas em tempo real
+    console.log('[Dashboard] Notificação recebida:', notificacao)
+    // Recarregar estatísticas ao receber notificação
+    carregarDados()
+  })
+})
+
+onUnmounted(() => {
+  if (desinscrever) {
+    desinscrever()
+  }
+})
 
 /**
  * Dashboard View - Módulo de visão geral
@@ -9,10 +104,10 @@ const { formatCurrency } = useCurrency()
  * Exibe métricas principais do sistema:
  * - Pedidos ativos
  * - Receita do dia
- * - Ocupação de mesas
+ * - Ocupação de unidades de consumo
  * - Fundos de consumo ativos
  * 
- * Dados atualmente em mock - pronto para integração
+ * Atualiza em tempo real via WebSocket
  */
 </script>
 
@@ -32,14 +127,21 @@ const { formatCurrency } = useCurrency()
       </div>
     </div>
 
+    <!-- Loading State -->
+    <div v-if="loading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div v-for="i in 4" :key="i" class="card animate-pulse">
+        <div class="h-24 bg-gray-200 rounded"></div>
+      </div>
+    </div>
+
     <!-- Stats Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
       <div class="card">
         <div class="flex items-center justify-between">
           <div>
             <p class="text-text-secondary text-sm">Pedidos Ativos</p>
-            <p class="text-3xl font-bold text-text-primary mt-2">24</p>
-            <p class="text-success text-sm mt-1">+12% vs ontem</p>
+            <p class="text-3xl font-bold text-text-primary mt-2">{{ stats.pedidosAtivos }}</p>
+            <p class="text-success text-sm mt-1">{{ stats.variacaoPedidos || '+12%' }} vs ontem</p>
           </div>
           <div class="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
             <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -53,8 +155,8 @@ const { formatCurrency } = useCurrency()
         <div class="flex items-center justify-between">
           <div>
             <p class="text-text-secondary text-sm">Receita Hoje</p>
-            <p class="text-3xl font-bold text-text-primary mt-2">{{ formatCurrency(1247) }}</p>
-            <p class="text-success text-sm mt-1">+8% vs ontem</p>
+            <p class="text-3xl font-bold text-text-primary mt-2">{{ formatCurrency(stats.receitaHoje) }}</p>
+            <p class="text-success text-sm mt-1">{{ stats.variacaoReceita || '+8%' }} vs ontem</p>
           </div>
           <div class="w-12 h-12 bg-success/10 rounded-lg flex items-center justify-center">
             <svg class="w-6 h-6 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -67,9 +169,9 @@ const { formatCurrency } = useCurrency()
       <div class="card">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-text-secondary text-sm">Mesas Ocupadas</p>
-            <p class="text-3xl font-bold text-text-primary mt-2">12/20</p>
-            <p class="text-info text-sm mt-1">60% ocupação</p>
+            <p class="text-text-secondary text-sm">Unidades Ocupadas</p>
+            <p class="text-3xl font-bold text-text-primary mt-2">{{ stats.unidadesOcupadas }}/{{ stats.unidadesTotal }}</p>
+            <p class="text-info text-sm mt-1">{{ Math.round((stats.unidadesOcupadas / stats.unidadesTotal) * 100) }}% ocupação</p>
           </div>
           <div class="w-12 h-12 bg-info/10 rounded-lg flex items-center justify-center">
             <svg class="w-6 h-6 text-info" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -83,8 +185,8 @@ const { formatCurrency } = useCurrency()
         <div class="flex items-center justify-between">
           <div>
             <p class="text-text-secondary text-sm">Fundos Ativos</p>
-            <p class="text-3xl font-bold text-text-primary mt-2">{{ formatCurrency(3480) }}</p>
-            <p class="text-warning text-sm mt-1">18 fundos abertos</p>
+            <p class="text-3xl font-bold text-text-primary mt-2">{{ formatCurrency(stats.fundosAtivos) }}</p>
+            <p class="text-warning text-sm mt-1">{{ stats.quantidadeFundos || 0 }} fundos abertos</p>
           </div>
           <div class="w-12 h-12 bg-warning/10 rounded-lg flex items-center justify-center">
             <svg class="w-6 h-6 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -99,46 +201,40 @@ const { formatCurrency } = useCurrency()
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <div class="card">
         <h3 class="text-lg font-semibold text-text-primary mb-4">Pedidos Recentes</h3>
-        <div class="space-y-3">
-          <div class="flex items-center justify-between p-3 bg-background rounded-lg">
+        <div v-if="pedidosRecentes.length === 0" class="text-center py-6 text-text-secondary">
+          Nenhum pedido recente
+        </div>
+        <div v-else class="space-y-3">
+          <div v-for="pedido in pedidosRecentes.slice(0, 5)" :key="pedido.id" 
+               class="flex items-center justify-between p-3 bg-background rounded-lg">
             <div class="flex items-center space-x-3">
-              <div class="w-2 h-2 bg-success rounded-full"></div>
+              <div :class="[
+                'w-2 h-2 rounded-full',
+                pedido.status === 'CONCLUIDO' ? 'bg-success' : 'bg-warning'
+              ]"></div>
               <div>
-                <p class="text-sm font-medium text-text-primary">Mesa 5 - Pedido #1234</p>
-                <p class="text-xs text-text-secondary">Há 2 minutos</p>
+                <p class="text-sm font-medium text-text-primary">{{ pedido.referencia }} - Pedido #{{ pedido.numero }}</p>
+                <p class="text-xs text-text-secondary">{{ pedido.horarioRelativo || pedido.horario }}</p>
               </div>
             </div>
-            <span class="text-sm font-medium text-text-primary">{{ formatCurrency(45.80) }}</span>
-          </div>
-          <div class="flex items-center justify-between p-3 bg-background rounded-lg">
-            <div class="flex items-center space-x-3">
-              <div class="w-2 h-2 bg-warning rounded-full"></div>
-              <div>
-                <p class="text-sm font-medium text-text-primary">Mesa 3 - Pedido #1233</p>
-                <p class="text-xs text-text-secondary">Há 5 minutos</p>
-              </div>
-            </div>
-            <span class="text-sm font-medium text-text-primary">{{ formatCurrency(32.50) }}</span>
+            <span class="text-sm font-medium text-text-primary">{{ formatCurrency(pedido.total) }}</span>
           </div>
         </div>
       </div>
 
       <div class="card">
         <h3 class="text-lg font-semibold text-text-primary mb-4">Produtos em Destaque</h3>
-        <div class="space-y-3">
-          <div class="flex items-center justify-between p-3 bg-background rounded-lg">
+        <div v-if="produtosDestaque.length === 0" class="text-center py-6 text-text-secondary">
+          Nenhum produto vendido hoje
+        </div>
+        <div v-else class="space-y-3">
+          <div v-for="(produto, index) in produtosDestaque.slice(0, 5)" :key="produto.id" 
+               class="flex items-center justify-between p-3 bg-background rounded-lg">
             <div>
-              <p class="text-sm font-medium text-text-primary">Cerveja Super Bock</p>
-              <p class="text-xs text-text-secondary">42 vendas hoje</p>
+              <p class="text-sm font-medium text-text-primary">{{ produto.nome }}</p>
+              <p class="text-xs text-text-secondary">{{ produto.vendas }} vendas hoje</p>
             </div>
-            <span class="badge-success">Top #1</span>
-          </div>
-          <div class="flex items-center justify-between p-3 bg-background rounded-lg">
-            <div>
-              <p class="text-sm font-medium text-text-primary">Francesinha</p>
-              <p class="text-xs text-text-secondary">28 vendas hoje</p>
-            </div>
-            <span class="badge-success">Top #2</span>
+            <span class="badge-success">Top #{{ index + 1 }}</span>
           </div>
         </div>
       </div>

@@ -1,0 +1,429 @@
+===============================================================================
+INSTRUÇÕES DE AUTENTICAÇÃO - API BACKEND
+Sistema de Restauração - Documentação para Frontend
+===============================================================================
+
+ATUALIZADO: 17 de Fevereiro de 2026
+BASE URL: http://localhost:8080/api
+
+===============================================================================
+1. TIPOS DE AUTENTICAÇÃO
+===============================================================================
+
+O sistema possui DOIS fluxos de autenticação distintos:
+
+A) CLIENTES (Usuários finais) → Autenticação via OTP (SMS)
+B) ADMIN/ATENDENTES (Staff) → Autenticação via Telefone + Senha
+
+⚠️ NÃO CONFUNDIR OS ENDPOINTS! Cada tipo tem seu próprio endpoint.
+
+===============================================================================
+2. AUTENTICAÇÃO DE CLIENTES (OTP)
+===============================================================================
+
+FLUXO EM 2 ETAPAS:
+1. Solicitar OTP (envia SMS)
+2. Validar OTP (retorna JWT token)
+
+────────────────────────────────────────────────────────────────────────────
+PASSO 1: SOLICITAR OTP
+────────────────────────────────────────────────────────────────────────────
+
+POST /api/auth/solicitar-otp
+
+HEADERS:
+Content-Type: application/json
+
+BODY (JSON):
+{
+  "telefone": "925813939"
+}
+
+RESPOSTA DE SUCESSO (200):
+{
+  "success": true,
+  "message": "OTP enviado com sucesso",
+  "data": null,
+  "timestamp": "2026-02-17T20:30:00"
+}
+
+FORMATO DE TELEFONE ACEITO:
+✅ 925813939          (sem prefixo)
+✅ 244925813939       (com código do país sem +)
+✅ +244925813939      (com + e código do país)
+✅ +244 925 813 939   (com espaços)
+
+TODOS NORMALIZADOS AUTOMATICAMENTE PARA: +244925813939
+
+────────────────────────────────────────────────────────────────────────────
+PASSO 2: VALIDAR OTP
+────────────────────────────────────────────────────────────────────────────
+
+POST /api/auth/validar-otp
+
+HEADERS:
+Content-Type: application/json
+
+BODY (JSON):
+{
+  "telefone": "925813939",
+  "otp": "123456"
+}
+
+RESPOSTA DE SUCESSO (200):
+{
+  "success": true,
+  "message": "Autenticação realizada com sucesso",
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiJ9...",
+    "tipo": "Bearer",
+    "expiresIn": 86400000,
+    "cliente": {
+      "id": 1,
+      "nome": "João Pedro Afonso",
+      "telefone": "+244925813939",
+      "telefoneVerificado": true,
+      "tipoUsuario": "CLIENTE"
+    }
+  },
+  "timestamp": "2026-02-17T20:30:00"
+}
+
+===============================================================================
+3. AUTENTICAÇÃO DE ADMIN/ATENDENTES (TELEFONE + SENHA)
+===============================================================================
+
+FLUXO EM 1 ETAPA:
+Login direto com telefone e senha
+
+────────────────────────────────────────────────────────────────────────────
+LOGIN ADMIN/ATENDENTE
+────────────────────────────────────────────────────────────────────────────
+
+POST /api/auth/admin/login
+
+HEADERS:
+Content-Type: application/json
+
+BODY (JSON):
+{
+  "telefone": "999999999",
+  "senha": "admin123"
+}
+
+⚠️ IMPORTANTE: Os campos devem ser EXATAMENTE "telefone" e "senha" (lowercase)
+
+RESPOSTA DE SUCESSO (200):
+{
+  "success": true,
+  "message": "Login realizado com sucesso",
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiJ9...",
+    "tipo": "Bearer",
+    "expiresIn": 86400000,
+    "atendente": {
+      "id": 1,
+      "nome": "Admin Sistema",
+      "telefone": "+244999999999",
+      "role": "GERENTE",
+      "ativo": true
+    }
+  },
+  "timestamp": "2026-02-17T20:30:00"
+}
+
+────────────────────────────────────────────────────────────────────────────
+CREDENCIAIS DE TESTE (DEV)
+────────────────────────────────────────────────────────────────────────────
+
+ADMIN/GERENTE:
+Telefone: 999999999
+Senha: admin123
+Role: GERENTE (acesso total)
+
+ATENDENTE:
+Telefone: 923456789
+Senha: atendente123
+Role: ATENDENTE (acesso limitado)
+
+===============================================================================
+4. USANDO O TOKEN JWT
+===============================================================================
+
+Após autenticação bem-sucedida, inclua o token em TODAS as requisições protegidas:
+
+HEADER:
+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
+
+EXEMPLO REQUISIÇÃO AUTENTICADA:
+
+GET /api/unidades-consumo
+
+HEADERS:
+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
+Content-Type: application/json
+
+────────────────────────────────────────────────────────────────────────────
+INFORMAÇÕES DO TOKEN JWT
+────────────────────────────────────────────────────────────────────────────
+
+VALIDADE: 24 horas (86400000 ms)
+ALGORITMO: HS256
+CLAIMS:
+- sub: telefone normalizado (+244XXXXXXXXX)
+- roles: papel do usuário (ROLE_CLIENTE, ROLE_ATENDENTE, ROLE_GERENTE)
+- nome: nome completo do usuário
+- iat: data de emissão
+- exp: data de expiração
+
+QUANDO TOKEN EXPIRA:
+Status: 401 Unauthorized
+Response:
+{
+  "timestamp": "2026-02-17T20:30:00",
+  "status": 401,
+  "error": "Token expirado",
+  "message": "O token JWT expirou. Por favor, faça login novamente.",
+  "path": "/api/endpoint"
+}
+
+AÇÃO: Redirecionar usuário para tela de login
+
+===============================================================================
+5. TRATAMENTO DE ERROS
+===============================================================================
+
+────────────────────────────────────────────────────────────────────────────
+ERRO 400 - BAD REQUEST (Dados inválidos)
+────────────────────────────────────────────────────────────────────────────
+
+RESPOSTA:
+{
+  "timestamp": "2026-02-17T20:30:00",
+  "status": 400,
+  "error": "Erro de validação",
+  "message": "Dados inválidos fornecidos",
+  "path": "/api/auth/admin/login",
+  "validationErrors": {
+    "telefone": "Telefone é obrigatório",
+    "senha": "Senha é obrigatória"
+  }
+}
+
+CAUSAS COMUNS:
+- Campos faltando no JSON
+- Campos com nomes errados (ex: "password" em vez de "senha")
+- Campos vazios ou nulos
+- Formato de telefone inválido
+
+────────────────────────────────────────────────────────────────────────────
+ERRO 401 - UNAUTHORIZED (Credenciais inválidas)
+────────────────────────────────────────────────────────────────────────────
+
+RESPOSTA:
+{
+  "timestamp": "2026-02-17T20:30:00",
+  "status": 401,
+  "error": "Credenciais inválidas",
+  "message": "Telefone ou senha incorretos",
+  "path": "/api/auth/admin/login"
+}
+
+CAUSAS:
+- Senha incorreta
+- Atendente não existe
+- Atendente inativo
+
+────────────────────────────────────────────────────────────────────────────
+ERRO 404 - NOT FOUND (Endpoint não existe)
+────────────────────────────────────────────────────────────────────────────
+
+RESPOSTA:
+{
+  "timestamp": "2026-02-17T20:30:00",
+  "status": 404,
+  "error": "Endpoint não encontrado",
+  "message": "Endpoint 'POST /api/auth/login' não existe. Verifique a URL e o método HTTP.",
+  "path": "/api/auth/login"
+}
+
+⚠️ ENDPOINTS CORRETOS:
+✅ POST /api/auth/solicitar-otp        (Clientes - passo 1)
+✅ POST /api/auth/validar-otp          (Clientes - passo 2)
+✅ POST /api/auth/admin/login          (Admin/Atendentes)
+
+❌ POST /api/auth/login                (NÃO EXISTE!)
+
+────────────────────────────────────────────────────────────────────────────
+ERRO 500 - INTERNAL SERVER ERROR
+────────────────────────────────────────────────────────────────────────────
+
+RESPOSTA:
+{
+  "timestamp": "2026-02-17T20:30:00",
+  "status": 500,
+  "error": "Erro interno do servidor",
+  "message": "Ocorreu um erro inesperado. Por favor, tente novamente mais tarde.",
+  "path": "/api/auth/admin/login"
+}
+
+AÇÃO: Reportar ao time de backend com detalhes da requisição
+
+===============================================================================
+6. EXEMPLOS PRÁTICOS (CURL)
+===============================================================================
+
+────────────────────────────────────────────────────────────────────────────
+EXEMPLO 1: Login Admin/Atendente
+────────────────────────────────────────────────────────────────────────────
+
+curl -X POST http://localhost:8080/api/auth/admin/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "telefone": "999999999",
+    "senha": "admin123"
+  }'
+
+SUCESSO:
+{
+  "success": true,
+  "message": "Login realizado com sucesso",
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiJ9...",
+    "tipo": "Bearer",
+    "expiresIn": 86400000,
+    "atendente": {
+      "id": 1,
+      "nome": "Admin Sistema",
+      "telefone": "+244999999999",
+      "role": "GERENTE"
+    }
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────
+EXEMPLO 2: Solicitar OTP (Cliente)
+────────────────────────────────────────────────────────────────────────────
+
+curl -X POST http://localhost:8080/api/auth/solicitar-otp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "telefone": "925813939"
+  }'
+
+SUCESSO:
+{
+  "success": true,
+  "message": "OTP enviado com sucesso",
+  "data": null
+}
+
+────────────────────────────────────────────────────────────────────────────
+EXEMPLO 3: Validar OTP (Cliente)
+────────────────────────────────────────────────────────────────────────────
+
+curl -X POST http://localhost:8080/api/auth/validar-otp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "telefone": "925813939",
+    "otp": "123456"
+  }'
+
+SUCESSO:
+{
+  "success": true,
+  "message": "Autenticação realizada com sucesso",
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiJ9...",
+    "tipo": "Bearer",
+    "cliente": {
+      "id": 1,
+      "nome": "João Pedro Afonso",
+      "telefone": "+244925813939"
+    }
+  }
+}
+
+────────────────────────────────────────────────────────────────────────────
+EXEMPLO 4: Requisição Autenticada
+────────────────────────────────────────────────────────────────────────────
+
+TOKEN="eyJhbGciOiJIUzI1NiJ9..."
+
+curl -X GET http://localhost:8080/api/unidades-consumo \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json"
+
+===============================================================================
+7. CHECKLIST DE INTEGRAÇÃO FRONTEND
+===============================================================================
+
+CONFIGURAÇÃO:
+☐ BASE_URL configurada corretamente (http://localhost:8080/api)
+☐ CORS habilitado no backend para origem do frontend
+
+REQUISIÇÕES:
+☐ Content-Type: application/json em todas as requisições
+☐ Nomes dos campos EXATAMENTE como especificado (telefone, senha, otp)
+☐ Authorization header com formato: "Bearer {token}"
+
+TRATAMENTO DE ERROS:
+☐ Tratar status 400 (mostrar erros de validação)
+☐ Tratar status 401 (redirecionar para login)
+☐ Tratar status 404 (verificar URL do endpoint)
+☐ Tratar status 500 (mostrar mensagem genérica)
+
+ARMAZENAMENTO DE TOKEN:
+☐ Salvar token após login bem-sucedido
+☐ Incluir token em todas as requisições protegidas
+☐ Limpar token ao fazer logout
+☐ Limpar token quando receber 401 (token expirado)
+
+FLUXO DE AUTENTICAÇÃO:
+☐ Para Clientes: solicitar-otp → validar-otp
+☐ Para Admin/Atendentes: admin/login direto
+☐ Salvar dados do usuário (nome, telefone, role)
+☐ Redirecionar para dashboard após login
+
+===============================================================================
+8. CORS - ORIGENS PERMITIDAS
+===============================================================================
+
+O backend CORS está configurado para aceitar requisições de:
+
+✅ http://localhost:3000
+✅ http://localhost:3001
+✅ http://localhost:3002
+
+MÉTODOS PERMITIDOS:
+GET, POST, PUT, PATCH, DELETE, OPTIONS
+
+HEADERS PERMITIDOS:
+Authorization, Content-Type, X-Requested-With
+
+Se o frontend rodar em outra porta, contate o time de backend.
+
+===============================================================================
+9. CONTATO E SUPORTE
+===============================================================================
+
+DÚVIDAS SOBRE:
+- Formato de requisições → Este documento
+- Erros 400/404 → Verificar endpoint e campos
+- Erros 401/403 → Verificar credenciais e token
+- Erros 500 → Reportar ao backend com detalhes
+
+DOCUMENTAÇÃO COMPLETA:
+http://localhost:8080/swagger-ui.html (quando backend rodando)
+
+CÓDIGO-FONTE BACKEND:
+/src/main/java/com/restaurante/controller/AuthController.java
+/src/main/java/com/restaurante/dto/request/
+
+===============================================================================
+FIM DAS INSTRUÇÕES
+===============================================================================
+
+ÚLTIMA ATUALIZAÇÃO: 17/02/2026
+VERSÃO: 1.0
+TESTADO E VALIDADO: ✅

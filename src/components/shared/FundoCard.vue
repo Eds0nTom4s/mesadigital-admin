@@ -18,24 +18,25 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['verDetalhes'])
+const emit = defineEmits(['verDetalhes', 'recarregar'])
 
 // Mapeia tipos de fundo para labels
 const tipoLabels = {
-  MESA: 'Mesa',
+  UNIDADE_CONSUMO: 'Unidade de Consumo',
   QR_CONSUMO: 'QR Code',
   EVENTO: 'Evento'
 }
 
-// Mapeia status para badges
-const statusConfig = {
-  ATIVO: { class: 'badge-success', label: 'Ativo' },
-  ENCERRADO: { class: 'badge-secondary', label: 'Encerrado' },
-  EXPIRADO: { class: 'badge-error', label: 'Expirado' }
+// Retorna configuração do status baseado no campo 'ativo' (API)
+const getStatusConfig = (ativo) => {
+  return ativo
+    ? { class: 'badge-success', label: 'Ativo' }
+    : { class: 'badge-secondary', label: 'Encerrado' }
 }
 
-// Formata data
+// Formata data (usa createdAt da API ou dataCriacao do mock)
 const formatarData = (dataISO) => {
+  if (!dataISO) return 'Data indisponível'
   const data = new Date(dataISO)
   return data.toLocaleString('pt-PT', {
     day: '2-digit',
@@ -71,25 +72,31 @@ const getTipoIcon = (tipo) => {
           <p class="text-sm text-text-secondary">{{ tipoLabels[fundo.tipo] }} • #{{ fundo.id }}</p>
         </div>
       </div>
-      <span :class="statusConfig[fundo.status].class">
-        {{ statusConfig[fundo.status].label }}
+      <span :class="getStatusConfig(fundo.ativo).class">
+        {{ getStatusConfig(fundo.ativo).label }}
       </span>
     </div>
 
     <div class="space-y-3">
       <div class="flex items-center justify-between p-3 bg-background rounded-lg">
         <span class="text-sm text-text-secondary">Saldo Atual</span>
-        <SaldoBadge :saldo="fundo.saldoAtual" :status="fundo.status" tamanho="md" />
+        <SaldoBadge :saldo="fundo.saldoAtual" :ativo="fundo.ativo" tamanho="md" />
       </div>
 
       <div class="flex items-center justify-between text-sm">
         <span class="text-text-secondary">Data de Criação</span>
-        <span class="text-text-primary font-medium">{{ formatarData(fundo.dataCriacao) }}</span>
+        <span class="text-text-primary font-medium">{{ formatarData(fundo.createdAt || fundo.dataCriacao) }}</span>
       </div>
     </div>
 
-    <div class="mt-4 pt-4 border-t border-border">
-      <button class="btn-primary w-full" @click.stop="emit('verDetalhes', fundo)">
+    <div class="mt-4 pt-4 border-t border-border flex gap-2">
+      <button class="btn-secondary flex-1" @click.stop="emit('recarregar', fundo)" :disabled="!fundo.ativo">
+        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+        </svg>
+        Recarregar
+      </button>
+      <button class="btn-primary flex-1" @click.stop="emit('verDetalhes', fundo)">
         Ver Detalhes
       </button>
     </div>

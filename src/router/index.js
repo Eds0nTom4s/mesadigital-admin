@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
+import authService from '@/services/authService'
 
 /**
  * Configuração de rotas do painel administrativo
@@ -12,6 +13,15 @@ const routes = [
   {
     path: '/',
     redirect: '/admin/dashboard'
+  },
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/views/LoginView.vue'),
+    meta: {
+      title: 'Login',
+      requiresAuth: false
+    }
   },
   {
     path: '/admin',
@@ -30,9 +40,9 @@ const routes = [
       {
         path: 'pedidos',
         name: 'Pedidos',
-        component: () => import('@/modules/pedidos/PedidosView.vue'),
+        component: () => import('@/modules/pedidos/PedidosBalcaoView.vue'),
         meta: {
-          title: 'Gestão de Pedidos',
+          title: 'Gestão de Pedidos - Balcão',
           requiresAuth: true
         }
       },
@@ -46,11 +56,11 @@ const routes = [
         }
       },
       {
-        path: 'mesas',
-        name: 'Mesas',
-        component: () => import('@/modules/mesas/MesasView.vue'),
+        path: 'unidades-consumo',
+        name: 'UnidadesConsumo',
+        component: () => import('@/modules/unidades-consumo/UnidadesConsumoView.vue'),
         meta: {
-          title: 'Gestão de Mesas',
+          title: 'Gestão de Unidades de Consumo',
           requiresAuth: true
         }
       },
@@ -121,16 +131,21 @@ const router = createRouter({
   routes
 })
 
-// Navigation guard para autenticação (placeholder)
-router.beforeEach((to, from, next) => {
+// Navigation guard para autenticação
+router.beforeEach(async (to, from, next) => {
   const requiresAuth = to.matched.some(record => record.meta.requiresAuth)
   
-  // TODO: Implementar verificação real de autenticação
-  const isAuthenticated = true // Mock
+  // Verificar token no localStorage
+  const token = localStorage.getItem('token')
+  const isAuthenticated = !!token
   
   if (requiresAuth && !isAuthenticated) {
-    // Redirecionar para login quando implementado
+    // Redireciona para login se não autenticado
+    console.warn('[Router] Acesso negado - redirecionando para login')
     next('/login')
+  } else if (to.path === '/login' && isAuthenticated) {
+    // Se já autenticado e tenta acessar login, redireciona para dashboard
+    next('/admin/dashboard')
   } else {
     next()
   }

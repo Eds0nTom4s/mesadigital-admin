@@ -1,0 +1,709 @@
+================================================================================
+RESPOSTAS ÀS DÚVIDAS DA EQUIPE DE FRONTEND
+Sistema de Restauração - Integração Fundo de Consumo
+================================================================================
+
+DATA: 17 de Fevereiro de 2026
+DESTINATÁRIO: Equipe Frontend
+ASSUNTO: Esclarecimentos sobre Integração API Fundo de Consumo
+
+================================================================================
+ANÁLISE DA EQUIPE (PONTOS IDENTIFICADOS)
+================================================================================
+
+A equipe identificou corretamente as seguintes diferenças entre Mock e API:
+
+1. Status: Mock usa status: 'ATIVO'|'ENCERRADO'|'EXPIRADO' → API usa ativo: true|false
+2. Datas: Mock usa dataCriacao → API usa createdAt e updatedAt
+3. Saldo inicial: No backend é OBRIGATÓRIO (mínimo 5.000 AOA configurável)
+4. Estrutura Fundo: API inclui objeto cliente completo
+5. Autenticação: JWT obrigatório em todos os endpoints
+
+
+================================================================================
+RESPOSTAS DETALHADAS
+================================================================================
+
+1. STATUS VS ATIVO
+-------------------
+
+✅ CORRETO! A API usa apenas booleano:
+
+- ativo: true  → Fundo funcionando normalmente (permite todas operações)
+- ativo: false → Fundo encerrado (bloqueia movimentações)
+
+⚠️ NÃO HÁ "EXPIRADO" NO BACKEND
+
+Se precisarem desse estado no frontend, implementem como lógica de apresentação.
+Exemplo: verificar se há inatividade há X dias e exibir badge "Inativo há 90 dias".
+
+CONVERSÃO NECESSÁRIA:
+Mock                  → API
+─────────────────────────────────────
+status: 'ATIVO'      → ativo: true
+status: 'ENCERRADO'  → ativo: false
+status: 'EXPIRADO'   → ativo: false (+ lógica frontend)
+
+
+-------------------
+2. DATAS: dataCriacao vs createdAt/updatedAt
+-------------------
+
+✅ CORRETO! API retorna campos diferentes:
+
+API Backend:
+- createdAt  → Data de criação (ISO 8601: "2026-02-17T10:00:00")
+- updatedAt  → Última atualização (ISO 8601: "2026-02-17T14:30:00")
+
+⚠️ NÃO HÁ "dataCriacao" NO BACKEND
+
+CONVERSÃO NECESSÁRIA:
+Mock                 → API
+────────────────────────────────────
+dataCriacao         → createdAt
+(não existe)        → updatedAt (novo)
+
+EXEMPLO DE CONVERSÃO:
+// Mock
+const fundo = { dataCriacao: '2026-02-17' };
+
+// API
+const fundo = { 
+  createdAt: '2026-02-17T10:00:00',
+  updatedAt: '2026-02-17T14:30:00'
+};
+
+// No componente
+const dataFormatada = new Date(fundo.createdAt).toLocaleDateString('pt-AO');
+
+
+-------------------
+3. SALDO INICIAL OBRIGATÓRIO (CRÍTICO!)
+-------------------
+
+✅ CRÍTICO! Backend exige saldo mínimo:
+
+REGRAS:
+- Valor mínimo: 5.000 AOA (configurável no backend)
+- Campo saldoInicial é OBRIGATÓRIO ao criar fundo
+- Backend rejeita com erro 400 se saldoInicial < 5000
+
+FLUXO CORRETO:
+
+PASSO 1: Consultar valor mínimo ANTES de exibir formulário
+GET /api/fundos/config/valor-minimo
+
+Response:
+{
+  "status": 200,
+  "data": 5000.00
+}
+
+PASSO 2: Validar no frontend
+if (saldoInicial < valorMinimo) {
+  erro = `Saldo inicial deve ser no mínimo ${valorMinimo.toFixed(2)} AOA`;
+}
+
+PASSO 3: Enviar para API
+POST /api/fundos
+{
+  "clienteId": 10,
+  "saldoInicial": 10000.00,
+  "observacoes": "Carga inicial via dinheiro"
+}
+
+ERRO SE NÃO RESPEITAR:
+{
+  "status": 400,
+  "message": "Saldo inicial deve ser no mínimo 5000.00 AOA. Valor informado: 3000.00 AOA"
+}
+
+
+-------------------
+4. ESTRUTURA DO FUNDO
+-------------------
+
+✅ CORRETO! API retorna cliente completo (não apenas ID):
+
+ESTRUTURA COMPLETA DA API:
+{
+  "id": 1,
+  "cliente": {                        // Objeto completo (não apenas ID!)
+    "id": 10,
+    "nome": "João Pedro Afonso",
+    "telefone": "+244925813939",
+    "telefoneVerificado": true,
+    "ativo": true,
+    "tipoUsuario": "CLIENTE"
+  },
+  "saldoAtual": 50000.00,
+  "ativo": true,                      // Booleano (não string!)
+  "createdAt": "2026-02-17T10:00:00",
+  "updatedAt": "2026-02-17T14:30:00",
+  "version": 5                        // Controle de concorrência
+}
+
+CONVERSÃO NECESSÁRIA:
+Mock                    → API
+──────────────────────────────────────────
+clienteId: 10          → cliente: { id: 10, nome: "...", ... }
+status: 'ATIVO'        → ativo: true
+dataCriacao: '...'     → createdAt: '...'
+(não existe)           → updatedAt: '...'
+(não existe)           → version: 5
+
+
+================================================================================
+RESPOSTAS ÀS 3 PERGUNTAS
+================================================================================
+
+PERGUNTA 1: Já existe sistema de autenticação no frontend?
+-----------------------------------------------------------
+
+RESPOSTA: Depende do que já existe no projeto.
+
+O BACKEND JÁ ESTÁ PRONTO COM:
+✓ JWT authentication
+✓ Endpoints de autenticação disponíveis
+✓ Token com validade de 24 horas
+✓ Roles: ADMIN, ATENDENTE, CLIENTE
+
+SE O FRONTEND AINDA NÃO TEM, VOCÊS PRECISAM IMPLEMENTAR:
+
+1. Armazenar token
+   sessionStorage.setItem('token', accessToken);  // NÃO usar localStorage!
+
+2. Incluir token em TODAS as requisições
+   Authorization: Bearer {token}
+
+3. Interceptor axios/fetch
+   axios.interceptors.request.use(config => {
+     const token = sessionStorage.getItem('token');
+     if (token) {
+       config.headers.Authorization = `Bearer ${token}`;
+     }
+     return config;
+   });
+
+4. Redirecionar para login se receber 401
+   axios.interceptors.response.use(
+     response => response,
+     error => {
+       if (error.response?.status === 401) {
+         sessionStorage.removeItem('token');
+         router.push('/login');
+       }
+       return Promise.reject(error);
+     }
+   );
+
+5. Verificar expiração do token
+   Token expira em 24 horas (86400 segundos)
+
+
+PERGUNTA 2: Qual o endpoint de login? Já está disponível?
+----------------------------------------------------------
+
+RESPOSTA: ✅ SIM! O backend tem 2 sistemas de autenticação:
+
+
+A) LOGIN ADMINISTRATIVO (Para Painel Admin)
+────────────────────────────────────────────
+
+Endpoint: POST /api/auth/login
+Content-Type: application/json
+
+Request Body:
+{
+  "username": "admin",
+  "password": "senha123"
+}
+
+Response 200:
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "expiresIn": 86400
+}
+
+Response 401 (Credenciais inválidas):
+{
+  "status": 401,
+  "message": "Credenciais inválidas"
+}
+
+USAR PARA: Painel administrativo onde atendentes/admins fazem login
+
+
+B) LOGIN CLIENTE (Via OTP - Para App Mobile/Cliente)
+─────────────────────────────────────────────────────
+
+PASSO 1: Solicitar OTP
+Endpoint: POST /api/auth/solicitar-otp
+Content-Type: application/json
+
+Request:
+{
+  "telefone": "925813939"
+}
+
+Response 200:
+{
+  "status": 200,
+  "message": "OTP enviado com sucesso"
+}
+
+NOTA: OTP é enviado via SMS (em dev aparece no log do backend)
+OTP válido por 30 minutos
+
+
+PASSO 2: Validar OTP (Retorna JWT)
+Endpoint: POST /api/auth/validar-otp
+Content-Type: application/json
+
+Request:
+{
+  "telefone": "925813939",
+  "codigo": "1234"
+}
+
+Response 200:
+{
+  "status": 200,
+  "data": {
+    "id": 10,
+    "nome": "João Pedro Afonso",
+    "telefone": "+244925813939",
+    "telefoneVerificado": true,
+    "accessToken": "eyJhbGci...",
+    "expiresIn": 86400
+  }
+}
+
+Response 400 (OTP inválido):
+{
+  "status": 400,
+  "message": "Código OTP inválido ou expirado"
+}
+
+USAR PARA: App do cliente onde ele se autentica com telefone + OTP
+
+
+QUAL USAR?
+──────────
+- Painel Administrativo → POST /api/auth/login (username/password)
+- App do Cliente        → POST /api/auth/solicitar-otp + POST /api/auth/validar-otp
+
+
+PERGUNTA 3: Manter mock como fallback ou substituir completamente?
+-------------------------------------------------------------------
+
+RECOMENDAÇÃO: ⚠️ SUBSTITUIR COMPLETAMENTE
+
+Mas se precisarem transição gradual:
+
+
+ESTRATÉGIA 1: Substituição Completa (RECOMENDADO)
+──────────────────────────────────────────────────
+
+1. Remover completamente código mockado
+2. Implementar integração com API real
+3. Usar variáveis de ambiente para configuração
+
+// .env
+VITE_API_URL=http://localhost:8080/api
+
+// api.config.ts
+export const API_CONFIG = {
+  BASE_URL: import.meta.env.VITE_API_URL || 'http://localhost:8080/api',
+  TIMEOUT: 30000
+};
+
+
+ESTRATÉGIA 2: Transição Gradual (SE NECESSÁRIO)
+────────────────────────────────────────────────
+
+// .env
+VITE_API_URL=http://localhost:8080/api
+VITE_USE_MOCK=false
+
+// api.config.ts
+const API_CONFIG = {
+  BASE_URL: import.meta.env.VITE_API_URL || 'http://localhost:8080/api',
+  USE_MOCK: import.meta.env.VITE_USE_MOCK === 'true',
+  TIMEOUT: 30000
+};
+
+// fundoService.ts
+export async function buscarFundo(clienteId: number) {
+  if (API_CONFIG.USE_MOCK) {
+    return mockFundoService.buscarFundo(clienteId);  // Mock
+  }
+  
+  const response = await api.get(`/fundos/cliente/${clienteId}`);  // API
+  return response.data.data;
+}
+
+⚠️ REMOVER MOCK APÓS INTEGRAÇÃO COMPLETA!
+
+
+MOTIVOS PARA NÃO MANTER MOCK PERMANENTEMENTE:
+──────────────────────────────────────────────
+❌ Duplicação de código (2x manutenção)
+❌ Risco de divergência entre mock e API real
+❌ Dificulta debug (não se sabe se erro é do mock ou da API)
+❌ Aumenta complexidade desnecessária
+❌ Testes podem passar com mock mas falhar com API real
+
+
+ALTERNATIVA PARA TESTES:
+────────────────────────
+Use Mock Service Worker (MSW) para testes e2e:
+
+npm install -D msw
+
+// mocks/handlers.ts
+export const handlers = [
+  rest.get('/api/fundos/cliente/:id', (req, res, ctx) => {
+    return res(ctx.json({ /* mock data */ }));
+  })
+];
+
+Isso mantém testes isolados SEM poluir código de produção.
+
+
+================================================================================
+CHECKLIST DE INTEGRAÇÃO
+================================================================================
+
+Para facilitar, aqui está a ordem recomendada:
+
+
+☐ FASE 1: AUTENTICAÇÃO
+   ☐ 1.1. Implementar serviço de autenticação
+      ☐ Login (POST /api/auth/login)
+      ☐ Armazenar token no sessionStorage
+      ☐ Função logout (limpar sessionStorage)
+   
+   ☐ 1.2. Configurar interceptor HTTP
+      ☐ Adicionar Bearer token em todas requisições
+      ☐ Redirecionar para login em erro 401
+      ☐ Implementar refresh de token (se aplicável)
+   
+   ☐ 1.3. Testar autenticação
+      ☐ Fazer login com admin/senha123
+      ☐ Verificar token armazenado
+      ☐ Verificar header Authorization em requisições
+      ☐ Testar expiração (forçar 401)
+
+
+☐ FASE 2: CONFIGURAÇÃO INICIAL
+   ☐ 2.1. Consultar valor mínimo
+      ☐ GET /api/fundos/config/valor-minimo
+      ☐ Armazenar em estado global/context
+      ☐ Exibir no formulário de criação
+   
+   ☐ 2.2. Configurar validações
+      ☐ Validar saldoInicial >= valorMinimo
+      ☐ Validar formato de valores (2 casas decimais)
+      ☐ Validar clienteId numérico
+
+
+☐ FASE 3: CRIAÇÃO DE FUNDO
+   ☐ 3.1. Implementar formulário
+      ☐ Campo clienteId (seleção)
+      ☐ Campo saldoInicial (input number)
+      ☐ Campo observacoes (textarea opcional)
+      ☐ Exibir valor mínimo dinâmico
+   
+   ☐ 3.2. Implementar chamada API
+      ☐ POST /api/fundos com clienteId + saldoInicial + observacoes
+      ☐ Tratar sucesso (exibir fundo criado)
+      ☐ Tratar erros (400, 404, 401, 500)
+   
+   ☐ 3.3. Testar criação
+      ☐ Criar com saldo >= 5.000 AOA (sucesso)
+      ☐ Tentar criar com saldo < 5.000 AOA (erro 400)
+      ☐ Verificar transação CREDITO criada
+
+
+☐ FASE 4: BUSCA DE FUNDO
+   ☐ 4.1. Implementar busca
+      ☐ GET /api/fundos/cliente/{id}
+      ☐ Exibir dados do fundo (saldo, status, datas)
+      ☐ Exibir dados do cliente completos
+   
+   ☐ 4.2. Tratar estados
+      ☐ Loading durante requisição
+      ☐ Fundo encontrado (exibir dados)
+      ☐ Fundo não encontrado (404)
+      ☐ Erro de rede (500)
+
+
+☐ FASE 5: RECARGA DE FUNDO
+   ☐ 5.1. Implementar recarga GPO
+      ☐ POST /api/fundos/{id}/recarregar (GPO)
+      ☐ Redirecionar para urlPagamento
+      ☐ Implementar polling para verificar confirmação
+   
+   ☐ 5.2. Implementar recarga REF
+      ☐ POST /api/fundos/{id}/recarregar (REF)
+      ☐ Exibir entidade + referência
+      ☐ Implementar polling (pode demorar horas)
+      ☐ Exibir status "Aguardando confirmação"
+
+
+☐ FASE 6: HISTÓRICO DE TRANSAÇÕES
+   ☐ 6.1. Implementar listagem
+      ☐ GET /api/fundos/{id}/transacoes
+      ☐ Exibir em tabela/lista ordenada (mais recente primeiro)
+      ☐ Cores: verde (CREDITO/ESTORNO), vermelho (DEBITO)
+   
+   ☐ 6.2. Implementar filtros
+      ☐ Por tipo (CREDITO, DEBITO, ESTORNO)
+      ☐ Por período (data início/fim)
+      ☐ Por valor (mínimo/máximo)
+
+
+☐ FASE 7: TESTES INTEGRADOS
+   ☐ 7.1. Fluxo completo
+      ☐ Login → Consultar valor mínimo → Criar fundo → Buscar fundo
+   
+   ☐ 7.2. Cenários de erro
+      ☐ Token expirado (401)
+      ☐ Saldo insuficiente (400)
+      ☐ Fundo não encontrado (404)
+      ☐ Gateway indisponível (500)
+
+
+☐ FASE 8: REFATORAÇÃO E LIMPEZA
+   ☐ 8.1. Remover código mockado
+      ☐ Deletar arquivos de mock
+      ☐ Remover flags USE_MOCK
+      ☐ Limpar imports não utilizados
+   
+   ☐ 8.2. Documentar código
+      ☐ Adicionar JSDoc nos serviços
+      ☐ Documentar interfaces TypeScript
+      ☐ Adicionar comentários em lógica complexa
+
+
+================================================================================
+INFORMAÇÕES ADICIONAIS
+================================================================================
+
+ESTRUTURA DE ERROS
+──────────────────
+
+Todos os erros seguem o formato padrão:
+
+{
+  "status": 400,
+  "message": "Mensagem de erro legível",
+  "timestamp": "2026-02-17T15:30:00",
+  "path": "/api/fundos"
+}
+
+Códigos HTTP:
+- 200 OK              → Sucesso (GET)
+- 201 Created         → Recurso criado (POST)
+- 400 Bad Request     → Validação falhou
+- 401 Unauthorized    → Token inválido/ausente
+- 403 Forbidden       → Sem permissão
+- 404 Not Found       → Recurso não encontrado
+- 409 Conflict        → Conflito (ex: fundo já existe)
+- 500 Internal Error  → Erro no servidor
+
+
+PERMISSÕES POR ROLE
+───────────────────
+
+ADMIN:
+✓ Acesso total a todos os endpoints
+✓ Criar fundos para qualquer cliente
+✓ Recarregar fundos
+✓ Consultar qualquer fundo
+✓ Ver histórico completo
+
+ATENDENTE:
+✓ Consultar fundos
+✓ Ver histórico
+✗ NÃO pode recarregar fundos
+✗ NÃO pode criar fundos
+
+CLIENTE:
+✓ Ver próprio saldo
+✓ Ver próprio histórico
+✗ NÃO pode recarregar (somente via gateway)
+✗ NÃO pode ver outros clientes
+
+
+CORS
+────
+
+Backend já está configurado para aceitar requisições de:
+- http://localhost:3000
+- http://localhost:4200
+
+Se precisar adicionar outra origem, solicitar no backend.
+
+
+TIMEOUT
+───────
+
+Recomendado: 30 segundos
+
+axios.create({
+  timeout: 30000
+});
+
+
+RETRY COM EXPONENTIAL BACKOFF
+──────────────────────────────
+
+Implementar para erros 5xx (servidor):
+
+async function fetchComRetry(url, options, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fetch(url, options);
+    } catch (error) {
+      if (error.status >= 500 && i < maxRetries - 1) {
+        const delay = Math.pow(2, i) * 1000; // 1s, 2s, 4s
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+
+FORMATAÇÃO DE VALORES MONETÁRIOS
+─────────────────────────────────
+
+// Formato Angolano (AOA)
+const formatarMoeda = (valor: number) => {
+  return new Intl.NumberFormat('pt-AO', {
+    style: 'currency',
+    currency: 'AOA',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(valor);
+};
+
+// Resultado: "5.000,00 AOA"
+
+
+FORMATAÇÃO DE DATAS
+───────────────────
+
+// ISO 8601 para Date
+const data = new Date('2026-02-17T10:00:00');
+
+// Formato curto
+data.toLocaleDateString('pt-AO');  // "17/02/2026"
+
+// Formato longo
+data.toLocaleString('pt-AO');      // "17/02/2026, 10:00:00"
+
+// Personalizado
+new Intl.DateTimeFormat('pt-AO', {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit'
+}).format(data);  // "17 de fev. de 2026, 10:00"
+
+
+NOTIFICAÇÕES VIA WEBSOCKET (FUTURO)
+────────────────────────────────────
+
+Backend suporta WebSocket em: ws://localhost:8080/ws
+
+Para receber notificações em tempo real quando pagamento for confirmado:
+
+const socket = new WebSocket('ws://localhost:8080/ws');
+
+socket.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  if (message.type === 'PAGAMENTO_CONFIRMADO') {
+    // Atualizar saldo
+  }
+};
+
+⚠️ Implementar posteriormente, não é crítico para MVP
+
+
+================================================================================
+DÚVIDAS FREQUENTES (FAQ)
+================================================================================
+
+Q1: Posso criar fundo com saldo zero?
+A1: NÃO. Saldo mínimo é 5.000 AOA (configurável no backend).
+
+Q2: O que acontece se enviar valor abaixo do mínimo?
+A2: Erro 400 com mensagem: "Saldo inicial deve ser no mínimo 5000.00 AOA"
+
+Q3: Transação de carga inicial é criada automaticamente?
+A3: SIM. Backend cria TransacaoFundo tipo CREDITO ao criar fundo.
+
+Q4: Cliente pode ter múltiplos fundos?
+A4: NÃO. Um cliente = Um fundo ativo por vez.
+
+Q5: Como encerrar um fundo?
+A5: Não há endpoint público. Apenas ADMIN pode encerrar via operação interna.
+
+Q6: Fundo encerrado pode ser reativado?
+A6: NÃO. Precisa criar novo fundo.
+
+Q7: Token JWT expira?
+A7: SIM. Validade: 24 horas (86400 segundos).
+
+Q8: O que fazer quando token expirar?
+A8: Redirecionar para tela de login.
+
+Q9: Posso usar localStorage para token?
+A9: NÃO RECOMENDADO. Use sessionStorage (mais seguro contra XSS).
+
+Q10: Valores monetários precisam ter 2 casas decimais?
+A10: SIM. Backend valida precision 10, scale 2.
+
+Q11: Endpoint de recarga é síncrono ou assíncrono?
+A11: ASSÍNCRONO. Retorna Pagamento pendente, usar polling para verificar.
+
+Q12: Quanto tempo demora confirmação REF?
+A12: De 5 minutos a 24 horas (depende do banco).
+
+Q13: GPO é instantâneo?
+A13: SIM, mas ainda requer callback. Polling recomendado (mais rápido que REF).
+
+Q14: Como sei se pagamento foi confirmado?
+A14: Consultar saldo periodicamente (GET /api/fundos/cliente/{id}).
+
+Q15: Posso filtrar transações por data?
+A15: Atualmente endpoint retorna todas. Implementar filtro no frontend.
+
+
+================================================================================
+CONTATO E SUPORTE
+================================================================================
+
+Para dúvidas adicionais ou problemas durante integração:
+
+Backend Team:
+- Documentação API: http://localhost:8080/swagger-ui.html
+- Arquivo Postman: API_EXAMPLES.md (raiz do projeto)
+
+PRÓXIMOS PASSOS:
+1. Revisar este documento com a equipe
+2. Definir prioridades de implementação
+3. Iniciar FASE 1 (Autenticação)
+4. Reunião de acompanhamento em 3 dias
+
+BOA INTEGRAÇÃO! 🚀
+
+================================================================================
+ÚLTIMA ATUALIZAÇÃO: 17 de Fevereiro de 2026
+VERSÃO DO DOCUMENTO: 1.0
+================================================================================

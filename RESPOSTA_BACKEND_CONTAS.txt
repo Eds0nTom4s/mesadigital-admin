@@ -1,0 +1,1159 @@
+================================================================================
+  RESPOSTA BACKEND - ESPECIFICAÇÃO DE CONTAS E PAGAMENTOS
+================================================================================
+
+Data: 20 de Fevereiro de 2026
+De: Equipe Backend
+Para: Equipe Frontend
+Referência: SOLICITACAO_BACKEND_CONTAS.md
+
+================================================================================
+SUMÁRIO EXECUTIVO
+================================================================================
+
+Agradecemos pela solicitação detalhada e organizada. Após análise completa do
+código backend, fornecemos abaixo as respostas para todas as questões levantadas.
+
+PRINCIPAIS ESCLARECIMENTOS:
+- A entidade correta é UNIDADE DE CONSUMO (não "Conta")
+- Estados financeiros estão IMPLEMENTADOS no Pedido
+- Fundo de Consumo está vinculado ao CLIENTE
+- Débito automático FUNCIONA no momento da criação do pedido
+- Pós-pago possui INTERRUPTOR GLOBAL no sistema
+
+
+================================================================================
+1. ENTIDADE CONTA - RESPOSTA
+================================================================================
+
+1.1 NOME CORRETO DA ENTIDADE
+-----------------------------
+
+❌ NÃO existe entidade "Conta"
+✅ EXISTE entidade "UnidadeDeConsumo"
+
+EXPLICAÇÃO:
+O conceito que você chamou de "Conta" no frontend corresponde à nossa entidade
+"UnidadeDeConsumo". Esta é uma abstração genérica que representa um ponto de
+consumo no sistema.
+
+UNIDADE DE CONSUMO pode ser:
+- Mesa física de restaurante
+- Quarto de hotel (room service)
+- Área de evento
+- Espaço lounge
+- Virtual (delivery)
+
+CAMINHO DA ENTIDADE:
+src/main/java/com/restaurante/model/entity/UnidadeDeConsumo.java
+
+
+1.2 CONCEITO E RESPONSABILIDADES
+---------------------------------
+
+Uma UnidadeDeConsumo:
+- Representa um ponto de consumo ativo no sistema
+- SEMPRE está associada a um Cliente (obrigatório)
+- Pode ter múltiplos Pedidos vinculados
+- Possui ciclo de vida: DISPONIVEL → OCUPADA → AGUARDANDO_PAGAMENTO → FINALIZADA
+- Criada quando cliente escaneia QR Code OU atendente cria manualmente
+- Vinculada obrigatoriamente a uma UnidadeAtendimento (restaurante, bar, etc)
+
+
+1.3 DIFERENÇAS CONCEITUAIS
+---------------------------
+
+FRONTEND (seu modelo):           BACKEND (modelo real):
+├─ Conta                    →    UnidadeDeConsumo
+├─ identificador            →    referencia
+├─ tipo (MESA/COMANDA)      →    tipo (enum TipoUnidadeConsumo)
+├─ statusFinanceiro         →    status (enum StatusUnidadeConsumo)
+├─ aberturaEm              →    abertaEm
+├─ fechamentoEm            →    fechadaEm
+├─ pedidos                 →    pedidos (List<Pedido>)
+└─ fundoConsumo            →    (indiretamente via Cliente)
+
+
+================================================================================
+2. ESTADOS FINANCEIROS - RESPOSTA
+================================================================================
+
+2.1 ONDE ESTÃO OS ESTADOS FINANCEIROS?
+---------------------------------------
+
+Os estados financeiros estão em DUAS entidades:
+
+A) PEDIDO - StatusFinanceiroPedido (eixo financeiro do pedido):
+   - NAO_PAGO: Aguardando pagamento (pós-pago)
+   - PAGO: Pagamento confirmado
+   - ESTORNADO: Cancelado com devolução
+
+B) UNIDADE DE CONSUMO - StatusUnidadeConsumo (ciclo de vida):
+   - DISPONIVEL: Livre para uso
+   - OCUPADA: Em uso por cliente
+   - AGUARDANDO_PAGAMENTO: Consumo finalizado, pagamento pendente
+   - FINALIZADA: Pagamento concluído
+
+
+2.2 NOMENCLATURA CORRETA
+-------------------------
+
+❌ NÃO use: "PAGO", "EM_DEBITO", "PARCIAL" como estados da UnidadeDeConsumo
+✅ USE: Os enums acima conforme a entidade
+
+IMPORTANTE:
+- StatusFinanceiroPedido é do PEDIDO individual
+- StatusUnidadeConsumo é da UNIDADE DE CONSUMO (mesa/comanda)
+- São conceitos DIFERENTES e INDEPENDENTES
+
+
+2.3 CÁLCULO DE ESTADOS
+-----------------------
+
+StatusFinanceiroPedido (PEDIDO):
+- Armazenado no banco de dados
+- Atualizado automaticamente ao processar pagamento
+- Independente do estado operacional (StatusPedido)
+
+StatusUnidadeConsumo (UNIDADE):
+- Armazenado no banco de dados
+- Atualizado conforme ciclo de vida da unidade
+- Não é calculado em tempo real
+
+
+2.4 RESUMO FINANCEIRO DA UNIDADE
+---------------------------------
+
+Para calcular totais financeiros de uma UnidadeDeConsumo:
+
+TOTAL CONSUMIDO:
+- Soma de todos os pedidos.total da unidade
+
+TOTAL PAGO:
+- Soma dos pedidos com statusFinanceiro = PAGO
+
+TOTAL PENDENTE:
+- Soma dos pedidos com statusFinanceiro = NAO_PAGO
+
+CÁLCULO NO FRONTEND:
+Estes valores NÃO são armazenados. Devem ser calculados pelo frontend
+a partir da lista de pedidos retornada no response.
+
+
+================================================================================
+3. RELAÇÃO UNIDADE DE CONSUMO ↔ PEDIDO - RESPOSTA
+================================================================================
+
+3.1 RELACIONAMENTO CONFIRMADO
+------------------------------
+
+✅ Uma UnidadeDeConsumo pode ter múltiplos Pedidos
+✅ Cada Pedido pertence a uma única UnidadeDeConsumo
+✅ Relacionamento: @OneToMany (UnidadeDeConsumo → Pedidos)
+
+ESTRUTURA JPA:
+UnidadeDeConsumo {
+    @OneToMany(mappedBy = "unidadeConsumo")
+    private List<Pedido> pedidos;
+}
+
+Pedido {
+    @ManyToOne
+    @JoinColumn(name = "unidade_consumo_id", nullable = false)
+    private UnidadeDeConsumo unidadeConsumo;
+}
+
+
+3.2 CICLO DE VIDA DA UNIDADE DE CONSUMO
+----------------------------------------
+
+ABERTURA:
+- Cliente escaneia QR Code da mesa
+- OU Atendente cria manualmente via painel
+- Status inicial: OCUPADA
+- Timestamp abertaEm registrado
+- Cliente vinculado obrigatoriamente
+
+DURANTE USO:
+- Cliente pode fazer múltiplos pedidos
+- Status permanece OCUPADA enquanto houver consumo ativo
+
+FECHAMENTO:
+- Atendente chama endpoint PUT /api/unidades-consumo/{id}/fechar
+- Sistema valida se pode fechar (ver seção 8.2)
+- Status muda para FINALIZADA
+- Timestamp fechadaEm registrado
+
+
+================================================================================
+4. FUNDO DE CONSUMO - INTEGRAÇÃO - RESPOSTA
+================================================================================
+
+4.1 VINCULAÇÃO DO FUNDO
+------------------------
+
+✅ Fundo de Consumo está vinculado ao CLIENTE (não à UnidadeDeConsumo)
+
+ESTRUTURA:
+Cliente (1) ←→ (0..1) FundoConsumo
+
+REGRAS:
+- Um Cliente pode ter UM fundo ativo por vez
+- Relacionamento @OneToOne
+- FundoConsumo pertence ao Cliente
+- Todas as UnidadesDeConsumo do mesmo Cliente usam o mesmo fundo
+
+
+4.2 DÉBITO AUTOMÁTICO
+----------------------
+
+✅ O débito é AUTOMÁTICO ao criar pedido com tipoPagamento = PRE_PAGO
+
+FLUXO TÉCNICO:
+1. Frontend chama POST /api/pedidos com CriarPedidoRequest
+2. Backend valida saldo suficiente no Fundo do Cliente
+3. Backend cria o Pedido
+4. Backend debita automaticamente o Fundo (TransacaoFundo.DEBITO)
+5. Backend marca statusFinanceiro = PAGO
+6. Backend retorna PedidoResponse com pedido já pago
+
+IDEMPOTÊNCIA:
+Se pedido já estiver pago, sistema ignora processamento duplicado.
+
+
+4.3 CONSULTA DE FUNDO DISPONÍVEL
+---------------------------------
+
+Endpoint para consultar fundo:
+GET /api/fundos-consumo/cliente/{clienteId}
+
+Response:
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "saldoAtual": 15000.00,
+    "ativo": true,
+    "clienteId": 123
+  }
+}
+
+ALTERNATIVA (obter junto com UnidadeDeConsumo):
+GET /api/unidades-consumo/{id}
+
+Response incluirá:
+{
+  "cliente": {
+    "id": 123,
+    "nome": "João Silva",
+    "fundoConsumo": {
+      "id": 1,
+      "saldoAtual": 15000.00
+    }
+  }
+}
+
+
+================================================================================
+5. PAGAMENTO DE PEDIDOS - FLUXO CORRETO - RESPOSTA
+================================================================================
+
+5.1 VALIDAÇÃO DOS FLUXOS
+-------------------------
+
+FLUXO A - Com Fundo Suficiente (PRE_PAGO):
+✅ CORRETO
+
+1. POST /api/pedidos { unidadeConsumoId, itens[], tipoPagamento: "PRE_PAGO" }
+2. Backend debita automaticamente do fundo
+3. Retorna pedido com statusFinanceiro = PAGO
+
+OBSERVAÇÕES:
+- tipoPagamento é OPCIONAL no request (default: PRE_PAGO)
+- Se saldo insuficiente, retorna erro 400 com mensagem clara
+
+
+FLUXO B - Sem Fundo (POS_PAGO):
+✅ PARCIALMENTE CORRETO (ajustes necessários)
+
+FLUXO REAL:
+1. POST /api/pedidos { unidadeConsumoId, itens[], tipoPagamento: "POS_PAGO" }
+2. Backend valida se pós-pago está ATIVO globalmente
+3. Backend valida se usuário tem permissão (GERENTE/ADMIN)
+4. Backend cria pedido com statusFinanceiro = NAO_PAGO
+5. Backend retorna PedidoResponse
+
+DEPOIS, para confirmar pagamento:
+6. PUT /api/pedidos/{id}/confirmar-pagamento (somente GERENTE/ADMIN)
+7. Backend marca statusFinanceiro = PAGO
+
+
+5.2 ENDPOINT DE PAGAMENTO
+--------------------------
+
+❌ NÃO existe: POST /api/pedidos/{id}/pagar
+✅ EXISTE: PUT /api/pedidos/{id}/confirmar-pagamento
+
+IMPORTANTE:
+Este endpoint confirma pagamento POS_PAGO após pagamento presencial.
+Somente GERENTE ou ADMIN podem chamar.
+
+Request: (sem body)
+PUT /api/pedidos/{id}/confirmar-pagamento
+Authorization: Bearer {token_gerente}
+
+Response:
+{
+  "success": true,
+  "message": "Pagamento confirmado para pedido PED-100",
+  "data": {
+    "id": 100,
+    "statusFinanceiro": "PAGO",
+    "pagoEm": "2026-02-20T18:45:00"
+  }
+}
+
+
+5.3 MÉTODOS DE PAGAMENTO
+-------------------------
+
+TipoPagamentoPedido (usado ao criar pedido):
+- PRE_PAGO: Débito automático de Fundo de Consumo
+- POS_PAGO: Pagamento posterior (requer autorização)
+
+IMPORTANTE:
+- NÃO confundir com métodos de gateway (GPO, REFERENCIA, MULTICAIXA)
+- Métodos de gateway são usados para RECARGA de Fundo (via AppyPay)
+- No contexto de pedidos, usa-se apenas PRE_PAGO ou POS_PAGO
+
+
+5.4 CAMPO ESTADO FINANCEIRO
+----------------------------
+
+✅ O campo statusFinanceiro EXISTE em Pedido
+
+VALORES:
+- NAO_PAGO: Aguardando pagamento
+- PAGO: Pagamento confirmado
+- ESTORNADO: Cancelado com devolução
+
+LOCALIZAÇÃO:
+src/main/java/com/restaurante/model/enums/StatusFinanceiroPedido.java
+
+
+================================================================================
+6. ENDPOINTS NECESSÁRIOS - RESPOSTA
+================================================================================
+
+6.1 ENDPOINTS DE UNIDADES DE CONSUMO
+-------------------------------------
+
+BASE URL: /api/unidades-consumo
+
+✅ GET /api/unidades-consumo/status/{status}
+   - Lista unidades filtradas por status
+   - Params: status (DISPONIVEL, OCUPADA, AGUARDANDO_PAGAMENTO, FINALIZADA)
+   - Use OCUPADA para listar "abertas"
+
+✅ GET /api/unidades-consumo/{id}
+   - Detalhes completos da unidade
+   - Inclui: cliente, pedidos, totais
+
+✅ POST /api/unidades-consumo
+   - Criar nova unidade (abrir mesa/comanda)
+   - Request: CriarUnidadeConsumoRequest
+   - Body: { referencia, tipo, clienteId, unidadeAtendimentoId }
+
+✅ PUT /api/unidades-consumo/{id}/fechar
+   - Fechar unidade (validações aplicadas)
+   - Sem body
+
+❌ GET /api/unidades-consumo/{id}/resumo
+   - Não existe endpoint separado
+   - Resumo vem junto no GET /api/unidades-consumo/{id}
+
+
+6.2 ENDPOINTS DE PEDIDOS
+-------------------------
+
+BASE URL: /api/pedidos
+
+✅ GET /api/pedidos (listar todos)
+✅ POST /api/pedidos (criar pedido)
+✅ GET /api/pedidos/{id} (buscar por ID)
+✅ GET /api/pedidos/numero/{numero} (buscar por número)
+✅ GET /api/pedidos/status/{status} (filtrar por status operacional)
+✅ PUT /api/pedidos/{id}/cancelar?motivo={motivo} (cancelar)
+✅ PUT /api/pedidos/{id}/confirmar-pagamento (confirmar pagamento pós-pago)
+
+❌ NÃO EXISTE: GET /api/pedidos/conta/{contaId}
+✅ USE: GET /api/pedidos?unidadeConsumoId={id}
+   OU implemente filtro no frontend após obter pedidos da unidade
+
+
+6.3 ENDPOINTS DE PRODUTOS
+--------------------------
+
+✅ GET /api/produtos (lista todos)
+✅ GET /api/produtos/{id} (buscar por ID)
+✅ GET /api/produtos/categoria/{categoriaId} (filtrar por categoria)
+
+❌ NÃO EXISTE: GET /api/produtos/disponiveis
+✅ ALTERNATIVA: Filtrar disponibilidade no frontend
+   (campo disponivel=true vem no response)
+
+
+================================================================================
+7. ESTRUTURA DE DADOS ESPERADA - RESPOSTA
+================================================================================
+
+7.1 UNIDADE DE CONSUMO RESPONSE
+--------------------------------
+
+UnidadeConsumoResponse {
+  "id": 1,
+  "referencia": "Mesa 10",                     // ← identificador
+  "tipo": "MESA_FISICA",                       // ← TipoUnidadeConsumo enum
+  "numero": 10,                                // ← número da mesa
+  "qrCode": "QR-MESA-10-ABC123",               // ← QR Code único
+  "status": "OCUPADA",                         // ← StatusUnidadeConsumo enum
+  "capacidade": 4,                             // ← lotação máxima
+  "abertaEm": "2026-02-20T18:30:00",           // ← timestamp abertura
+  "fechadaEm": null,                           // ← timestamp fechamento
+  "cliente": {                                 // ← cliente vinculado
+    "id": 123,
+    "nome": "João Silva",
+    "email": "joao@email.com",
+    "telefone": "+244900000000"
+  },
+  "pedidos": [                                 // ← lista de pedidos
+    {
+      "id": 100,
+      "numero": "PED-100",
+      "status": "EM_ANDAMENTO",                // ← StatusPedido
+      "statusFinanceiro": "PAGO",              // ← StatusFinanceiroPedido
+      "total": 5000.00,
+      "createdAt": "2026-02-20T18:35:00"
+    }
+  ],
+  "total": 5000.00                             // ← soma de pedidos.total
+}
+
+
+7.2 CAMPOS FINANCEIROS CALCULADOS
+----------------------------------
+
+IMPORTANTE: Estes campos NÃO vêm do backend.
+Frontend deve calcular:
+
+totalConsumido = soma de todos pedidos.total
+totalPago = soma de pedidos onde statusFinanceiro = PAGO
+totalPendente = soma de pedidos onde statusFinanceiro = NAO_PAGO
+
+statusFinanceiroConsolidado:
+- Se totalPendente = 0 → "PAGO"
+- Se totalPago = 0 → "EM_DEBITO"
+- Se totalPago > 0 E totalPendente > 0 → "PARCIAL"
+
+
+7.3 PEDIDO - CAMPOS FINANCEIROS
+--------------------------------
+
+PedidoResponse {
+  "id": 101,
+  "numero": "PED-101",
+  "status": "ENTREGUE",                        // ← StatusPedido (operacional)
+  "statusFinanceiro": "PAGO",                  // ← StatusFinanceiroPedido
+  "tipoPagamento": "PRE_PAGO",                 // ← TipoPagamentoPedido
+  "total": 5000.00,                            // ← valor total
+  "pagoEm": "2026-02-20T18:35:00",             // ← timestamp pagamento
+  "observacoes": "Pedido urgente",
+  "unidadeConsumoId": 1,
+  "referenciaUnidadeConsumo": "Mesa 10",
+  "itens": [ ... ],
+  "createdAt": "2026-02-20T18:30:00",
+  "updatedAt": "2026-02-20T18:35:00"
+}
+
+✅ statusFinanceiro: Existe
+✅ tipoPagamento: Existe
+✅ pagoEm: Existe
+❌ metodoPagamento: Não existe no Pedido
+❌ valorPago: Use "total" (sempre pago integralmente)
+
+
+7.4 TIPOS DE DADOS
+------------------
+
+✅ BigDecimal para valores monetários (Kwanzas)
+✅ LocalDateTime para timestamps
+✅ statusFinanceiro é ARMAZENADO (não calculado)
+✅ totalConsumido/totalPago/totalPendente são CALCULADOS pelo frontend
+✅ pedidos[] vem populado no response de UnidadeDeConsumo
+
+
+================================================================================
+8. REGRAS DE NEGÓCIO - VALIDAÇÕES - RESPOSTA
+================================================================================
+
+8.1 CRIAÇÃO DE PEDIDO
+----------------------
+
+✅ UnidadeDeConsumo deve estar com status = OCUPADA
+✅ Se tipoPagamento = PRE_PAGO:
+   - Valida saldo suficiente no Fundo do Cliente
+   - Erro 400 se saldo insuficiente
+✅ Se tipoPagamento = POS_PAGO:
+   - Valida se pós-pago está ATIVO globalmente
+   - Valida se usuário tem role GERENTE ou ADMIN
+   - Erro 403 se não autorizado
+   - Cria pedido com statusFinanceiro = NAO_PAGO
+
+
+8.2 FECHAMENTO DE UNIDADE DE CONSUMO
+-------------------------------------
+
+VALIDAÇÕES ATUAIS (implementadas):
+✅ Não permite se status já = FINALIZADA
+
+VALIDAÇÕES FINANCEIRAS (removidas):
+❌ NÃO valida totalPendente > 0
+
+DECISÃO DE DESIGN:
+A validação financeira foi REMOVIDA propositalmente para ser gerenciada
+pelo módulo financeiro (futuro). Atualmente, frontend deve:
+- Avisar se há pendências
+- Permitir fechamento mesmo com pendências
+- Gerente assume responsabilidade
+
+
+8.3 PAGAMENTO DE PEDIDO
+------------------------
+
+PAGAMENTO PRE_PAGO (automático):
+✅ Débito atômico do fundo
+✅ Não permite valor parcial
+✅ Não permite valor maior que total
+
+PAGAMENTO POS_PAGO (manual):
+✅ Somente GERENTE/ADMIN pode confirmar
+✅ Marca como PAGO integralmente
+✅ Não registra método de pagamento presencial (implementação futura)
+
+
+8.4 CANCELAMENTO DE PEDIDO
+---------------------------
+
+VALIDAÇÕES:
+✅ Somente GERENTE pode cancelar
+✅ Motivo é obrigatório (mínimo 5 caracteres)
+✅ Não pode cancelar se status = FINALIZADO ou CANCELADO
+
+ESTORNO AUTOMÁTICO:
+✅ Se pedido estava PAGO:
+   - Se PRE_PAGO: devolve para Fundo de Consumo
+   - Se POS_PAGO: apenas marca como ESTORNADO
+✅ statusFinanceiro muda para ESTORNADO
+✅ Todos SubPedidos são cancelados automaticamente
+
+
+================================================================================
+9. POLÍTICA PÓS-PAGO - RESPOSTA
+================================================================================
+
+9.1 CONFIGURAÇÃO GLOBAL
+------------------------
+
+✅ Pós-pago possui INTERRUPTOR GLOBAL no sistema
+
+LOCALIZAÇÃO:
+src/main/java/com/restaurante/service/ConfiguracaoFinanceiraService.java
+
+
+9.2 CONSULTA DE CONFIGURAÇÃO
+-----------------------------
+
+❌ NÃO EXISTE endpoint REST específico
+
+ALTERNATIVA 1 - Via Erro:
+- Tente criar pedido POS_PAGO
+- Se pós-pago desabilitado, retorna erro 400:
+  "Pós-pago está desabilitado no sistema"
+
+ALTERNATIVA 2 - Via Service (backend):
+- ConfiguracaoFinanceiraService.isPosPagoAtivo()
+- Método público disponível
+
+RECOMENDAÇÃO:
+Frontend deve assumir que pós-pago está disponível para GERENTE/ADMIN.
+Se erro 400 retornar, exibir mensagem ao usuário.
+
+
+9.3 ESCOPO DA POLÍTICA
+-----------------------
+
+✅ Configuração é GLOBAL (todo o sistema)
+❌ NÃO é por unidade
+❌ NÃO é por tipo de cliente
+❌ NÃO é por UnidadeDeConsumo
+
+
+9.4 LIMITE PÓS-PAGO
+--------------------
+
+✅ Sistema possui limite pós-pago: R$ 500,00 (padrão)
+
+VALIDAÇÃO:
+- Ao criar pedido POS_PAGO, valida se total de pedidos NAO_PAGO do cliente
+  não excede limite configurado
+- Se exceder, retorna erro 400: "Limite de pós-pago excedido"
+
+CÁLCULO:
+- Soma pedidos do Cliente com statusFinanceiro = NAO_PAGO
+- Se soma + novo pedido > limite, bloqueia
+
+
+================================================================================
+10. AJUSTES NECESSÁRIOS NO FRONTEND
+================================================================================
+
+10.1 NOMENCLATURA
+-----------------
+
+SUBSTITUIR:                      POR:
+├─ Conta                    →    UnidadeDeConsumo
+├─ contaId                  →    unidadeConsumoId
+├─ identificador            →    referencia
+├─ aberturaEm              →    abertaEm
+├─ fechamentoEm            →    fechadaEm
+
+
+10.2 ENDPOINTS
+--------------
+
+SUBSTITUIR:                                    POR:
+├─ GET /api/contas/abertas                →   GET /api/unidades-consumo/status/OCUPADA
+├─ GET /api/contas/{id}                   →   GET /api/unidades-consumo/{id}
+├─ POST /api/contas                       →   POST /api/unidades-consumo
+├─ PUT /api/contas/{id}/fechar            →   PUT /api/unidades-consumo/{id}/fechar
+├─ GET /api/contas/{id}/resumo            →   (calcular no frontend)
+├─ GET /api/pedidos/conta/{contaId}       →   (filtrar pedidos da unidade)
+├─ POST /api/pedidos/{id}/pagar           →   PUT /api/pedidos/{id}/confirmar-pagamento
+
+
+10.3 CAMPOS FINANCEIROS
+-----------------------
+
+CALCULAR NO FRONTEND (não vêm do backend):
+- totalConsumido (soma de pedidos.total)
+- totalPago (soma de pedidos.total onde statusFinanceiro=PAGO)
+- totalPendente (soma de pedidos.total onde statusFinanceiro=NAO_PAGO)
+- statusFinanceiroConsolidado (baseado nos totais acima)
+
+
+10.4 ENUMS
+----------
+
+StatusUnidadeConsumo (status da unidade):
+- DISPONIVEL
+- OCUPADA
+- AGUARDANDO_PAGAMENTO
+- FINALIZADA
+
+StatusFinanceiroPedido (estado financeiro do pedido):
+- NAO_PAGO
+- PAGO
+- ESTORNADO
+
+TipoPagamentoPedido (tipo de pagamento):
+- PRE_PAGO
+- POS_PAGO
+
+
+================================================================================
+11. EXEMPLOS DE INTEGRAÇÃO
+================================================================================
+
+11.1 CRIAR UNIDADE DE CONSUMO (ABRIR MESA)
+-------------------------------------------
+
+Request:
+POST /api/unidades-consumo
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "referencia": "Mesa 10",
+  "tipo": "MESA_FISICA",
+  "numero": 10,
+  "capacidade": 4,
+  "clienteId": 123,
+  "unidadeAtendimentoId": 1
+}
+
+Response (201):
+{
+  "success": true,
+  "message": "Unidade de consumo criada com sucesso",
+  "data": {
+    "id": 50,
+    "referencia": "Mesa 10",
+    "tipo": "MESA_FISICA",
+    "status": "OCUPADA",
+    "abertaEm": "2026-02-20T19:00:00",
+    "cliente": { ... }
+  }
+}
+
+
+11.2 CRIAR PEDIDO PRE_PAGO (COM FUNDO)
+---------------------------------------
+
+Request:
+POST /api/pedidos
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "unidadeConsumoId": 50,
+  "itens": [
+    {
+      "produtoId": 10,
+      "quantidade": 2,
+      "observacoes": "Sem cebola"
+    }
+  ],
+  "tipoPagamento": "PRE_PAGO",
+  "observacoes": "Pedido urgente"
+}
+
+Response (201):
+{
+  "success": true,
+  "message": "Pedido criado com sucesso",
+  "data": {
+    "id": 100,
+    "numero": "PED-100",
+    "status": "CRIADO",
+    "statusFinanceiro": "PAGO",              ← JÁ PAGO
+    "tipoPagamento": "PRE_PAGO",
+    "total": 5000.00,
+    "pagoEm": "2026-02-20T19:05:00",
+    "unidadeConsumoId": 50
+  }
+}
+
+
+11.3 CRIAR PEDIDO POS_PAGO (SEM FUNDO)
+---------------------------------------
+
+Request:
+POST /api/pedidos
+Authorization: Bearer {token_gerente}
+Content-Type: application/json
+
+{
+  "unidadeConsumoId": 50,
+  "itens": [
+    {
+      "produtoId": 15,
+      "quantidade": 1
+    }
+  ],
+  "tipoPagamento": "POS_PAGO"
+}
+
+Response (201):
+{
+  "success": true,
+  "message": "Pedido criado com sucesso",
+  "data": {
+    "id": 101,
+    "numero": "PED-101",
+    "status": "CRIADO",
+    "statusFinanceiro": "NAO_PAGO",          ← NÃO PAGO
+    "tipoPagamento": "POS_PAGO",
+    "total": 3000.00,
+    "pagoEm": null,
+    "unidadeConsumoId": 50
+  }
+}
+
+
+11.4 CONFIRMAR PAGAMENTO POS_PAGO
+----------------------------------
+
+Request:
+PUT /api/pedidos/101/confirmar-pagamento
+Authorization: Bearer {token_gerente}
+
+Response (200):
+{
+  "success": true,
+  "message": "Pagamento confirmado para pedido PED-101",
+  "data": {
+    "id": 101,
+    "statusFinanceiro": "PAGO",              ← AGORA PAGO
+    "pagoEm": "2026-02-20T19:30:00"
+  }
+}
+
+
+11.5 LISTAR UNIDADES ABERTAS
+-----------------------------
+
+Request:
+GET /api/unidades-consumo/status/OCUPADA
+Authorization: Bearer {token}
+
+Response (200):
+{
+  "success": true,
+  "message": "Sucesso",
+  "data": [
+    {
+      "id": 50,
+      "referencia": "Mesa 10",
+      "status": "OCUPADA",
+      "cliente": { ... },
+      "pedidos": [
+        { "id": 100, "statusFinanceiro": "PAGO", "total": 5000.00 },
+        { "id": 101, "statusFinanceiro": "PAGO", "total": 3000.00 }
+      ],
+      "total": 8000.00
+    }
+  ]
+}
+
+
+11.6 FECHAR UNIDADE DE CONSUMO
+-------------------------------
+
+Request:
+PUT /api/unidades-consumo/50/fechar
+Authorization: Bearer {token}
+
+Response (200):
+{
+  "success": true,
+  "message": "Unidade de consumo fechada com sucesso",
+  "data": {
+    "id": 50,
+    "status": "FINALIZADA",                  ← FECHADA
+    "fechadaEm": "2026-02-20T19:45:00"
+  }
+}
+
+
+================================================================================
+12. ERROS COMUNS E TRATAMENTO
+================================================================================
+
+12.1 ERRO: SALDO INSUFICIENTE
+------------------------------
+
+Situação: Criar pedido PRE_PAGO sem saldo suficiente
+
+Response (400):
+{
+  "success": false,
+  "message": "Saldo insuficiente. Disponível: 1000.00, Necessário: 5000.00",
+  "timestamp": "2026-02-20T19:00:00"
+}
+
+Ação Frontend:
+- Exibir mensagem clara ao usuário
+- Oferecer opção de recarregar fundo
+- OU criar pedido POS_PAGO (se GERENTE)
+
+
+12.2 ERRO: PÓS-PAGO DESABILITADO
+---------------------------------
+
+Situação: Criar pedido POS_PAGO com interruptor OFF
+
+Response (400):
+{
+  "success": false,
+  "message": "Pós-pago está desabilitado no sistema",
+  "timestamp": "2026-02-20T19:00:00"
+}
+
+Ação Frontend:
+- Ocultar opção "Pós-Pago" no formulário
+- OU desabilitar botão com tooltip explicativo
+
+
+12.3 ERRO: PÓS-PAGO NÃO AUTORIZADO
+-----------------------------------
+
+Situação: Cliente tenta criar pedido POS_PAGO
+
+Response (403):
+{
+  "success": false,
+  "message": "Apenas GERENTE ou ADMIN podem criar pedidos pós-pago",
+  "timestamp": "2026-02-20T19:00:00"
+}
+
+Ação Frontend:
+- Verificar role do usuário
+- Exibir opção POS_PAGO apenas para GERENTE/ADMIN
+
+
+12.4 ERRO: LIMITE PÓS-PAGO EXCEDIDO
+------------------------------------
+
+Situação: Cliente tem débitos acumulados acima do limite
+
+Response (400):
+{
+  "success": false,
+  "message": "Limite de pós-pago excedido. Limite: 50000.00, Débito atual: 45000.00, Tentando adicionar: 8000.00",
+  "timestamp": "2026-02-20T19:00:00"
+}
+
+Ação Frontend:
+- Exibir mensagem explicativa
+- Sugerir pagar débitos pendentes
+- OU recarregar fundo
+
+
+12.5 ERRO: UNIDADE NÃO ENCONTRADA
+----------------------------------
+
+Situação: ID inválido de UnidadeDeConsumo
+
+Response (404):
+{
+  "success": false,
+  "message": "Unidade de consumo não encontrada: ID 999",
+  "timestamp": "2026-02-20T19:00:00"
+}
+
+Ação Frontend:
+- Validar IDs antes de enviar
+- Exibir erro amigável ao usuário
+
+
+================================================================================
+13. ESTRUTURA DE REQUEST
+================================================================================
+
+13.1 CriarUnidadeConsumoRequest
+--------------------------------
+
+{
+  "referencia": "Mesa 10",                    // obrigatório
+  "tipo": "MESA_FISICA",                      // obrigatório
+  "numero": 10,                               // opcional
+  "capacidade": 4,                            // opcional
+  "clienteId": 123,                           // obrigatório
+  "unidadeAtendimentoId": 1                   // obrigatório
+}
+
+
+13.2 CriarPedidoRequest
+------------------------
+
+{
+  "unidadeConsumoId": 50,                     // obrigatório
+  "itens": [                                  // obrigatório, min 1
+    {
+      "produtoId": 10,                        // obrigatório
+      "quantidade": 2,                        // obrigatório, min 1
+      "observacoes": "Sem cebola"             // opcional
+    }
+  ],
+  "tipoPagamento": "PRE_PAGO",                // opcional (default: PRE_PAGO)
+  "observacoes": "Pedido urgente"             // opcional
+}
+
+
+================================================================================
+14. MIGRAÇÃO DO CÓDIGO FRONTEND
+================================================================================
+
+14.1 CONTASSERVICE.JS → UNIDADESCONSUMOSERVICE.JS
+--------------------------------------------------
+
+Renomear serviço e atualizar endpoints:
+
+ANTES:
+const API_BASE = '/api/contas';
+
+DEPOIS:
+const API_BASE = '/api/unidades-consumo';
+
+
+14.2 MÉTODOS DO SERVIÇO
+------------------------
+
+listarAbertas():
+  GET /api/unidades-consumo/status/OCUPADA
+
+buscarPorId(id):
+  GET /api/unidades-consumo/${id}
+
+criar(data):
+  POST /api/unidades-consumo
+  Body: { referencia, tipo, clienteId, unidadeAtendimentoId }
+
+fechar(id):
+  PUT /api/unidades-consumo/${id}/fechar
+
+obterResumo(id):
+  - Chamar buscarPorId(id)
+  - Calcular totais no frontend
+
+
+14.3 CÁLCULO DE RESUMO FINANCEIRO
+----------------------------------
+
+function calcularResumo(unidadeConsumo) {
+  const totalConsumido = unidadeConsumo.pedidos
+    .reduce((sum, p) => sum + p.total, 0);
+  
+  const totalPago = unidadeConsumo.pedidos
+    .filter(p => p.statusFinanceiro === 'PAGO')
+    .reduce((sum, p) => sum + p.total, 0);
+  
+  const totalPendente = unidadeConsumo.pedidos
+    .filter(p => p.statusFinanceiro === 'NAO_PAGO')
+    .reduce((sum, p) => sum + p.total, 0);
+  
+  let statusFinanceiro;
+  if (totalPendente === 0) {
+    statusFinanceiro = 'PAGO';
+  } else if (totalPago === 0) {
+    statusFinanceiro = 'EM_DEBITO';
+  } else {
+    statusFinanceiro = 'PARCIAL';
+  }
+  
+  return {
+    totalConsumido,
+    totalPago,
+    totalPendente,
+    statusFinanceiro
+  };
+}
+
+
+14.4 ATUALIZAÇÃO DO COMPONENTE
+-------------------------------
+
+PedidosBalcaoView.vue:
+
+SUBSTITUIR:
+- contas → unidadesConsumo
+- contaSelecionada → unidadeSelecionada
+- contasService → unidadesConsumoService
+- statusFinanceiro (prop) → calcular localmente
+
+
+================================================================================
+15. DOCUMENTAÇÃO ADICIONAL
+================================================================================
+
+15.1 ARQUIVOS DE REFERÊNCIA
+----------------------------
+
+ENTIDADES:
+- src/main/java/com/restaurante/model/entity/UnidadeDeConsumo.java
+- src/main/java/com/restaurante/model/entity/Pedido.java
+- src/main/java/com/restaurante/model/entity/FundoConsumo.java
+
+ENUMS:
+- src/main/java/com/restaurante/model/enums/StatusUnidadeConsumo.java
+- src/main/java/com/restaurante/model/enums/StatusFinanceiroPedido.java
+- src/main/java/com/restaurante/model/enums/TipoPagamentoPedido.java
+
+CONTROLLERS:
+- src/main/java/com/restaurante/controller/UnidadeDeConsumoController.java
+- src/main/java/com/restaurante/controller/PedidoController.java
+
+SERVICES:
+- src/main/java/com/restaurante/service/UnidadeDeConsumoService.java
+- src/main/java/com/restaurante/service/PedidoService.java
+- src/main/java/com/restaurante/service/PedidoFinanceiroService.java
+- src/main/java/com/restaurante/service/ConfiguracaoFinanceiraService.java
+
+
+15.2 DOCUMENTAÇÃO EXISTENTE
+----------------------------
+
+✅ INSTRUCOES_FRONTEND_PAGINA_PEDIDOS.txt
+   - Estados operacionais de pedidos
+   - Fluxo de SubPedidos
+
+✅ INTEGRACAO_FRONTEND_FUNDO_CONSUMO.txt
+   - Recarga de fundo via AppyPay
+   - Consulta de saldo
+
+✅ INSTRUCOES_FRONTEND_PAGINA_PRODUTOS.txt
+   - Catálogo de produtos
+
+
+================================================================================
+16. RESUMO DAS RESPOSTAS CRÍTICAS
+================================================================================
+
+1. ✅ Nome correto: UnidadeDeConsumo (não "Conta")
+2. ✅ Endpoints existem (com ajustes de nomenclatura)
+3. ✅ Estados financeiros: StatusFinanceiroPedido (NAO_PAGO, PAGO, ESTORNADO)
+4. ✅ Estrutura JSON: Fornecida neste documento
+5. ✅ Débito automático: Funciona ao criar pedido PRE_PAGO
+6. ✅ Pagamento manual: PUT /api/pedidos/{id}/confirmar-pagamento
+7. ✅ Pós-pago: isPosPagoAtivo() no service (sem endpoint REST)
+8. ✅ Validações: Confirmadas neste documento
+
+
+================================================================================
+17. PRÓXIMOS PASSOS RECOMENDADOS
+================================================================================
+
+IMEDIATO (Equipe Frontend):
+1. Renomear serviços e variáveis (Conta → UnidadeDeConsumo)
+2. Atualizar endpoints conforme seção 10.2
+3. Implementar cálculo de resumo financeiro (seção 14.3)
+4. Ajustar enums conforme seção 10.4
+5. Testar integração com backend real
+
+CURTO PRAZO (Ambas Equipes):
+1. Validar casos de uso completos
+2. Testar fluxo de erro
+3. Documentar exceções adicionais
+4. Criar testes E2E de integração
+
+MÉDIO PRAZO (Backend):
+1. Criar endpoint GET /api/config/pos-pago (se necessário)
+2. Adicionar filtro ?unidadeConsumoId em GET /api/pedidos
+3. Implementar auditoria financeira completa
+4. Adicionar métricas e dashboards
+
+
+================================================================================
+18. CONTATO E SUPORTE
+================================================================================
+
+DÚVIDAS ADICIONAIS:
+- Consultar documentação existente
+- Verificar código-fonte das entidades
+- Testar via Swagger: http://localhost:8080/swagger-ui.html
+- Analisar logs do servidor em caso de erro
+
+AMBIENTE DE TESTES:
+- Servidor: http://localhost:8080
+- Swagger: http://localhost:8080/swagger-ui.html
+- Health Check: http://localhost:8080/actuator/health
+
+
+================================================================================
+FIM DA RESPOSTA
+================================================================================
+
+Esperamos que este documento esclareça todas as dúvidas levantadas.
+A equipe de backend está à disposição para suporte adicional durante a integração.
+
+Boa implementação! 🚀

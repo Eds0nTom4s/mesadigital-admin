@@ -9,11 +9,30 @@ const { formatCurrency } = useCurrency()
     <div class="flex items-center justify-between">
       <div>
         <h2 class="text-2xl font-bold text-text-primary">Auditoria do Sistema</h2>
-        <p class="text-text-secondary mt-1">Registro de todas as operações</p>
+        <p class="text-text-secondary mt-1">Visualização de logs e atividades (dados de exemplo)</p>
       </div>
-      <button class="btn-secondary">
-        Exportar Relatório
-      </button>
+      <div class="flex items-center space-x-2">
+        <svg class="w-5 h-5 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <span class="text-sm text-warning font-medium">Dados de Demonstração</span>
+      </div>
+    </div>
+
+    <!-- Aviso sobre dados de demonstração -->
+    <div class="card bg-warning/5 border border-warning/20">
+      <div class="flex items-start space-x-3">
+        <svg class="w-6 h-6 text-warning flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+        </svg>
+        <div>
+          <h4 class="font-semibold text-warning mb-1">⚙️ Funcionalidade em Desenvolvimento</h4>
+          <p class="text-sm text-text-secondary">
+            Esta página exibe dados de demonstração para ilustrar o layout e funcionalidades futuras. 
+            A integração com o sistema de auditoria real será implementada em breve.
+          </p>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -30,7 +49,7 @@ const { formatCurrency } = useCurrency()
             <option>Todos os Módulos</option>
             <option>Pedidos</option>
             <option>Produtos</option>
-            <option>Mesas</option>
+            <option>Unidades de Consumo</option>
             <option>Fundos</option>
             <option>Usuários</option>
           </select>
@@ -54,7 +73,7 @@ const { formatCurrency } = useCurrency()
               <span class="text-xs text-text-secondary">14:30:15</span>
             </div>
             <p class="text-sm text-text-secondary">
-              <span class="font-medium">Margarida Silva</span> criou um novo pedido para Mesa 5 no valor de {{ formatCurrency(45.80) }}
+              <span class="font-medium">Margarida Silva</span> criou um novo pedido para Unidade 5 no valor de {{ formatCurrency(45.80) }}
             </p>
             <div class="flex items-center space-x-2 mt-2">
               <span class="badge-success">Criação</span>
@@ -114,10 +133,10 @@ const { formatCurrency } = useCurrency()
       </div>
 
       <div class="mt-4 flex items-center justify-between">
-        <p class="text-sm text-text-secondary">Mostrando 3 de 1,247 registros</p>
+        <p class="text-sm text-text-secondary">Mostrando 3 registros de exemplo</p>
         <div class="flex space-x-2">
-          <button class="btn-secondary">Anterior</button>
-          <button class="btn-primary">Próximo</button>
+          <button class="btn-secondary" disabled>Anterior</button>
+          <button class="btn-secondary" disabled>Próximo</button>
         </div>
       </div>
     </div>

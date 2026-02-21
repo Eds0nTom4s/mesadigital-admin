@@ -1,0 +1,1355 @@
+================================================================================
+  INSTRUÇÕES FRONTEND - PÁGINA DE PEDIDOS
+================================================================================
+
+Data: 20 de Fevereiro de 2026
+Sistema: Sistema de Restauração
+Versão: 1.0
+
+================================================================================
+1. VISÃO GERAL
+================================================================================
+
+A página de Pedidos é o CORAÇÃO do sistema. Gerencia todo o ciclo de vida
+dos pedidos desde a criação até a entrega final ao cliente.
+
+IMPORTANTE: O sistema trabalha com 2 níveis hierárquicos:
+1. PEDIDO (Nível Cliente) - O pedido completo da mesa
+2. SUBPEDIDO (Nível Operacional) - Unidade operacional por cozinha
+
+PERFIS DE USUÁRIO E SUAS VISÕES:
+
+CLIENTE:
+- Cria pedido para sua mesa
+- Visualiza acompanhamento em tempo real
+- Recebe notificações WebSocket de mudanças de status
+- NÃO pode cancelar (somente gerente)
+
+ATENDENTE:
+- Visualiza todos os pedidos ativos da sua unidade
+- Marca SubPedidos como ENTREGUE
+- Gerencia fluxo de entrega cozinha → cliente
+- Recebe alertas quando SubPedido fica PRONTO
+
+COZINHA (Perfil específico):
+- Visualiza SubPedidos da sua cozinha
+- Assume SubPedidos (PENDENTE → EM_PREPARACAO)
+- Marca como PRONTO quando finaliza
+- NÃO vê pedidos de outras cozinhas
+
+GERENTE:
+- Acesso total a todos os pedidos
+- Pode cancelar pedidos/subpedidos
+- Visualiza dashboards e KPIs
+- Gerencia exceções e problemas
+
+
+CONCEITO DE PEDIDO vs SUBPEDIDO:
+---------------------------------
+
+EXEMPLO PRÁTICO:
+Cliente na Mesa 10 faz pedido com:
+- 1x Hambúrguer (preparado na Cozinha Central)
+- 1x Pizza (preparada na Pizzaria)
+- 2x Refrigerante (preparado no Bar)
+
+O SISTEMA DIVIDE AUTOMATICAMENTE EM:
+→ Pedido PED-001 (total R$ 85,00)
+   ├─ SubPedido PED-001-1 (Cozinha Central: Hambúrguer)
+   ├─ SubPedido PED-001-2 (Pizzaria: Pizza)
+   └─ SubPedido PED-001-3 (Bar: Refrigerantes)
+
+CADA SUBPEDIDO segue seu próprio ciclo:
+- Cozinha Central pode estar EM_PREPARACAO
+- Pizzaria pode estar PRONTO
+- Bar pode estar PENDENTE
+
+O PEDIDO só fica FINALIZADO quando TODOS os SubPedidos estiverem ENTREGUE.
+
+
+================================================================================
+2. ESTRUTURA DE DADOS
+================================================================================
+
+2.1 PEDIDO (Entidade Principal)
+--------------------------------
+
+CAMPOS:
+- id: Identificador único (Long)
+- numero: Número único do pedido (String, formato: PED-XXX)
+- status: Status agregado do pedido (Enum - ver seção 2.3)
+- observacoes: Observações gerais do cliente (String, opcional)
+- total: Valor total do pedido em Kwanzas (BigDecimal)
+- unidadeConsumoId: ID da mesa/unidade de consumo (Long)
+- referenciaUnidadeConsumo: Número da mesa (ex: "Mesa 10")
+- itens: Lista de produtos do pedido (Array de ItemPedidoResponse)
+- createdAt: Data/hora de criação (DateTime)
+- updatedAt: Data/hora da última atualização (DateTime)
+
+IMPORTANTE: 
+- O "status" do Pedido é CALCULADO AUTOMATICAMENTE pelo backend
+- Não existe endpoint para alterar status de Pedido diretamente
+- Para alterar status, você deve alterar os SubPedidos
+
+
+2.2 SUBPEDIDO (Unidade Operacional)
+-----------------------------------
+
+CAMPOS:
+- id: Identificador único (Long)
+- pedidoId: ID do pedido pai (Long)
+- numeroPedido: Número do pedido (String, ex: PED-001)
+- cozinhaId: ID da cozinha responsável (Long)
+- nomeCozinha: Nome da cozinha (String)
+- unidadeAtendimentoId: ID da unidade de atendimento (Long)
+- nomeUnidadeAtendimento: Nome da unidade (String)
+- status: Status atual (Enum - ver seção 2.4)
+- itens: Produtos desta cozinha (Array de ItemPedidoResponse)
+- observacoes: Observações específicas (String, opcional)
+- recebidoEm: Quando cozinha recebeu (DateTime, null se CRIADO)
+- iniciadoEm: Quando começou preparo (DateTime, null se não iniciado)
+- prontoEm: Quando ficou pronto (DateTime, null se não pronto)
+- entregueEm: Quando foi entregue (DateTime, null se não entregue)
+- tempoPreparacaoMinutos: Tempo total de preparo (Long, calculado)
+
+IMPORTANTE:
+- SubPedido é a unidade operacional do sistema
+- Cada SubPedido pertence a UMA cozinha
+- SubPedidos seguem máquina de estados rigorosa
+
+
+2.3 STATUS DO PEDIDO (Calculado Automaticamente)
+-------------------------------------------------
+
+VALORES VÁLIDOS:
+- CRIADO: Pedido registrado, todos SubPedidos aguardando
+- EM_ANDAMENTO: Pelo menos um SubPedido em execução
+- FINALIZADO: Todos SubPedidos entregues (TERMINAL)
+- CANCELADO: Pedido cancelado (TERMINAL)
+
+REGRAS DE CÁLCULO (Backend automático):
+- Se TODOS SubPedidos = CRIADO ou PENDENTE → Pedido = CRIADO
+- Se QUALQUER SubPedido = EM_PREPARACAO ou PRONTO → Pedido = EM_ANDAMENTO
+- Se TODOS SubPedidos = ENTREGUE → Pedido = FINALIZADO
+- Se TODOS SubPedidos = CANCELADO → Pedido = CANCELADO
+
+ESTADOS TERMINAIS (não mudam mais):
+- FINALIZADO
+- CANCELADO
+
+
+2.4 STATUS DO SUBPEDIDO (Máquina de Estados)
+---------------------------------------------
+
+VALORES E TRANSIÇÕES VÁLIDAS:
+
+CRIADO (inicial):
+- Descrição: "Criado" - Registrado, aguardando confirmação
+- Próximo estado possível: PENDENTE ou CANCELADO
+- Quem pode alterar: Sistema (auto) ou GERENTE (cancelar)
+
+PENDENTE:
+- Descrição: "Pendente" - Confirmado, aguardando cozinha assumir
+- Próximo estado possível: EM_PREPARACAO ou CANCELADO
+- Quem pode alterar: COZINHA (assumir) ou GERENTE (cancelar)
+
+EM_PREPARACAO:
+- Descrição: "Em Preparação" - Sendo preparado pela cozinha
+- Próximo estado possível: PRONTO ou CANCELADO
+- Quem pode alterar: COZINHA (marcar pronto) ou GERENTE (cancelar)
+
+PRONTO:
+- Descrição: "Pronto" - Preparado, aguardando entrega ao cliente
+- Próximo estado possível: ENTREGUE
+- Quem pode alterar: ATENDENTE (confirmar entrega)
+
+ENTREGUE (terminal):
+- Descrição: "Entregue" - Entregue ao cliente
+- Próximo estado possível: Nenhum (TERMINAL)
+- Quem pode alterar: Ninguém (final)
+
+CANCELADO (terminal):
+- Descrição: "Cancelado" - Cancelado com motivo
+- Próximo estado possível: Nenhum (TERMINAL)
+- Quem pode alterar: Ninguém (final)
+
+
+DIAGRAMA DO FLUXO:
+         CRIADO
+           ↓
+        PENDENTE ←─────────────┐
+           ↓                   │
+      EM_PREPARACAO            │  (GERENTE pode cancelar
+           ↓                   │   em qualquer etapa)
+         PRONTO                │
+           ↓                   │
+        ENTREGUE               ↓
+                          CANCELADO
+
+
+2.5 ITEM DO PEDIDO
+------------------
+
+CAMPOS:
+- id: Identificador único (Long)
+- produtoId: ID do produto (Long)
+- produtoNome: Nome do produto (String)
+- produtoCodigo: Código do produto (String)
+- quantidade: Quantidade solicitada (Integer)
+- precoUnitario: Preço unitário no momento do pedido (BigDecimal)
+- subtotal: Valor total do item (quantidade × precoUnitario)
+- observacoes: Observações específicas do item (String, opcional)
+
+
+2.6 FORMATO DE RESPOSTA PADRÃO DA API
+--------------------------------------
+
+Todas as respostas seguem o padrão ApiResponse:
+
+{
+  "success": true,
+  "message": "Mensagem descritiva",
+  "data": { ... dados do pedido ... },
+  "timestamp": "2026-02-20T16:30:00"
+}
+
+Em caso de erro:
+
+{
+  "success": false,
+  "message": "Descrição do erro",
+  "data": null,
+  "timestamp": "2026-02-20T16:30:00"
+}
+
+================================================================================
+3. ENDPOINTS DA API - PEDIDOS
+================================================================================
+
+BASE URL: http://localhost:8080/api/pedidos
+
+AUTENTICAÇÃO: 
+- Incluir header: Authorization: Bearer {JWT_TOKEN}
+
+
+3.1 CRIAR NOVO PEDIDO
+----------------------
+
+MÉTODO: POST
+ENDPOINT: /api/pedidos
+AUTENTICAÇÃO: Sim
+PERMISSÕES: CLIENTE, ATENDENTE, GERENTE, ADMIN
+
+DESCRIÇÃO:
+Cria um novo pedido para uma mesa/unidade de consumo.
+O sistema automaticamente divide em SubPedidos por cozinha.
+
+HEADERS:
+- Authorization: Bearer {token}
+- Content-Type: application/json
+
+PAYLOAD (REQUEST BODY):
+{
+  "unidadeConsumoId": 1,
+  "itens": [
+    {
+      "produtoId": 10,
+      "quantidade": 1,
+      "observacoes": "Sem cebola"
+    },
+    {
+      "produtoId": 15,
+      "quantidade": 2,
+      "observacoes": null
+    }
+  ],
+  "tipoPagamento": "PRE_PAGO",
+  "observacoes": "Pedido urgente"
+}
+
+VALIDAÇÕES OBRIGATÓRIAS:
+- unidadeConsumoId: Obrigatório (ID da mesa)
+- itens: Array não vazio, mínimo 1 item
+  └─ produtoId: Obrigatório
+  └─ quantidade: Obrigatório, mínimo 1
+  └─ observacoes: Opcional
+- tipoPagamento: Opcional (padrão: PRE_PAGO)
+  └─ Valores válidos: PRE_PAGO, POS_PAGO
+- observacoes: Opcional
+
+EXEMPLO DE RESPOSTA (201 CREATED):
+{
+  "success": true,
+  "message": "Pedido criado com sucesso",
+  "data": {
+    "id": 100,
+    "numero": "PED-100",
+    "status": "CRIADO",
+    "observacoes": "Pedido urgente",
+    "total": 7500.00,
+    "unidadeConsumoId": 1,
+    "referenciaUnidadeConsumo": "Mesa 10",
+    "itens": [
+      {
+        "id": 201,
+        "produtoId": 10,
+        "produtoNome": "Hambúrguer Clássico",
+        "produtoCodigo": "PROD-010",
+        "quantidade": 1,
+        "precoUnitario": 2500.00,
+        "subtotal": 2500.00,
+        "observacoes": "Sem cebola"
+      },
+      {
+        "id": 202,
+        "produtoId": 15,
+        "produtoNome": "Refrigerante Cola 350ml",
+        "produtoCodigo": "PROD-015",
+        "quantidade": 2,
+        "precoUnitario": 450.00,
+        "subtotal": 900.00,
+        "observacoes": null
+      }
+    ],
+    "createdAt": "2026-02-20T16:30:00",
+    "updatedAt": "2026-02-20T16:30:00"
+  },
+  "timestamp": "2026-02-20T16:30:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Formulário de seleção de produtos
+- Carrinho de compras com quantidade ajustável
+- Campo observações por item e observações gerais
+- Cálculo automático do total
+- Após sucesso, redirecionar para tela de acompanhamento
+- Exibir número do pedido gerado em destaque
+
+
+3.2 BUSCAR PEDIDO POR ID
+-------------------------
+
+MÉTODO: GET
+ENDPOINT: /api/pedidos/{id}
+AUTENTICAÇÃO: Sim
+PERMISSÕES: Todos os perfis autenticados
+
+DESCRIÇÃO:
+Retorna detalhes completos de um pedido específico.
+
+PARÂMETROS:
+- id (path): ID do pedido
+
+EXEMPLO DE REQUISIÇÃO:
+GET http://localhost:8080/api/pedidos/100
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "Pedido encontrado",
+  "data": {
+    "id": 100,
+    "numero": "PED-100",
+    "status": "EM_ANDAMENTO",
+    "observacoes": "Pedido urgente",
+    "total": 7500.00,
+    "unidadeConsumoId": 1,
+    "referenciaUnidadeConsumo": "Mesa 10",
+    "itens": [ ... ],
+    "createdAt": "2026-02-20T16:30:00",
+    "updatedAt": "2026-02-20T16:35:00"
+  },
+  "timestamp": "2026-02-20T16:40:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Exibir número do pedido em destaque
+- Mostrar status com badge colorido
+- Listar todos os itens com quantidades
+- Mostrar total formatado
+- Botão para ver detalhes dos SubPedidos
+- Se cliente, mostrar progresso visual
+
+
+3.3 BUSCAR PEDIDO POR NÚMERO
+-----------------------------
+
+MÉTODO: GET
+ENDPOINT: /api/pedidos/numero/{numero}
+AUTENTICAÇÃO: Sim
+PERMISSÕES: Todos os perfis autenticados
+
+DESCRIÇÃO:
+Busca pedido pelo número único (formato: PED-XXX).
+Útil para buscas rápidas por número.
+
+PARÂMETROS:
+- numero (path): Número do pedido (ex: PED-100)
+
+EXEMPLO DE REQUISIÇÃO:
+GET http://localhost:8080/api/pedidos/numero/PED-100
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+(Mesma estrutura do endpoint 3.2)
+
+COMPORTAMENTO ESPERADO NA UI:
+- Campo de busca com máscara "PED-XXX"
+- Busca ao pressionar Enter ou botão
+- Redirecionar para detalhes se encontrado
+- Exibir erro amigável se não encontrado
+
+
+3.4 LISTAR PEDIDOS POR STATUS
+------------------------------
+
+MÉTODO: GET
+ENDPOINT: /api/pedidos/status/{status}
+AUTENTICAÇÃO: Sim
+PERMISSÕES: ATENDENTE, GERENTE, ADMIN
+
+DESCRIÇÃO:
+Lista pedidos filtrados por status específico.
+Útil para painéis de gerenciamento.
+
+PARÂMETROS:
+- status (path): Um dos valores válidos (CRIADO, EM_ANDAMENTO, FINALIZADO, CANCELADO)
+
+EXEMPLO DE REQUISIÇÃO:
+GET http://localhost:8080/api/pedidos/status/EM_ANDAMENTO
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "Pedidos listados com sucesso",
+  "data": [
+    {
+      "id": 100,
+      "numero": "PED-100",
+      "status": "EM_ANDAMENTO",
+      "observacoes": "Pedido urgente",
+      "total": 7500.00,
+      "unidadeConsumoId": 1,
+      "referenciaUnidadeConsumo": "Mesa 10",
+      "itens": [ ... ],
+      "createdAt": "2026-02-20T16:30:00",
+      "updatedAt": "2026-02-20T16:35:00"
+    },
+    {
+      "id": 101,
+      "numero": "PED-101",
+      "status": "EM_ANDAMENTO",
+      "observacoes": null,
+      "total": 12800.00,
+      "unidadeConsumoId": 5,
+      "referenciaUnidadeConsumo": "Mesa 15",
+      "itens": [ ... ],
+      "createdAt": "2026-02-20T16:32:00",
+      "updatedAt": "2026-02-20T16:38:00"
+    }
+  ],
+  "timestamp": "2026-02-20T16:40:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Tabs ou botões para filtrar por status
+- Grid/lista de cards de pedidos
+- Cada card mostra: número, mesa, total, tempo decorrido
+- Click no card abre detalhes
+
+
+3.5 LISTAR PEDIDOS ATIVOS
+--------------------------
+
+MÉTODO: GET
+ENDPOINT: /api/pedidos/ativos
+AUTENTICAÇÃO: Sim
+PERMISSÕES: ATENDENTE, GERENTE, ADMIN
+
+DESCRIÇÃO:
+Lista pedidos em andamento (CRIADO ou EM_ANDAMENTO).
+Endpoint principal para painel do atendente.
+
+EXEMPLO DE REQUISIÇÃO:
+GET http://localhost:8080/api/pedidos/ativos
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "Pedidos ativos listados",
+  "data": [
+    {
+      "id": 100,
+      "numero": "PED-100",
+      "status": "EM_ANDAMENTO",
+      "total": 7500.00,
+      "unidadeConsumoId": 1,
+      "referenciaUnidadeConsumo": "Mesa 10",
+      "itens": [ ... ],
+      "createdAt": "2026-02-20T16:30:00",
+      "updatedAt": "2026-02-20T16:35:00"
+    }
+  ],
+  "timestamp": "2026-02-20T16:40:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Atualizar lista a cada 30 segundos (polling)
+- OU usar WebSocket para atualizações em tempo real
+- Ordenar por tempo de criação (mais antigos primeiro)
+- Destacar pedidos com atraso
+
+
+3.6 CANCELAR PEDIDO (SOMENTE GERENTE)
+--------------------------------------
+
+MÉTODO: PUT
+ENDPOINT: /api/pedidos/{id}/cancelar?motivo={motivo}
+AUTENTICAÇÃO: Sim
+PERMISSÕES: Somente GERENTE e ADMIN
+
+DESCRIÇÃO:
+Cancela um pedido completo com motivo obrigatório.
+IMPORTANTE: Cancela TODOS os SubPedidos automaticamente.
+
+PARÂMETROS:
+- id (path): ID do pedido a cancelar
+- motivo (query): Motivo do cancelamento (obrigatório, mínimo 5 caracteres)
+
+EXEMPLO DE REQUISIÇÃO:
+PUT http://localhost:8080/api/pedidos/100/cancelar?motivo=Cliente desistiu
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "Pedido cancelado com sucesso",
+  "data": {
+    "id": 100,
+    "numero": "PED-100",
+    "status": "CANCELADO",
+    "observacoes": "Pedido urgente",
+    "total": 7500.00,
+    "unidadeConsumoId": 1,
+    "referenciaUnidadeConsumo": "Mesa 10",
+    "itens": [ ... ],
+    "createdAt": "2026-02-20T16:30:00",
+    "updatedAt": "2026-02-20T16:45:00"
+  },
+  "timestamp": "2026-02-20T16:45:00"
+}
+
+EXEMPLO DE ERRO (400 BAD REQUEST):
+{
+  "success": false,
+  "message": "Motivo de cancelamento é obrigatório",
+  "data": null,
+  "timestamp": "2026-02-20T16:45:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Modal de confirmação com campo de motivo
+- Validar motivo (mínimo 5 caracteres)
+- Explicar que TODOS os SubPedidos serão cancelados
+- Após sucesso, atualizar lista e exibir toast
+- Marcar pedido cancelado visualmente (cinza, riscado)
+
+
+================================================================================
+4. ENDPOINTS DA API - SUBPEDIDOS
+================================================================================
+
+BASE URL: http://localhost:8080/api/subpedidos
+
+AUTENTICAÇÃO: Todas as requisições requerem token JWT
+
+
+4.1 BUSCAR SUBPEDIDO POR ID
+----------------------------
+
+MÉTODO: GET
+ENDPOINT: /api/subpedidos/{id}
+AUTENTICAÇÃO: Sim
+PERMISSÕES: Todos os perfis autenticados
+
+DESCRIÇÃO:
+Retorna detalhes completos de um SubPedido específico.
+
+EXEMPLO DE REQUISIÇÃO:
+GET http://localhost:8080/api/subpedidos/50
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "Sucesso",
+  "data": {
+    "id": 50,
+    "pedidoId": 100,
+    "numeroPedido": "PED-100",
+    "cozinhaId": 1,
+    "nomeCozinha": "Cozinha Central",
+    "unidadeAtendimentoId": 1,
+    "nomeUnidadeAtendimento": "Restaurante Principal",
+    "status": "EM_PREPARACAO",
+    "itens": [
+      {
+        "id": 201,
+        "produtoId": 10,
+        "produtoNome": "Hambúrguer Clássico",
+        "produtoCodigo": "PROD-010",
+        "quantidade": 1,
+        "precoUnitario": 2500.00,
+        "subtotal": 2500.00,
+        "observacoes": "Sem cebola"
+      }
+    ],
+    "observacoes": null,
+    "recebidoEm": "2026-02-20T16:30:00",
+    "iniciadoEm": "2026-02-20T16:32:00",
+    "prontoEm": null,
+    "entregueEm": null,
+    "tempoPreparacaoMinutos": null
+  },
+  "timestamp": "2026-02-20T16:40:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Exibir número do SubPedido (ID ou número formatado)
+- Mostrar cozinha responsável
+- Status com badge colorido
+- Listar produtos deste SubPedido
+- Mostrar timestamps de cada etapa
+- Calcular tempo decorrido
+
+
+4.2 BUSCAR SUBPEDIDOS DE UM PEDIDO
+-----------------------------------
+
+MÉTODO: GET
+ENDPOINT: /api/subpedidos/pedido/{pedidoId}
+AUTENTICAÇÃO: Sim
+PERMISSÕES: Todos os perfis autenticados
+
+DESCRIÇÃO:
+Lista todos os SubPedidos de um Pedido específico.
+Útil para acompanhamento do cliente.
+
+PARÂMETROS:
+- pedidoId (path): ID do pedido
+
+EXEMPLO DE REQUISIÇÃO:
+GET http://localhost:8080/api/subpedidos/pedido/100
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "Sucesso",
+  "data": [
+    {
+      "id": 50,
+      "pedidoId": 100,
+      "numeroPedido": "PED-100",
+      "cozinhaId": 1,
+      "nomeCozinha": "Cozinha Central",
+      "status": "EM_PREPARACAO",
+      "itens": [ ... ],
+      "recebidoEm": "2026-02-20T16:30:00",
+      "iniciadoEm": "2026-02-20T16:32:00",
+      "prontoEm": null,
+      "entregueEm": null,
+      "tempoPreparacaoMinutos": null
+    },
+    {
+      "id": 51,
+      "pedidoId": 100,
+      "numeroPedido": "PED-100",
+      "cozinhaId": 3,
+      "nomeCozinha": "Bar",
+      "status": "PRONTO",
+      "itens": [ ... ],
+      "recebidoEm": "2026-02-20T16:30:00",
+      "iniciadoEm": "2026-02-20T16:31:00",
+      "prontoEm": "2026-02-20T16:33:00",
+      "entregueEm": null,
+      "tempoPreparacaoMinutos": 2
+    }
+  ],
+  "timestamp": "2026-02-20T16:40:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Exibir como timeline/lista de progresso
+- Cada SubPedido é um card/item
+- Mostrar nome da cozinha
+- Ícone/cor por status
+- Progresso visual geral (ex: 1 de 2 pronto)
+
+
+4.3 BUSCAR SUBPEDIDOS ATIVOS DE UMA COZINHA
+--------------------------------------------
+
+MÉTODO: GET
+ENDPOINT: /api/subpedidos/cozinha/{cozinhaId}/ativos
+AUTENTICAÇÃO: Sim
+PERMISSÕES: COZINHA, GERENTE, ADMIN
+
+DESCRIÇÃO:
+Lista SubPedidos ativos (PENDENTE, EM_PREPARACAO, PRONTO) de uma cozinha.
+ENDPOINT PRINCIPAL para painel da cozinha.
+
+PARÂMETROS:
+- cozinhaId (path): ID da cozinha
+
+EXEMPLO DE REQUISIÇÃO:
+GET http://localhost:8080/api/subpedidos/cozinha/1/ativos
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "Sucesso",
+  "data": [
+    {
+      "id": 50,
+      "pedidoId": 100,
+      "numeroPedido": "PED-100",
+      "cozinhaId": 1,
+      "nomeCozinha": "Cozinha Central",
+      "unidadeAtendimentoId": 1,
+      "nomeUnidadeAtendimento": "Restaurante Principal",
+      "status": "PENDENTE",
+      "itens": [ ... ],
+      "recebidoEm": "2026-02-20T16:30:00",
+      "iniciadoEm": null,
+      "prontoEm": null,
+      "entregueEm": null,
+      "tempoPreparacaoMinutos": null
+    },
+    {
+      "id": 52,
+      "pedidoId": 101,
+      "numeroPedido": "PED-101",
+      "cozinhaId": 1,
+      "nomeCozinha": "Cozinha Central",
+      "unidadeAtendimentoId": 1,
+      "nomeUnidadeAtendimento": "Restaurante Principal",
+      "status": "EM_PREPARACAO",
+      "itens": [ ... ],
+      "recebidoEm": "2026-02-20T16:35:00",
+      "iniciadoEm": "2026-02-20T16:36:00",
+      "prontoEm": null,
+      "entregueEm": null,
+      "tempoPreparacaoMinutos": null
+    }
+  ],
+  "timestamp": "2026-02-20T16:40:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Painel tipo kanban com 3 colunas: PENDENTE, EM_PREPARACAO, PRONTO
+- Atualização automática via WebSocket
+- Som de alerta quando novo SubPedido chega
+- Botões de ação em cada card
+- Ordenar por tempo (mais antigos primeiro)
+
+
+4.4 COZINHA ASSUME SUBPEDIDO
+-----------------------------
+
+MÉTODO: PUT
+ENDPOINT: /api/subpedidos/{id}/assumir
+AUTENTICAÇÃO: Sim
+PERMISSÕES: COZINHA, GERENTE, ADMIN
+
+DESCRIÇÃO:
+Cozinha assume SubPedido pendente (PENDENTE → EM_PREPARACAO).
+Registra timestamp de início de preparo.
+
+PARÂMETROS:
+- id (path): ID do SubPedido
+
+EXEMPLO DE REQUISIÇÃO:
+PUT http://localhost:8080/api/subpedidos/50/assumir
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "SubPedido assumido",
+  "data": {
+    "id": 50,
+    "status": "EM_PREPARACAO",
+    "iniciadoEm": "2026-02-20T16:42:00",
+    ... demais campos ...
+  },
+  "timestamp": "2026-02-20T16:42:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Botão "Assumir" em SubPedidos PENDENTE
+- Ao clicar, mover card para coluna EM_PREPARACAO
+- Exibir toast de confirmação
+- Atualizar via WebSocket para outros usuários
+
+
+4.5 COZINHA MARCA SUBPEDIDO COMO PRONTO
+----------------------------------------
+
+MÉTODO: PUT
+ENDPOINT: /api/subpedidos/{id}/marcar-pronto
+AUTENTICAÇÃO: Sim
+PERMISSÕES: COZINHA, GERENTE, ADMIN
+
+DESCRIÇÃO:
+Cozinha finaliza SubPedido (EM_PREPARACAO → PRONTO).
+Registra timestamp de conclusão.
+IMPORTANTE: Dispara notificação WebSocket para atendentes.
+
+PARÂMETROS:
+- id (path): ID do SubPedido
+
+EXEMPLO DE REQUISIÇÃO:
+PUT http://localhost:8080/api/subpedidos/50/marcar-pronto
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "SubPedido pronto",
+  "data": {
+    "id": 50,
+    "status": "PRONTO",
+    "prontoEm": "2026-02-20T16:50:00",
+    "tempoPreparacaoMinutos": 18,
+    ... demais campos ...
+  },
+  "timestamp": "2026-02-20T16:50:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Botão "Marcar Pronto" em SubPedidos EM_PREPARACAO
+- Ao clicar, mover card para coluna PRONTO
+- Exibir toast de confirmação
+- Som de alerta para atendentes (via WebSocket)
+
+
+4.6 ATENDENTE MARCA SUBPEDIDO COMO ENTREGUE
+--------------------------------------------
+
+MÉTODO: PUT
+ENDPOINT: /api/subpedidos/{id}/marcar-entregue
+AUTENTICAÇÃO: Sim
+PERMISSÕES: ATENDENTE, GERENTE, ADMIN
+
+DESCRIÇÃO:
+Atendente confirma entrega ao cliente (PRONTO → ENTREGUE).
+Registra timestamp de entrega.
+Estado TERMINAL - não pode ser alterado depois.
+
+PARÂMETROS:
+- id (path): ID do SubPedido
+
+EXEMPLO DE REQUISIÇÃO:
+PUT http://localhost:8080/api/subpedidos/50/marcar-entregue
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "SubPedido entregue",
+  "data": {
+    "id": 50,
+    "status": "ENTREGUE",
+    "entregueEm": "2026-02-20T16:52:00",
+    "tempoPreparacaoMinutos": 20,
+    ... demais campos ...
+  },
+  "timestamp": "2026-02-20T16:52:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Botão "Confirmar Entrega" em SubPedidos PRONTO
+- Modal de confirmação: "Confirmar entrega à Mesa X?"
+- Após confirmar, remover da lista de ativos
+- Exibir toast de confirmação
+- Atualizar contador de pedidos entregues
+
+
+4.7 CANCELAR SUBPEDIDO (SOMENTE GERENTE)
+-----------------------------------------
+
+MÉTODO: PUT
+ENDPOINT: /api/subpedidos/{id}/cancelar?motivo={motivo}
+AUTENTICAÇÃO: Sim
+PERMISSÕES: Somente GERENTE e ADMIN
+
+DESCRIÇÃO:
+Gerente cancela SubPedido com motivo obrigatório.
+Pode cancelar de QUALQUER estado (exceto já ENTREGUE ou CANCELADO).
+Estado TERMINAL - não pode ser alterado depois.
+
+PARÂMETROS:
+- id (path): ID do SubPedido
+- motivo (query): Motivo do cancelamento (obrigatório)
+
+EXEMPLO DE REQUISIÇÃO:
+PUT http://localhost:8080/api/subpedidos/50/cancelar?motivo=Produto acabou
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "SubPedido cancelado",
+  "data": {
+    "id": 50,
+    "status": "CANCELADO",
+    "observacoes": "Cancelado: Produto acabou",
+    ... demais campos ...
+  },
+  "timestamp": "2026-02-20T16:45:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Botão "Cancelar" apenas para GERENTE
+- Modal com campo de motivo obrigatório
+- Confirmar antes de cancelar
+- Marcar SubPedido cancelado visualmente (cinza)
+- Atualizar status do Pedido pai
+
+
+4.8 BUSCAR SUBPEDIDOS COM ATRASO
+---------------------------------
+
+MÉTODO: GET
+ENDPOINT: /api/subpedidos/atrasados?minutosAtraso={minutos}
+AUTENTICAÇÃO: Sim
+PERMISSÕES: GERENTE, ADMIN
+
+DESCRIÇÃO:
+Lista SubPedidos com tempo de preparo acima do esperado.
+Útil para dashboard de gerenciamento.
+
+PARÂMETROS:
+- minutosAtraso (query): Threshold em minutos (padrão: 30)
+
+EXEMPLO DE REQUISIÇÃO:
+GET http://localhost:8080/api/subpedidos/atrasados?minutosAtraso=30
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "Sucesso",
+  "data": [
+    {
+      "id": 48,
+      "pedidoId": 99,
+      "numeroPedido": "PED-099",
+      "cozinhaId": 1,
+      "nomeCozinha": "Cozinha Central",
+      "status": "EM_PREPARACAO",
+      "recebidoEm": "2026-02-20T15:30:00",
+      "iniciadoEm": "2026-02-20T15:35:00",
+      "tempoPreparacaoMinutos": 65,
+      ... demais campos ...
+    }
+  ],
+  "timestamp": "2026-02-20T16:40:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Lista de alertas com SubPedidos atrasados
+- Destacar em vermelho
+- Mostrar tempo de atraso
+- Botão para notificar cozinha
+
+
+================================================================================
+5. INTEGRAÇÃO WEBSOCKET - NOTIFICAÇÕES EM TEMPO REAL
+================================================================================
+
+IMPORTANTE: A página de pedidos DEVE usar WebSocket para atualizações em tempo
+real. Consultar documento: DOCUMENTACAO_WEBSOCKET_FRONTEND.md
+
+TÓPICOS RELEVANTES PARA PEDIDOS:
+
+/topic/pedido/{pedidoId}
+- Cliente se inscreve para acompanhar seu pedido
+- Recebe notificações de mudanças de status de SubPedidos
+- Atualizar UI automaticamente
+
+/topic/cozinha/{cozinhaId}
+- Cozinha se inscreve para receber novos SubPedidos
+- Tocar som de alerta quando SubPedido PENDENTE chegar
+- Atualizar painel automaticamente
+
+/topic/atendente/unidade/{unidadeId}
+- Atendente se inscreve para alertas de SubPedidos PRONTO
+- Prioridade alta - buscar na cozinha
+- Vibrar/tocar som quando SubPedido ficar pronto
+
+/topic/subpedido/{id}
+- Qualquer usuário acompanhando SubPedido específico
+- Recebe todas as mudanças de status
+- Atualizar detalhes em tempo real
+
+
+EXEMPLO DE NOTIFICAÇÃO WEBSOCKET:
+{
+  "id": 50,
+  "numero": "PED-100-1",
+  "pedidoId": 100,
+  "numeroPedido": "PED-100",
+  "statusAnterior": "PENDENTE",
+  "statusNovo": "EM_PREPARACAO",
+  "cozinhaId": 1,
+  "nomeCozinha": "Cozinha Central",
+  "unidadeAtendimentoId": 1,
+  "nomeUnidadeAtendimento": "Restaurante Principal",
+  "usuario": "chef.maria",
+  "timestamp": "2026-02-20T16:42:00",
+  "observacoes": "Cozinha assumiu preparo",
+  "tipoAcao": "MUDANCA_STATUS"
+}
+
+
+================================================================================
+6. TRATAMENTO DE ERROS
+================================================================================
+
+6.1 CÓDIGOS HTTP
+----------------
+
+200 OK: Operação bem-sucedida
+201 CREATED: Pedido criado com sucesso
+400 BAD REQUEST: Dados inválidos ou transição de estado inválida
+401 UNAUTHORIZED: Token JWT ausente ou inválido
+403 FORBIDDEN: Usuário não tem permissão para esta operação
+404 NOT FOUND: Pedido ou SubPedido não encontrado
+409 CONFLICT: Conflito de concorrência (OptimisticLockException)
+500 INTERNAL SERVER ERROR: Erro no servidor
+
+
+6.2 ERROS COMUNS E MENSAGENS
+-----------------------------
+
+TRANSIÇÃO INVÁLIDA:
+Mensagem: "Transição inválida de {STATUS_ATUAL} para {STATUS_NOVO}"
+Exemplo: "Transição inválida de PRONTO para PENDENTE"
+Ação: Recarregar estado atual do SubPedido
+
+SALDO INSUFICIENTE:
+Mensagem: "Saldo insuficiente no Fundo de Consumo"
+Ação: Informar cliente para recarregar saldo
+
+PRODUTO INDISPONÍVEL:
+Mensagem: "Produto {NOME} está indisponível no momento"
+Ação: Remover produto do carrinho e informar cliente
+
+MESA JÁ TEM PEDIDO ATIVO:
+Mensagem: "Esta mesa já possui um pedido ativo"
+Ação: Redirecionar para pedido existente
+
+CONFLITO DE CONCORRÊNCIA (409):
+Mensagem: "Os dados foram modificados por outro usuário. Recarregue e tente novamente."
+Ação: Recarregar dados do servidor
+
+
+================================================================================
+7. REQUISITOS DE UI/UX
+================================================================================
+
+7.1 PÁGINA DO CLIENTE - CRIAR PEDIDO
+-------------------------------------
+
+FLUXO:
+1. Selecionar produtos do cardápio
+2. Ajustar quantidades
+3. Adicionar observações (opcional)
+4. Revisar carrinho e total
+5. Confirmar pedido
+6. Redirecionar para acompanhamento
+
+ELEMENTOS:
+- Grid de produtos (reutilizar da página de produtos)
+- Carrinho flutuante/lateral com resumo
+- Botão "Adicionar ao Carrinho" em cada produto
+- Contador de quantidade (+/-)
+- Campo observações por item
+- Total calculado em tempo real
+- Botão "Finalizar Pedido" (destaque)
+
+
+7.2 PÁGINA DO CLIENTE - ACOMPANHAMENTO
+---------------------------------------
+
+LAYOUT:
+- Número do pedido em destaque (grande)
+- Badge do status geral (colorido, animado se em andamento)
+- Timeline vertical com SubPedidos
+  └─ Cada SubPedido mostra:
+     * Nome da cozinha
+     * Produtos
+     * Status com ícone
+     * Tempo estimado/decorrido
+- Barra de progresso geral (ex: 2 de 3 prontos)
+- Mensagem motivacional por status
+
+CORES POR STATUS:
+- CRIADO: Azul (#2196F3) - "Pedido recebido!"
+- EM_ANDAMENTO: Laranja (#FF9800) - "Estamos preparando..."
+- FINALIZADO: Verde (#4CAF50) - "Pedido pronto! Dirija-se ao balcão"
+- CANCELADO: Cinza (#9E9E9E) - "Pedido cancelado"
+
+ATUALIZAÇÃO:
+- WebSocket conectado mostrando indicador
+- Animação quando status muda
+- Som/vibração quando tudo estiver pronto
+
+
+7.3 PAINEL DA COZINHA
+----------------------
+
+LAYOUT KANBAN:
+┌─────────────┬─────────────┬─────────────┐
+│  PENDENTE   │ EM PREPARO  │   PRONTO    │
+├─────────────┼─────────────┼─────────────┤
+│ [Card 1]    │ [Card 3]    │ [Card 5]    │
+│ [Card 2]    │ [Card 4]    │             │
+└─────────────┴─────────────┴─────────────┘
+
+CARD DE SUBPEDIDO:
+- Número do pedido (destaque)
+- Mesa (ex: "Mesa 10")
+- Lista de produtos com quantidades
+- Tempo decorrido (atualiza a cada minuto)
+- Observações (se houver, destaque)
+- Botões de ação:
+  * PENDENTE: "Assumir"
+  * EM_PREPARACAO: "Marcar Pronto"
+  * PRONTO: (sem botão - aguarda atendente)
+
+NOTIFICAÇÕES:
+- Som de alerta quando novo SubPedido chega (PENDENTE)
+- Badge com contador no topo
+- Destaque visual em SubPedidos novos (borda colorida)
+
+
+7.4 PAINEL DO ATENDENTE
+------------------------
+
+LAYOUT:
+- Lista de pedidos ativos
+- Cada pedido mostra:
+  * Número
+  * Mesa
+  * Status geral
+  * SubPedidos com seus status
+  * Tempo total decorrido
+  * Botão "Ver Detalhes"
+
+SEÇÃO PRIORITÁRIA:
+- "SubPedidos Prontos para Entrega" no topo
+- Cards grandes, fundo verde claro
+- Botão "Confirmar Entrega" em destaque
+- Som/vibração quando SubPedido fica PRONTO
+
+FILTROS:
+- Todos
+- Pendentes
+- Em Andamento
+- Com itens prontos
+
+
+7.5 PAINEL DO GERENTE
+----------------------
+
+LAYOUT DASHBOARD:
+- KPIs no topo:
+  * Total de pedidos hoje
+  * Pedidos ativos
+  * Tempo médio de preparo
+  * SubPedidos atrasados
+- Lista de pedidos com filtros avançados
+- Botões de ação especiais:
+  * Cancelar pedido
+  * Cancelar SubPedido
+  * Ver histórico completo
+
+
+================================================================================
+8. FLUXO DE INTEGRAÇÃO (PASSO A PASSO)
+================================================================================
+
+ETAPA 1: CONFIGURAÇÃO WEBSOCKET
+--------------------------------
+1. Implementar conexão WebSocket (ver DOCUMENTACAO_WEBSOCKET_FRONTEND.md)
+2. Criar service para gerenciar subscrições
+3. Implementar handlers para notificações
+4. Testar conexão e reconexão automática
+
+ETAPA 2: LISTAGEM DE PRODUTOS (CRIAR PEDIDO)
+---------------------------------------------
+1. Reutilizar componente de listagem de produtos
+2. Adicionar funcionalidade de carrinho
+3. Implementar contador de quantidade
+4. Calcular total em tempo real
+5. Adicionar campo de observações
+
+ETAPA 3: CRIAR PEDIDO
+----------------------
+1. Implementar validação do carrinho (mínimo 1 item)
+2. Implementar chamada POST /api/pedidos
+3. Tratar erros (saldo insuficiente, produto indisponível)
+4. Redirecionar para acompanhamento após sucesso
+5. Limpar carrinho
+
+ETAPA 4: ACOMPANHAMENTO DO CLIENTE
+-----------------------------------
+1. Criar componente de timeline de SubPedidos
+2. Implementar chamada GET /api/subpedidos/pedido/{id}
+3. Subscrever no tópico WebSocket /topic/pedido/{id}
+4. Atualizar UI em tempo real quando notificação chegar
+5. Mostrar progresso visual
+
+ETAPA 5: PAINEL DA COZINHA
+---------------------------
+1. Criar layout kanban (3 colunas)
+2. Implementar chamada GET /api/subpedidos/cozinha/{id}/ativos
+3. Subscrever no tópico /topic/cozinha/{id}
+4. Implementar botão "Assumir" → PUT /api/subpedidos/{id}/assumir
+5. Implementar botão "Marcar Pronto" → PUT /api/subpedidos/{id}/marcar-pronto
+6. Tocar som quando novo SubPedido chegar
+7. Atualizar kanban via WebSocket
+
+ETAPA 6: PAINEL DO ATENDENTE
+-----------------------------
+1. Implementar chamada GET /api/pedidos/ativos
+2. Subscrever no tópico /topic/atendente/unidade/{id}
+3. Criar lista de SubPedidos PRONTO (prioridade)
+4. Implementar botão "Confirmar Entrega" → PUT /api/subpedidos/{id}/marcar-entregue
+5. Tocar alerta quando SubPedido ficar PRONTO
+6. Atualizar lista em tempo real
+
+ETAPA 7: CANCELAMENTO (GERENTE)
+--------------------------------
+1. Adicionar botão "Cancelar" em pedidos/subpedidos
+2. Criar modal de confirmação com campo motivo
+3. Implementar PUT /api/pedidos/{id}/cancelar
+4. Implementar PUT /api/subpedidos/{id}/cancelar
+5. Atualizar UI após cancelamento
+
+ETAPA 8: POLIMENTO E TESTES
+----------------------------
+1. Testar todos os fluxos com diferentes perfis
+2. Testar cenários de erro
+3. Testar reconexão WebSocket
+4. Validar responsividade
+5. Adicionar loading states
+6. Adicionar toasts de confirmação
+7. Revisar acessibilidade
+
+
+================================================================================
+9. CHECKLIST DE VALIDAÇÃO
+================================================================================
+
+FUNCIONALIDADES:
+☐ Cliente cria pedido selecionando produtos
+☐ Cliente acompanha pedido em tempo real
+☐ Cozinha vê SubPedidos da sua cozinha
+☐ Cozinha assume SubPedido (PENDENTE → EM_PREPARACAO)
+☐ Cozinha marca SubPedido pronto (EM_PREPARACAO → PRONTO)
+☐ Atendente vê SubPedidos prontos
+☐ Atendente confirma entrega (PRONTO → ENTREGUE)
+☐ Gerente pode cancelar pedidos/subpedidos
+☐ WebSocket notifica mudanças em tempo real
+
+VALIDAÇÕES:
+☐ Carrinho não pode estar vazio ao criar pedido
+☐ Quantidade deve ser maior que zero
+☐ Transições de estado respeitam máquina de estados
+☐ Estados terminais não podem ser alterados
+☐ Motivo obrigatório ao cancelar
+☐ Saldo suficiente no Fundo de Consumo
+
+WEBSOCKET:
+☐ Conexão estabelecida ao carregar página
+☐ Reconexão automática se desconectar
+☐ Notificações recebidas em tempo real
+☐ Som/vibração em eventos importantes
+☐ Indicador visual de conexão
+
+UI/UX:
+☐ Loading state durante requisições
+☐ Mensagens de erro claras
+☐ Confirmação antes de ações irreversíveis
+☐ Toast de sucesso após operações
+☐ Cards responsivos
+☐ Timeline visualmente clara
+☐ Badges coloridos por status
+☐ Tempo decorrido atualizado automaticamente
+
+TESTES:
+☐ Testar criação de pedido como CLIENTE
+☐ Testar acompanhamento como CLIENTE
+☐ Testar painel como COZINHA
+☐ Testar painel como ATENDENTE
+☐ Testar cancelamento como GERENTE
+☐ Testar com WebSocket desconectado
+☐ Testar transição inválida (deve dar erro)
+☐ Testar concorrência (2 usuários alterando mesmo SubPedido)
+
+
+================================================================================
+10. GLOSSÁRIO
+================================================================================
+
+PEDIDO: Agregado de SubPedidos criado pelo cliente para uma mesa.
+SUBPEDIDO: Unidade operacional dividida por cozinha responsável.
+MÁQUINA DE ESTADOS: Conjunto de estados e transições válidas.
+ESTADO TERMINAL: Estado final que não permite mais transições.
+WEBSOCKET: Protocolo de comunicação bidirecional em tempo real.
+STOMP: Protocolo de mensageria sobre WebSocket.
+OPTIMISTIC LOCK: Controle de concorrência para evitar conflitos.
+KANBAN: Layout visual com colunas representando estados.
+DEBOUNCE: Atrasar execução até usuário parar de digitar.
+TOAST: Notificação temporária que aparece e desaparece.
+
+
+================================================================================
+11. CONTATOS E SUPORTE
+================================================================================
+
+DOCUMENTAÇÃO RELACIONADA:
+- WebSocket: DOCUMENTACAO_WEBSOCKET_FRONTEND.md
+- Produtos: INSTRUCOES_FRONTEND_PAGINA_PRODUTOS.txt
+- Swagger: http://localhost:8080/swagger-ui.html
+
+DÚVIDAS TÉCNICAS:
+- Backend: Verificar logs do servidor
+- WebSocket: Testar conexão isoladamente primeiro
+- Autenticação: Verificar validade do token JWT
+
+
+================================================================================
+FIM DO DOCUMENTO
+================================================================================

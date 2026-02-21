@@ -1,0 +1,1096 @@
+================================================================================
+DOCUMENTAÇÃO DE INTEGRAÇÃO - FUNDO DE CONSUMO
+Sistema de Restauração - Painel Administrativo
+================================================================================
+
+VERSÃO: 1.0
+DATA: 17 de Fevereiro de 2026
+MOEDA: AOA (Kwanza Angolano)
+BASE URL: http://localhost:8080/api
+
+================================================================================
+1. VISÃO GERAL DO MÓDULO
+================================================================================
+
+O FUNDO DE CONSUMO é um sistema de PRÉ-PAGO onde:
+
+✓ Cliente carrega saldo antecipadamente
+✓ Pedidos debitam automaticamente do saldo
+✓ Sistema evita inadimplência (não permite saldo negativo)
+✓ Todo movimento financeiro é registrado e auditável
+
+CONCEITOS PRINCIPAIS:
+
+1. FUNDO DE CONSUMO
+   - Conta pré-paga vinculada ao cliente
+   - Um cliente possui apenas UM fundo ativo por vez
+   - Saldo nunca fica negativo (validação no débito)
+   - Status: ATIVO ou ENCERRADO
+
+2. TRANSAÇÃO DE FUNDO
+   - Registro imutável de toda movimentação
+   - Tipos:
+     * CREDITO: Recarga de saldo (aumenta)
+     * DEBITO: Pagamento de pedido (diminui)
+     * ESTORNO: Devolução por cancelamento (aumenta)
+
+3. FLUXO FINANCEIRO
+   Cliente Recarga → Saldo Aumenta → Faz Pedido → Saldo Diminui
+   Se Cancelar Pedido → Recebe Estorno → Saldo Aumenta
+
+
+================================================================================
+2. MODELO DE DADOS
+================================================================================
+
+2.1 FUNDO DE CONSUMO (Entidade Principal)
+------------------------------------------
+{
+  "id": 1,                           // ID único do fundo
+  "cliente": {                       // Cliente proprietário
+    "id": 10,
+    "nome": "João Pedro Afonso",
+    "telefone": "+244925813939",
+    "telefoneVerificado": true
+  },
+  "saldoAtual": 50000.00,           // Saldo disponível em AOA
+  "ativo": true,                     // Status (true=ativo, false=encerrado)
+  "createdAt": "2026-02-17T10:00:00",
+  "updatedAt": "2026-02-17T14:30:00",
+  "version": 5                       // Controle de concorrência otimista
+}
+
+REGRAS DE NEGÓCIO:
+✓ saldoAtual >= 0 (SEMPRE não negativo)
+✓ ativo = true para permitir movimentações
+✓ Um cliente = Um fundo ativo
+✓ version incrementa a cada alteração (previne concorrência)
+
+
+2.2 TRANSAÇÃO DE FUNDO (Histórico Auditável)
+---------------------------------------------
+{
+  "id": 100,
+  "fundoConsumo": {                  // Fundo relacionado
+    "id": 1
+  },
+  "valor": 15000.00,                 // Valor da transação (sempre positivo)
+  "tipo": "DEBITO",                  // CREDITO | DEBITO | ESTORNO
+  "pedido": {                        // Pedido relacionado (opcional)
+    "id": 50,
+    "numeroSequencial": 12
+  },
+  "saldoAnterior": 50000.00,        // Saldo ANTES da transação
+  "saldoNovo": 35000.00,            // Saldo DEPOIS da transação
+  "observacoes": "Débito automático - Pedido #50",
+  "createdAt": "2026-02-17T14:30:00"
+}
+
+TIPOS DE TRANSAÇÃO:
+┌─────────┬──────────────────────┬────────────┬─────────────────┐
+│ TIPO    │ DESCRIÇÃO            │ EFEITO     │ VINCULA PEDIDO? │
+├─────────┼──────────────────────┼────────────┼─────────────────┤
+│ CREDITO │ Recarga de saldo     │ Aumenta    │ NÃO             │
+│ DEBITO  │ Pagamento de pedido  │ Diminui    │ SIM             │
+│ ESTORNO │ Cancelamento pedido  │ Aumenta    │ SIM             │
+└─────────┴──────────────────────┴────────────┴─────────────────┘
+
+REGRAS DE NEGÓCIO:
+✓ valor > 0 (sempre positivo)
+✓ saldoNovo = saldoAnterior ± valor
+✓ DEBITO e ESTORNO DEVEM vincular pedidoId
+✓ CREDITO não vincula pedido (recarga manual/gateway)
+✓ Registro IMUTÁVEL após criação
+
+
+2.3 CLIENTE (Resumo)
+--------------------
+{
+  "id": 10,
+  "nome": "João Pedro Afonso",
+  "telefone": "+244925813939",       // Formato E.164
+  "telefoneVerificado": true,
+  "ativo": true,
+  "tipoUsuario": "CLIENTE"
+}
+
+
+================================================================================
+3. ENDPOINTS DA API
+================================================================================
+
+BASE: /api/fundos
+AUTENTICAÇÃO: Bearer Token (JWT) obrigatório em todos os endpoints
+HEADER: Authorization: Bearer {token}
+
+
+3.1 CRIAR FUNDO PARA CLIENTE (COM SALDO INICIAL OBRIGATÓRIO)
+-----------------------------
+POST /api/fundos
+
+REQUEST BODY:
+{
+  "clienteId": 10,
+  "saldoInicial": 10000.00,              // Obrigatório, mínimo 5.000 AOA (configurável)
+  "observacoes": "Carga inicial"        // Opcional
+}
+
+RESPONSE 201 (Created):
+{
+  "status": 201,
+  "message": "Fundo criado com sucesso",
+  "data": {
+    "id": 1,
+    "cliente": {
+      "id": 10,
+      "nome": "João Pedro Afonso",
+      "telefone": "+244925813939"
+    },
+    "saldoAtual": 10000.00,
+    "ativo": true,
+    "createdAt": "2026-02-17T10:00:00"
+  },
+  "timestamp": "2026-02-17T10:00:00"
+}
+
+ERROS POSSÍVEIS:
+400 - Saldo inicial abaixo do mínimo (5.000 AOA)
+400 - Cliente já possui fundo ativo
+404 - Cliente não encontrado
+401 - Token JWT inválido/expirado
+403 - Sem permissão
+
+NOTA: Uma transação CREDITO é criada automaticamente com o saldo inicial
+
+
+NOTA: Uma transação CREDITO é criada automaticamente com o saldo inicial
+
+
+3.2 CONSULTAR VALOR MÍNIMO OBRIGATÓRIO
+----------------------------------------
+GET /api/fundos/config/valor-minimo
+
+RESPONSE 200:
+{
+  "status": 200,
+  "message": "Valor mínimo consultado",
+  "data": 5000.00                       // Valor mínimo em AOA (configurável)
+}
+
+IMPORTANTE: Frontend deve consultar este endpoint antes de exibir formulário
+de criação de fundo para validar valor digitado pelo usuário.
+
+CONFIGURAÇÃO (Backend):
+Valor configurável em application.properties:
+app.fundo-consumo.valor-minimo-inicial=5000.00
+
+
+3.3 BUSCAR FUNDO POR CLIENTE
+-----------------------------
+GET /api/fundos/cliente/{clienteId}
+
+EXEMPLO: GET /api/fundos/cliente/10
+
+RESPONSE 200:
+{
+  "status": 200,
+  "message": "Fundo encontrado",
+  "data": {
+    "id": 1,
+    "cliente": {
+      "id": 10,
+      "nome": "João Pedro Afonso",
+      "telefone": "+244925813939"
+    },
+    "saldoAtual": 35000.00,
+    "ativo": true,
+    "createdAt": "2026-02-17T10:00:00",
+    "updatedAt": "2026-02-17T14:30:00"
+  }
+}
+
+ERROS POSSÍVEIS:
+404 - Fundo não encontrado para este cliente
+401 - Token JWT inválido
+403 - Sem permissão
+
+
+3.4 RECARREGAR FUNDO (VIA GATEWAY APPYPAY)
+-------------------------------------------
+POST /api/fundos/{fundoId}/recarregar
+
+EXEMPLO: POST /api/fundos/1/recarregar
+
+REQUEST BODY:
+{
+  "valor": 100000.00,                    // Valor em AOA (obrigatório, > 0)
+  "metodoPagamento": "GPO",              // GPO ou REF (obrigatório)
+  "descricao": "Recarga via AppyPay"    // Opcional
+}
+
+MÉTODOS DE PAGAMENTO:
+┌─────┬───────────────────────┬──────────────┬─────────────────────┐
+│ GPO │ Pagamento AppyPay     │ Instantâneo  │ Confirmação imediata│
+│ REF │ Referência Bancária   │ Assíncrono   │ Aguarda callback    │
+└─────┴───────────────────────┴──────────────┴─────────────────────┘
+
+RESPONSE 201:
+{
+  "status": 201,
+  "message": "Pagamento criado com sucesso",
+  "data": {
+    "id": 200,
+    "referenciaPagamento": "APY-2026-02-17-ABC123",
+    "valor": 100000.00,
+    "metodoPagamento": "GPO",
+    "status": "PENDENTE",               // PENDENTE → PAGO → CONCLUIDO
+    "urlPagamento": "https://gwy-api.appypay.co.ao/...",  // Para GPO
+    "entidade": "11223",                // Para REF
+    "referencia": "999 888 777",        // Para REF
+    "createdAt": "2026-02-17T15:00:00"
+  }
+}
+
+FLUXO APÓS RESPONSE:
+1. Frontend redireciona usuário para urlPagamento (GPO)
+   OU exibe entidade/referência (REF)
+2. Cliente paga via AppyPay ou Multicaixa
+3. AppyPay envia callback para backend
+4. Backend processa callback e credita saldo automaticamente
+5. Frontend consulta status periodicamente
+
+ERROS POSSÍVEIS:
+400 - Valor inválido (deve ser > 0)
+400 - Método de pagamento inválido
+404 - Fundo não encontrado
+400 - Fundo encerrado (ativo = false)
+500 - Erro no gateway AppyPay
+
+
+3.5 CONSULTAR SALDO DO FUNDO
+-----------------------------
+GET /api/fundos/{fundoId}/saldo
+
+EXEMPLO: GET /api/fundos/1/saldo
+
+RESPONSE 200:
+{
+  "status": 200,
+  "message": "Saldo consultado",
+  "data": 35000.00                      // Saldo em AOA
+}
+
+
+3.6 LISTAR TRANSAÇÕES DO FUNDO (Histórico)
+-------------------------------------------
+GET /api/fundos/{fundoId}/transacoes
+
+EXEMPLO: GET /api/fundos/1/transacoes
+
+RESPONSE 200:
+{
+  "status": 200,
+  "message": "Transações listadas",
+  "data": [
+    {
+      "id": 100,
+      "valor": 15000.00,
+      "tipo": "DEBITO",
+      "pedido": {
+        "id": 50,
+        "numeroSequencial": 12
+      },
+      "saldoAnterior": 50000.00,
+      "saldoNovo": 35000.00,
+      "observacoes": "Débito automático - Pedido #50",
+      "createdAt": "2026-02-17T14:30:00"
+    },
+    {
+      "id": 99,
+      "valor": 50000.00,
+      "tipo": "CREDITO",
+      "pedido": null,
+      "saldoAnterior": 0.00,
+      "saldoNovo": 50000.00,
+      "observacoes": "Recarga via AppyPay",
+      "createdAt": "2026-02-17T10:05:00"
+    }
+  ]
+}
+
+ORDENAÇÃO: Do mais recente para o mais antigo (createdAt DESC)
+
+
+================================================================================
+4. FLUXOS DE NEGÓCIO COMPLETOS
+================================================================================
+
+4.1 FLUXO: CRIAR CLIENTE E ATIVAR FUNDO (COM SALDO INICIAL)
+------------------------------------------------------------
+CENÁRIO: Novo cliente deseja usar sistema pré-pago
+
+PASSOS:
+1. Frontend: Cliente é cadastrado (já existe no sistema)
+2. Frontend: GET /api/fundos/config/valor-minimo
+   - Obtém valor mínimo (ex: 5.000 AOA)
+3. Frontend: Exibe formulário solicitando saldo inicial (mínimo 5.000 AOA)
+4. Frontend: POST /api/fundos
+   Body: { 
+     "clienteId": 10,
+     "saldoInicial": 10000.00,
+     "observacoes": "Carga inicial via dinheiro"
+   }
+5. Backend: Valida cliente existe
+6. Backend: Valida não existe fundo ativo
+7. Backend: Valida saldoInicial >= valorMinimo (5.000 AOA)
+8. Backend: Cria fundo com saldo inicial (10.000 AOA)
+9. Backend: Cria transação CREDITO automática
+10. Frontend: Exibe fundo criado com saldo 10.000,00 AOA
+11. Frontend: Cliente já pode começar a fazer pedidos
+
+RESULTADO: Fundo ativo com saldo 10.000 AOA pronto para uso
+
+IMPORTANTE:
+✓ Saldo inicial é OBRIGATÓRIO (mínimo 5.000 AOA)
+✓ NÃO é possível criar fundo com saldo ZERO
+✓ Primeira transação é sempre CREDITO (carga inicial)
+
+
+4.2 FLUXO: RECARGA DE SALDO (GPO - INSTANTÂNEO)
+------------------------------------------------
+CENÁRIO: Cliente deseja adicionar 100.000 AOA via AppyPay
+
+PASSOS:
+1. Frontend: POST /api/fundos/1/recarregar
+   Body: {
+     "valor": 100000.00,
+     "metodoPagamento": "GPO"
+   }
+2. Backend: Cria pagamento no gateway AppyPay
+3. Backend: Retorna urlPagamento
+4. Frontend: Redireciona para urlPagamento (app/web AppyPay)
+5. Cliente: Paga via AppyPay
+6. AppyPay: Envia callback para backend (automático)
+7. Backend: Valida callback
+8. Backend: Executa fundoConsumoService.recarregar()
+   - Credita 100.000 AOA
+   - Cria TransacaoFundo tipo CREDITO
+   - Atualiza saldoAtual
+9. Frontend: Polling GET /api/fundos/cliente/10
+   - Detecta saldoAtual = 100000.00
+   - Exibe sucesso
+
+RESULTADO: Saldo aumentado de 0 → 100.000 AOA
+
+
+4.3 FLUXO: RECARGA DE SALDO (REF - REFERÊNCIA BANCÁRIA)
+--------------------------------------------------------
+CENÁRIO: Cliente deseja adicionar 50.000 AOA via Multicaixa
+
+PASSOS:
+1. Frontend: POST /api/fundos/1/recarregar
+   Body: {
+     "valor": 50000.00,
+     "metodoPagamento": "REF"
+   }
+2. Backend: Cria pagamento no gateway AppyPay
+3. Backend: Retorna entidade + referência
+4. Frontend: Exibe para cliente:
+   "Pague em qualquer caixa Multicaixa:
+    Entidade: 11223
+    Referência: 999 888 777
+    Valor: 50.000,00 AOA"
+5. Cliente: Paga em Multicaixa físico ou app bancário
+6. AppyPay: Detecta pagamento (pode demorar minutos/horas)
+7. AppyPay: Envia callback para backend
+8. Backend: Valida callback
+9. Backend: Executa fundoConsumoService.recarregar()
+10. Frontend: Polling GET /api/fundos/cliente/10
+    - Detecta saldoAtual aumentou
+    - Exibe sucesso
+
+IMPORTANTE: REF não é instantâneo!
+- Pode levar de 5 minutos a 24 horas
+- Frontend deve mostrar status "Aguardando confirmação"
+
+
+4.4 FLUXO: CLIENTE FAZ PEDIDO (DÉBITO AUTOMÁTICO)
+--------------------------------------------------
+CENÁRIO: Cliente com saldo 100.000 AOA faz pedido de 15.000 AOA
+
+PASSOS:
+1. Frontend: POST /api/pedidos (não é endpoint de fundo!)
+   Body: {
+     "unidadeConsumoId": 5,
+     "itens": [{ "produtoId": 15, "quantidade": 1 }]
+   }
+2. Backend (PedidoService):
+   - Cria pedido (total = 15.000 AOA)
+   - Detecta cliente tem Fundo Ativo
+3. Backend (PedidoFinanceiroService):
+   - Chama fundoConsumoService.debitar(clienteId, pedidoId, 15000.00)
+4. Backend (FundoConsumoService):
+   - Valida saldo suficiente: 100.000 >= 15.000 ✓
+   - Debita: saldo 100.000 → 85.000
+   - Cria TransacaoFundo tipo DEBITO
+   - Vincula pedidoId
+5. Backend: Marca pedido como PAGO
+6. Frontend: Exibe pedido criado e pago
+7. Frontend: Atualiza saldo exibido: 85.000 AOA
+
+RESULTADO: Pedido pago automaticamente, saldo reduzido
+
+
+4.5 FLUXO: PEDIDO INSUFICIENTE (SALDO < VALOR)
+-----------------------------------------------
+CENÁRIO: Cliente com saldo 5.000 AOA tenta pedido de 15.000 AOA
+
+PASSOS:
+1. Frontend: POST /api/pedidos
+2. Backend: Tenta debitar 15.000 AOA
+3. Backend (FundoConsumoService):
+   - Valida saldo: 5.000 < 15.000 ✗
+   - LANÇA SaldoInsuficienteException
+4. Backend: Retorna erro 400
+5. Frontend: Recebe:
+   {
+     "status": 400,
+     "message": "Saldo insuficiente. Saldo atual: 5000.00 AOA, Valor necessário: 15000.00 AOA"
+   }
+6. Frontend: Exibe mensagem amigável
+7. Frontend: Sugere recarga
+
+RESULTADO: Pedido NÃO criado, cliente precisa recarregar
+
+
+4.6 FLUXO: CANCELAMENTO DE PEDIDO (ESTORNO)
+--------------------------------------------
+CENÁRIO: Pedido #50 (15.000 AOA) é cancelado
+
+PASSOS:
+1. Frontend: DELETE /api/pedidos/50 (não é endpoint de fundo!)
+2. Backend (PedidoService):
+   - Valida pedido pode ser cancelado
+   - Marca status = CANCELADO
+3. Backend (PedidoFinanceiroService):
+   - Detecta pagamento foi via Fundo
+   - Chama fundoConsumoService.estornar(pedidoId)
+4. Backend (FundoConsumoService):
+   - Busca TransacaoFundo DEBITO do pedidoId
+   - Credita valor de volta: saldo 85.000 → 100.000
+   - Cria TransacaoFundo tipo ESTORNO
+   - Vincula pedidoId
+5. Frontend: Exibe pedido cancelado
+6. Frontend: Atualiza saldo: 100.000 AOA
+
+RESULTADO: Valor devolvido, saldo restaurado
+
+
+4.7 FLUXO: IDEMPOTÊNCIA (PROTEÇÃO CONTRA DUPLICAÇÃO)
+-----------------------------------------------------
+CENÁRIO: Requisição duplicada (retry, bug, duplo clique)
+
+COMPORTAMENTO DO BACKEND:
+- Se tentar DEBITAR pedidoId que já foi debitado:
+  → Retorna transação existente (NÃO debita novamente)
+  
+- Se tentar ESTORNAR pedidoId que já foi estornado:
+  → Retorna estorno existente (NÃO estorna novamente)
+
+EXEMPLO:
+1. POST /api/pedidos (pedidoId=50) → Debita 15.000 AOA
+2. POST /api/pedidos (pedidoId=50) → Retorna mesma transação (NÃO debita)
+
+RESULTADO: Sistema protegido contra duplicações
+
+
+================================================================================
+5. REGRAS DE VALIDAÇÃO
+================================================================================
+
+5.1 VALIDAÇÕES NO FRONTEND (ANTES DE ENVIAR)
+---------------------------------------------
+✓ saldoInicial >= valorMinimo (consultar via GET /api/fundos/config/valor-minimo)
+✓ valor > 0 (não permitir zero ou negativo)
+✓ metodoPagamento em ["GPO", "REF"]
+✓ clienteId é número inteiro positivo
+✓ Token JWT está presente e não expirado
+✓ Valores monetários com máximo 2 casas decimais
+
+MENSAGENS SUGERIDAS:
+- "Saldo inicial deve ser no mínimo {valorMinimo} AOA"
+- "Valor deve ser maior que zero"
+- "Selecione um método de pagamento válido"
+- "Sessão expirada. Faça login novamente"
+
+
+5.2 VALIDAÇÕES NO BACKEND (GARANTIDAS)
+---------------------------------------
+✓ Cliente existe no banco de dados
+✓ Cliente não tem fundo ativo (ao criar)
+✓ Saldo inicial >= valor mínimo configurado (5.000 AOA)
+✓ Valor numérico válido e positivo
+✓ Saldo suficiente antes de debitar
+✓ Fundo está ativo (ativo = true)
+✓ Token JWT válido e não expirado
+✓ Permissões adequadas do usuário
+
+ERROS RETORNADOS (HTTP):
+- 400: Validação falhou (dados inválidos)
+- 401: Não autenticado (sem token ou token inválido)
+- 403: Não autorizado (sem permissão)
+- 404: Recurso não encontrado
+- 409: Conflito (ex: fundo já existe)
+- 500: Erro interno do servidor
+
+
+5.3 LIMITES E RESTRIÇÕES
+-------------------------
+✓ Saldo máximo: 999.999.999,99 AOA (precision 10, scale 2)
+✓ Saldo inicial mínimo: 5.000,00 AOA (configurável)
+✓ Valor transação mínimo: 0,01 AOA
+✓ Valor transação máximo: 999.999.999,99 AOA
+✓ Um cliente = Um fundo ativo
+✓ Transações são IMUTÁVEIS (não editáveis)
+✓ Concorrência protegida (optimistic locking)
+
+
+================================================================================
+6. ESTADOS E TRANSIÇÕES
+================================================================================
+
+6.1 ESTADOS DO FUNDO
+---------------------
+┌────────┬────────────────────────────────────────────┐
+│ ATIVO  │ Permite todas as operações                │
+│        │ - Recarregar (CREDITO)                     │
+│        │ - Debitar (DEBITO)                         │
+│        │ - Estornar (ESTORNO)                       │
+├────────┼────────────────────────────────────────────┤
+│ INATIVO│ Bloqueado para movimentações               │
+│        │ - NÃO permite recargas                     │
+│        │ - NÃO permite débitos                      │
+│        │ - NÃO permite estornos                     │
+│        │ - Consultas ainda funcionam                │
+└────────┴────────────────────────────────────────────┘
+
+TRANSIÇÃO:
+ATIVO → INATIVO: Chamada manual (fundoConsumo.encerrar())
+INATIVO → ATIVO: NÃO PERMITIDO (criar novo fundo)
+
+
+6.2 TIPOS DE TRANSAÇÃO
+-----------------------
+CREDITO (Aumenta Saldo):
+- Origem: Recarga via gateway, crédito manual
+- Vincula pedido: NÃO
+- Reversível: NÃO
+
+DEBITO (Diminui Saldo):
+- Origem: Pagamento de pedido
+- Vincula pedido: SIM (obrigatório)
+- Reversível: SIM (via estorno)
+
+ESTORNO (Aumenta Saldo):
+- Origem: Cancelamento de pedido
+- Vincula pedido: SIM (mesmo do débito)
+- Reversível: NÃO
+
+
+================================================================================
+7. SEGURANÇA E AUTENTICAÇÃO
+================================================================================
+
+7.1 AUTENTICAÇÃO JWT
+--------------------
+TODOS os endpoints requerem token JWT no header:
+
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+TOKEN CONTÉM:
+- username: telefone ou email do usuário
+- role: ADMIN | ATENDENTE | CLIENTE
+- exp: timestamp de expiração (24 horas)
+
+OBTENÇÃO DO TOKEN:
+POST /api/auth/login
+Body: { "username": "admin", "password": "senha123" }
+
+Response:
+{
+  "accessToken": "eyJhbGci...",
+  "expiresIn": 86400
+}
+
+
+7.2 PERMISSÕES POR ROLE
+------------------------
+┌────────────┬────────────────────────────────────────┐
+│ ADMIN      │ Acesso total a todos os endpoints      │
+│            │ - Criar fundos                         │
+│            │ - Recarregar fundos                    │
+│            │ - Consultar qualquer fundo             │
+│            │ - Ver histórico completo               │
+├────────────┼────────────────────────────────────────┤
+│ ATENDENTE  │ Acesso limitado                        │
+│            │ - Consultar fundos                     │
+│            │ - Ver histórico                        │
+│            │ - NÃO pode recarregar                  │
+├────────────┼────────────────────────────────────────┤
+│ CLIENTE    │ Acesso apenas aos próprios dados       │
+│            │ - Ver próprio saldo                    │
+│            │ - Ver próprio histórico                │
+│            │ - NÃO pode recarregar (somente gateway)│
+│            │ - NÃO pode ver outros clientes         │
+└────────────┴────────────────────────────────────────┘
+
+NOTA: Permissões detalhadas podem ser ajustadas no backend
+
+
+7.3 PROTEÇÕES IMPLEMENTADAS
+----------------------------
+✓ Optimistic Locking (@Version): Previne conflitos de concorrência
+✓ Isolation SERIALIZABLE: Transações financeiras isoladas
+✓ Idempotência: Mesma operação não executa duas vezes
+✓ HTTPS obrigatório em produção
+✓ Rate limiting (recomendado no gateway)
+✓ Validação de input (Bean Validation)
+
+
+================================================================================
+8. TRATAMENTO DE ERROS
+================================================================================
+
+8.1 CÓDIGOS DE STATUS HTTP
+---------------------------
+200 OK              - Operação bem-sucedida (GET)
+201 Created         - Recurso criado com sucesso (POST)
+400 Bad Request     - Validação falhou ou dados inválidos
+401 Unauthorized    - Token ausente ou inválido
+403 Forbidden       - Sem permissão para esta operação
+404 Not Found       - Recurso não encontrado
+409 Conflict        - Conflito (ex: fundo já existe)
+500 Internal Error  - Erro no servidor ou gateway
+
+
+8.2 FORMATO DE ERRO PADRÃO
+---------------------------
+{
+  "status": 400,
+  "message": "Saldo insuficiente. Saldo atual: 5000.00 AOA, Valor necessário: 15000.00 AOA",
+  "timestamp": "2026-02-17T15:30:00",
+  "path": "/api/fundos/1/debitar"
+}
+
+
+8.3 ERROS COMUNS E SOLUÇÕES
+----------------------------
+┌────────────────────────────────┬─────────┬────────────────────────┐
+│ ERRO                           │ STATUS  │ SOLUÇÃO                │
+├────────────────────────────────┼─────────┼────────────────────────┤
+│ Saldo inicial abaixo do mínimo │ 400     │ Enviar >= 5.000 AOA    │
+│ Saldo insuficiente             │ 400     │ Solicitar recarga      │
+│ Cliente já possui fundo ativo  │ 400     │ Usar fundo existente   │
+│ Fundo não encontrado           │ 404     │ Criar fundo primeiro   │
+│ Fundo encerrado                │ 400     │ Criar novo fundo       │
+│ Token expirado                 │ 401     │ Fazer login novamente  │
+│ Valor inválido (≤ 0)           │ 400     │ Enviar valor > 0       │
+│ Método pagamento inválido      │ 400     │ GPO ou REF apenas      │
+│ Gateway AppyPay indisponível   │ 500     │ Tentar novamente       │
+└────────────────────────────────┴─────────┴────────────────────────┘
+
+
+================================================================================
+9. EXEMPLOS DE INTEGRAÇÃO (CÓDIGO JAVASCRIPT)
+================================================================================
+
+9.1 CRIAR FUNDO PARA CLIENTE COM SALDO INICIAL
+-----------------------------------------------
+async function criarFundo(clienteId, saldoInicial, token) {
+  try {
+    const response = await fetch('http://localhost:8080/api/fundos', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ 
+        clienteId,
+        saldoInicial,
+        observacoes: 'Carga inicial'
+      })
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message);
+    }
+    
+    const result = await response.json();
+    console.log('Fundo criado:', result.data);
+    return result.data;
+  } catch (error) {
+    console.error('Erro ao criar fundo:', error.message);
+    throw error;
+  }
+}
+
+// USO:
+const fundo = await criarFundo(10, 10000.00, 'eyJhbGci...');
+
+
+9.2 CONSULTAR VALOR MÍNIMO OBRIGATÓRIO
+---------------------------------------
+async function consultarValorMinimo(token) {
+  try {
+    const response = await fetch(
+      'http://localhost:8080/api/fundos/config/valor-minimo',
+      {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message);
+    }
+    
+    const result = await response.json();
+    return result.data; // Retorna BigDecimal (ex: 5000.00)
+  } catch (error) {
+    console.error('Erro ao consultar valor mínimo:', error.message);
+    throw error;
+  }
+}
+
+// USO:
+const valorMinimo = await consultarValorMinimo('eyJhbGci...');
+console.log('Valor mínimo para criar fundo:', valorMinimo.toFixed(2), 'AOA');
+
+
+9.3 BUSCAR FUNDO DO CLIENTE
+----------------------------
+async function buscarFundo(clienteId, token) {
+  try {
+    const response = await fetch(
+      `http://localhost:8080/api/fundos/cliente/${clienteId}`,
+      {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
+    
+    if (response.status === 404) {
+      return null; // Cliente não tem fundo
+    }
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message);
+    }
+    
+    const result = await response.json();
+    return result.data;
+  } catch (error) {
+    console.error('Erro ao buscar fundo:', error.message);
+    throw error;
+  }
+}
+
+// USO:
+const fundo = await buscarFundo(10, 'eyJhbGci...');
+if (fundo) {
+  console.log('Saldo atual:', fundo.saldoAtual.toFixed(2), 'AOA');
+}
+
+
+9.4 RECARREGAR VIA APPYPAY (GPO)
+---------------------------------
+async function recarregarGPO(fundoId, valor, token) {
+  try {
+    const response = await fetch(
+      `http://localhost:8080/api/fundos/${fundoId}/recarregar`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          valor: valor,
+          metodoPagamento: 'GPO',
+          descricao: 'Recarga via AppyPay'
+        })
+      }
+    );
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message);
+    }
+    
+    const result = await response.json();
+    const pagamento = result.data;
+    
+    // Redireciona para AppyPay
+    if (pagamento.urlPagamento) {
+      window.location.href = pagamento.urlPagamento;
+    }
+    
+    return pagamento;
+  } catch (error) {
+    console.error('Erro ao criar recarga:', error.message);
+    throw error;
+  }
+}
+
+// USO:
+await recarregarGPO(1, 100000.00, 'eyJhbGci...');
+
+
+9.5 RECARREGAR VIA REFERÊNCIA (REF)
+------------------------------------
+async function recarregarREF(fundoId, valor, token) {
+  try {
+    const response = await fetch(
+      `http://localhost:8080/api/fundos/${fundoId}/recarregar`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          valor: valor,
+          metodoPagamento: 'REF',
+          descricao: 'Recarga via Multicaixa'
+        })
+      }
+    );
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message);
+    }
+    
+    const result = await response.json();
+    const pagamento = result.data;
+    
+    // Exibe entidade e referência para o cliente
+    alert(`Pague em qualquer Multicaixa:
+      Entidade: ${pagamento.entidade}
+      Referência: ${pagamento.referencia}
+      Valor: ${pagamento.valor.toFixed(2)} AOA
+      
+      Aguarde confirmação (pode levar até 24h)`);
+    
+    return pagamento;
+  } catch (error) {
+    console.error('Erro ao criar recarga:', error.message);
+    throw error;
+  }
+}
+
+// USO:
+await recarregarREF(1, 50000.00, 'eyJhbGci...');
+
+
+9.6 LISTAR HISTÓRICO DE TRANSAÇÕES
+-----------------------------------
+async function listarTransacoes(fundoId, token) {
+  try {
+    const response = await fetch(
+      `http://localhost:8080/api/fundos/${fundoId}/transacoes`,
+      {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message);
+    }
+    
+    const result = await response.json();
+    return result.data;
+  } catch (error) {
+    console.error('Erro ao listar transações:', error.message);
+    throw error;
+  }
+}
+
+// USO E EXIBIÇÃO:
+const transacoes = await listarTransacoes(1, 'eyJhbGci...');
+transacoes.forEach(t => {
+  const simbolo = t.tipo === 'DEBITO' ? '-' : '+';
+  const cor = t.tipo === 'DEBITO' ? 'red' : 'green';
+  console.log(
+    `${simbolo} ${t.valor.toFixed(2)} AOA | ${t.tipo} | Saldo: ${t.saldoNovo.toFixed(2)}`
+  );
+});
+
+
+9.7 POLLING PARA DETECTAR CONFIRMAÇÃO DE PAGAMENTO
+---------------------------------------------------
+async function aguardarConfirmacao(clienteId, saldoEsperado, token, maxTentativas = 60) {
+  for (let i = 0; i < maxTentativas; i++) {
+    const fundo = await buscarFundo(clienteId, token);
+    
+    if (fundo.saldoAtual >= saldoEsperado) {
+      console.log('Pagamento confirmado! Saldo atualizado.');
+      return fundo;
+    }
+    
+    console.log(`Aguardando confirmação... (${i + 1}/${maxTentativas})`);
+    await new Promise(resolve => setTimeout(resolve, 5000)); // 5 segundos
+  }
+  
+  throw new Error('Timeout: Pagamento não confirmado após 5 minutos');
+}
+
+// USO:
+await recarregarREF(1, 50000.00, token);
+const fundo = await aguardarConfirmacao(10, 50000.00, token);
+
+
+================================================================================
+10. CENÁRIOS DE TESTE
+================================================================================
+
+10.1 TESTE: CRIAR FUNDO COM SALDO INICIAL
+------------------------------------------
+1. Consultar valor mínimo: GET /api/fundos/config/valor-minimo
+2. Verificar valorMinimo = 5000.00
+3. Criar fundo para clienteId=10 com saldoInicial=10000.00
+4. Verificar saldoAtual = 10000.00
+5. Verificar histórico tem 1 transação CREDITO (carga inicial)
+6. Tentar criar fundo com saldoInicial=3000.00 (abaixo do mínimo)
+7. Verificar erro 400 "Saldo inicial deve ser no mínimo 5000.00 AOA"
+
+RESULTADO ESPERADO: ✓ Fundo criado com saldo inicial, rejeição de valor abaixo do mínimo
+
+
+10.2 TESTE: DÉBITO AUTOMÁTICO EM PEDIDO
+----------------------------------------
+1. Cliente tem saldo 100.000 AOA
+2. Criar pedido de 15.000 AOA
+3. Verificar pedido status = PAGO
+4. Verificar saldo = 85.000 AOA
+5. Verificar histórico tem transação DEBITO
+
+RESULTADO ESPERADO: ✓ Pedido pago, saldo debitado
+
+
+10.3 TESTE: SALDO INSUFICIENTE
+-------------------------------
+1. Cliente tem saldo 5.000 AOA
+2. Tentar criar pedido de 15.000 AOA
+3. Verificar erro 400
+4. Verificar mensagem contém "Saldo insuficiente"
+5. Verificar pedido NÃO foi criado
+6. Verificar saldo permanece 5.000 AOA
+
+RESULTADO ESPERADO: ✓ Pedido rejeitado, saldo intacto
+
+
+10.4 TESTE: CANCELAMENTO E ESTORNO
+-----------------------------------
+1. Cliente tem saldo 85.000 AOA
+2. Pedido #50 (15.000 AOA) já foi pago
+3. Cancelar pedido #50
+4. Verificar saldo = 100.000 AOA
+5. Verificar histórico tem transação ESTORNO
+
+RESULTADO ESPERADO: ✓ Valor devolvido
+
+
+10.5 TESTE: IDEMPOTÊNCIA DE DÉBITO
+-----------------------------------
+1. Criar pedido #50 (15.000 AOA)
+2. Simular retry (chamar débito novamente)
+3. Verificar saldo debitado apenas UMA vez
+4. Verificar apenas UMA transação DEBITO para pedido #50
+
+RESULTADO ESPERADO: ✓ Protegido contra duplicação
+
+
+10.6 TESTE: FUNDO ENCERRADO
+----------------------------
+1. Fundo ativo com saldo 50.000 AOA
+2. Encerrar fundo (ativo = false)
+3. Tentar recarregar
+4. Verificar erro 400 "Fundo encerrado"
+5. Tentar debitar
+6. Verificar erro 400 "Fundo encerrado"
+
+RESULTADO ESPERADO: ✓ Operações bloqueadas
+
+
+================================================================================
+11. CONSIDERAÇÕES FINAIS
+================================================================================
+
+11.1 BOAS PRÁTICAS
+------------------
+✓ Sempre validar saldo no frontend ANTES de enviar requisição
+✓ Usar formatação monetária adequada (2 casas decimais)
+✓ Exibir valores sempre com símbolo "AOA"
+✓ Implementar loading states durante requisições assíncronas
+✓ Implementar retry com exponential backoff para erros 5xx
+✓ Cachear token JWT no sessionStorage (não localStorage por segurança)
+✓ Implementar timeout de 30 segundos nas requisições
+✓ Logar erros para monitoramento
+
+
+11.2 PERFORMANCE
+----------------
+✓ Cachear saldo do fundo (atualizar a cada 30 segundos)
+✓ Paginar listagem de transações (usar ?page=0&size=20)
+✓ Lazy loading para histórico longo
+✓ Comprimir assets (gzip/brotli)
+✓ Minimizar chamadas à API (batch quando possível)
+
+
+11.3 UX/UI RECOMENDADO
+----------------------
+✓ Exibir saldo sempre visível no topo
+✓ Usar cores semânticas:
+  - Verde: CREDITO, ESTORNO, saldo aumentando
+  - Vermelho: DEBITO, saldo diminuindo
+  - Amarelo: Aguardando confirmação (REF)
+✓ Animações suaves ao atualizar saldo
+✓ Notificações push quando pagamento confirmado (via WebSocket)
+✓ Modal de confirmação antes de recargas grandes (> 500.000 AOA)
+✓ Histórico com filtros (tipo, período, valor)
+
+
+11.4 ROADMAP FUTURO (NÃO IMPLEMENTADO AINDA)
+---------------------------------------------
+⚠️ Transferência entre fundos
+⚠️ Cashback e promoções
+⚠️ Limite de crédito temporário
+⚠️ Assinatura mensal (recarga automática)
+⚠️ Relatórios financeiros PDF
+⚠️ Webhook para notificações
+
+
+11.5 CONTATO E SUPORTE
+----------------------
+Para dúvidas ou problemas durante a integração:
+
+Backend Team Lead: [Seu nome]
+Email: [seu-email@example.com]
+Slack: #backend-support
+Documentação API: http://localhost:8080/swagger-ui.html
+
+ÚLTIMA ATUALIZAÇÃO: 17 de Fevereiro de 2026
+VERSÃO DO DOCUMENTO: 1.0
+================================================================================

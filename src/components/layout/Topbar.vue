@@ -9,6 +9,12 @@
 
     <!-- User Menu -->
     <div class="flex items-center space-x-4">
+      <!-- WebSocket Status Indicator -->
+      <WebSocketStatus 
+        :status="wsStore.statusConexao" 
+        @reconectar="wsStore.conectar"
+      />
+
       <!-- Unidade / Contexto (placeholder) -->
       <div class="hidden md:flex items-center space-x-2 px-3 py-2 bg-background rounded-lg">
         <svg class="w-4 h-4 text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -33,7 +39,7 @@
         </svg>
       </div>
 
-      <!-- User Menu Dropdown (placeholder) -->
+      <!-- User Menu Dropdown -->
       <div v-if="showUserMenu" class="absolute top-16 right-6 bg-card border border-border rounded-lg shadow-lg py-2 w-48 z-50">
         <button class="w-full text-left px-4 py-2 hover:bg-background transition-colors text-sm text-text-secondary">
           Meu Perfil
@@ -42,7 +48,10 @@
           Configurações
         </button>
         <div class="border-t border-border my-2"></div>
-        <button class="w-full text-left px-4 py-2 hover:bg-background transition-colors text-sm text-error">
+        <button @click="logout" class="w-full text-left px-4 py-2 hover:bg-background transition-colors text-sm text-error flex items-center">
+          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+          </svg>
           Sair
         </button>
       </div>
@@ -52,18 +61,28 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/store/auth'
+import { useWebSocketStore } from '@/store/websocket'
+import WebSocketStatus from '@/components/shared/WebSocketStatus.vue'
 
 const route = useRoute()
+const router = useRouter()
 const authStore = useAuthStore()
+const wsStore = useWebSocketStore()
 const showUserMenu = ref(false)
 
-// Dados do usuário (mock através da store)
-const userName = computed(() => authStore.user.name)
-const userRole = computed(() => authStore.user.role)
+// Dados do usuário
+const userName = computed(() => {
+  return authStore.user?.name || 'Usuário'
+})
+
+const userRole = computed(() => {
+  return authStore.user?.role || 'ATENDENTE'
+})
+
 const userInitials = computed(() => {
-  const names = authStore.user.name.split(' ')
+  const names = userName.value.split(' ')
   return names.length > 1 ? `${names[0][0]}${names[1][0]}` : names[0][0]
 })
 
@@ -73,7 +92,7 @@ const currentPageTitle = computed(() => {
     '/admin/dashboard': 'Dashboard',
     '/admin/pedidos': 'Gestão de Pedidos',
     '/admin/produtos': 'Gestão de Produtos',
-    '/admin/mesas': 'Gestão de Mesas',
+    '/admin/unidades-consumo': 'Gestão de Unidades de Consumo',
     '/admin/fundos': 'Fundos de Consumo',
     '/admin/usuarios': 'Gestão de Usuários',
     '/admin/auditoria': 'Auditoria do Sistema'
@@ -83,5 +102,10 @@ const currentPageTitle = computed(() => {
 
 const toggleUserMenu = () => {
   showUserMenu.value = !showUserMenu.value
+}
+
+const logout = () => {
+  authStore.logout()
+  router.push('/login')
 }
 </script>

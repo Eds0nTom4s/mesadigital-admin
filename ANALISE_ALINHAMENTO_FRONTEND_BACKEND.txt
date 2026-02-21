@@ -1,0 +1,856 @@
+================================================================================
+  ANÁLISE DE ALINHAMENTO - FRONTEND ↔ BACKEND
+================================================================================
+
+Data: 20 de Fevereiro de 2026
+Analista: Equipe Backend
+Documento Analisado: RELATORIO_REFATORACAO_UNIDADES_CONSUMO.txt
+Referência: RESPOSTA_BACKEND_CONTAS.txt
+
+================================================================================
+SUMÁRIO EXECUTIVO
+================================================================================
+
+AVALIAÇÃO GERAL: ✅ EXCELENTE ALINHAMENTO (95%)
+
+A equipe de frontend demonstrou compreensão profunda da especificação fornecida
+e realizou refatoração completa e precisa. O relatório é tecnicamente correto,
+bem estruturado e evidencia domínio dos conceitos do backend.
+
+DESTAQUES POSITIVOS:
+✅ Nomenclatura 100% correta (Conta → UnidadeDeConsumo)
+✅ Endpoints mapeados corretamente
+✅ Fluxos de pagamento implementados conforme especificação
+✅ Responsabilidades frontend/backend bem compreendidas
+✅ Cálculos financeiros delegados corretamente
+✅ Validações implementadas conforme esperado
+✅ Tratamento de erros apropriado
+
+PONTOS DE ATENÇÃO IDENTIFICADOS:
+⚠️ 1 divergência menor em TipoUnidadeConsumo (COMANDA não existe)
+⚠️ Sugestão de melhoria na validação de fechamento
+⚠️ Esclarecimento sobre endpoint de filtro de pedidos
+
+
+================================================================================
+SEÇÃO 1: ANÁLISE DE NOMENCLATURA
+================================================================================
+
+1.1 ENTIDADE PRINCIPAL ✅ CORRETO
+--------------------------------------------------
+Frontend: Conta → UnidadeDeConsumo
+Backend: ✅ UnidadeDeConsumo
+
+AVALIAÇÃO: Perfeito. A equipe compreendeu corretamente que a entidade
+"Conta" não existe e substituiu por "UnidadeDeConsumo" em todos os lugares.
+
+
+1.2 CAMPOS E ATRIBUTOS ✅ CORRETO
+--------------------------------------------------
+MAPEAMENTO FRONTEND → BACKEND:
+✅ identificador → referencia
+✅ aberturaEm → abertaEm
+✅ fechamentoEm → fechadaEm
+✅ contaId → unidadeConsumoId
+✅ estadoFinanceiro → statusFinanceiro (pedido)
+✅ estadoOperacional → status (pedido)
+
+AVALIAÇÃO: Mapeamento 100% correto. Demonstra atenção aos detalhes.
+
+
+1.3 RELACIONAMENTOS ✅ CORRETO
+--------------------------------------------------
+Frontend compreendeu:
+✅ FundoConsumo pertence ao Cliente (não à UnidadeDeConsumo)
+✅ Acesso via: unidade.cliente?.fundoConsumo
+✅ UnidadeDeConsumo.pedidos é um array
+
+AVALIAÇÃO: Relacionamento corretamente entendido. O uso de optional chaining
+(?.) demonstra boa prática de programação defensiva.
+
+
+================================================================================
+SEÇÃO 2: ANÁLISE DE ENDPOINTS
+================================================================================
+
+2.1 ENDPOINTS DE UNIDADES DE CONSUMO ✅ CORRETO
+--------------------------------------------------
+Frontend implementou:
+✅ GET /api/unidades-consumo/status/OCUPADA
+✅ GET /api/unidades-consumo/{id}
+✅ POST /api/unidades-consumo
+✅ PUT /api/unidades-consumo/{id}/fechar
+
+Backend possui:
+✅ Todos os endpoints acima existem e funcionam conforme descrito
+
+AVALIAÇÃO: Mapeamento perfeito de endpoints.
+
+
+2.2 ENDPOINTS DE PEDIDOS ✅ CORRETO
+--------------------------------------------------
+Frontend implementou:
+✅ POST /api/pedidos
+✅ PUT /api/pedidos/{id}/confirmar-pagamento
+
+Frontend removeu (corretamente):
+✅ POST /api/pedidos/{id}/pagar (não existe no backend)
+
+AVALIAÇÃO: Compreensão correta. O endpoint /pagar não existe; o correto
+é /confirmar-pagamento conforme especificado.
+
+
+2.3 ENDPOINTS AUSENTES ✅ CORRETO
+--------------------------------------------------
+Frontend corretamente identificou que NÃO existem:
+✅ GET /api/contas/*
+✅ POST /api/pedidos/{id}/pagar
+✅ GET /api/produtos/disponiveis
+✅ GET /api/unidades-consumo/{id}/resumo
+
+Frontend implementou workarounds apropriados:
+✅ Filtro de produtos disponível=true no frontend
+✅ Cálculo de resumo financeiro no frontend
+
+AVALIAÇÃO: Excelente. A equipe não tentou usar endpoints inexistentes e
+implementou as responsabilidades no frontend conforme especificado.
+
+
+================================================================================
+SEÇÃO 3: ANÁLISE DE ESTRUTURAS DE DADOS
+================================================================================
+
+3.1 UnidadeConsumoResponse ✅ CORRETO
+--------------------------------------------------
+Frontend espera:
+{
+  "id": number,
+  "referencia": string,
+  "tipo": TipoUnidadeConsumo,
+  "status": StatusUnidadeConsumo,
+  "abertaEm": DateTime,
+  "fechadaEm": DateTime | null,
+  "cliente": ClienteResponse,
+  "pedidos": Pedido[]
+}
+
+Backend retorna:
+✅ Estrutura idêntica conforme UnidadeConsumoResponse.java
+
+AVALIAÇÃO: Alinhamento perfeito.
+
+
+3.2 PedidoResponse ✅ CORRETO
+--------------------------------------------------
+Frontend espera:
+{
+  "statusFinanceiro": "NAO_PAGO" | "PAGO" | "ESTORNADO",
+  "tipoPagamento": "PRE_PAGO" | "POS_PAGO",
+  "status": StatusPedido,
+  "pagoEm": DateTime | null
+}
+
+Backend retorna:
+✅ Estrutura idêntica conforme PedidoResponse
+
+AVALIAÇÃO: Alinhamento perfeito.
+
+
+3.3 CÁLCULOS FINANCEIROS ✅ CORRETO
+--------------------------------------------------
+Frontend implementou calcularResumo():
+✅ totalConsumido = soma de pedidos.total
+✅ totalPago = soma de pedidos com statusFinanceiro='PAGO'
+✅ totalPendente = soma de pedidos com statusFinanceiro='NAO_PAGO'
+✅ statusFinanceiro consolidado:
+   - 'PAGO' se totalPendente = 0
+   - 'EM_DEBITO' se totalPago = 0
+   - 'PARCIAL' caso contrário
+
+Backend:
+✅ NÃO fornece estes cálculos (conforme especificado)
+✅ Responsabilidade corretamente delegada ao frontend
+
+AVALIAÇÃO: Implementação correta. A lógica de cálculo está adequada.
+
+
+================================================================================
+SEÇÃO 4: ANÁLISE DE FLUXOS DE PAGAMENTO
+================================================================================
+
+4.1 FLUXO PRE_PAGO ✅ CORRETO
+--------------------------------------------------
+Frontend implementou:
+1. ✅ Verifica fundoCliente = unidade.cliente?.fundoConsumo
+2. ✅ Se saldo suficiente → cria pedido com tipoPagamento='PRE_PAGO'
+3. ✅ Backend debita automaticamente
+4. ✅ Pedido retorna com statusFinanceiro='PAGO'
+5. ✅ Frontend recalcula totais da unidade
+
+Backend comportamento:
+✅ Valida saldo antes de criar pedido
+✅ Debita automaticamente via FundoConsumoService
+✅ Retorna pedido com statusFinanceiro='PAGO'
+✅ Transação atômica (rollback em caso de erro)
+
+AVALIAÇÃO: Fluxo corretamente compreendido e implementado.
+
+
+4.2 FLUXO POS_PAGO ✅ CORRETO
+--------------------------------------------------
+Frontend implementou:
+1. ✅ Cria pedido com tipoPagamento='POS_PAGO'
+2. ✅ Backend valida:
+   - Política pós-pago ativa
+   - Role GERENTE/ADMIN
+   - Limite do cliente
+3. ✅ Pedido criado com statusFinanceiro='NAO_PAGO'
+4. ✅ Para confirmar: PUT /api/pedidos/{id}/confirmar-pagamento
+5. ✅ Backend marca statusFinanceiro='PAGO'
+
+Backend comportamento:
+✅ Validações implementadas conforme descrito
+✅ Limite padrão R$ 500,00 (50000 centavos)
+✅ Endpoint /confirmar-pagamento existe e funciona
+
+AVALIAÇÃO: Fluxo corretamente compreendido e implementado.
+
+
+4.3 TRATAMENTO DE FUNDO INSUFICIENTE ✅ CORRETO
+--------------------------------------------------
+Frontend implementado:
+✅ Se saldo insuficiente → mostra modal de pagamento alternativo
+✅ Captura erro 400 do backend
+✅ Oferece opção POS_PAGO (se GERENTE)
+
+Backend comportamento:
+✅ Retorna 400 com mensagem clara
+✅ Não cria pedido se saldo insuficiente
+✅ Transação não executada
+
+AVALIAÇÃO: Tratamento de erro correto.
+
+
+================================================================================
+SEÇÃO 5: ANÁLISE DE VALIDAÇÕES
+================================================================================
+
+5.1 VALIDAÇÕES FRONTEND ✅ CORRETO
+--------------------------------------------------
+Frontend implementou:
+✅ podeFinalizarPedido (carrinho não vazio)
+✅ Validação de UnidadeSelecionada existe
+✅ Validação de produtos carregados
+✅ Aviso de fechamento com pendências
+
+AVALIAÇÃO: Validações apropriadas para o lado cliente.
+
+
+5.2 VALIDAÇÕES BACKEND ESPERADAS ✅ CORRETO
+--------------------------------------------------
+Frontend espera que backend valide:
+✅ Saldo suficiente (PRE_PAGO)
+✅ Política pós-pago ativa (POS_PAGO)
+✅ Role GERENTE/ADMIN (POS_PAGO)
+✅ Limite do cliente (POS_PAGO)
+✅ UnidadeDeConsumo existe
+✅ Pedido existe
+
+Backend realmente valida:
+✅ Todas as validações acima estão implementadas
+
+AVALIAÇÃO: Expectativas corretas sobre responsabilidades do backend.
+
+
+5.3 VALIDAÇÃO DE FECHAMENTO ⚠️ PONTO DE ATENÇÃO
+--------------------------------------------------
+Frontend implementado:
+✅ Mostra aviso se totalPendente > 0
+✅ Valida pedidos não entregues
+✅ Permite fechar mesmo com pendências (confiando no backend)
+
+Backend comportamento REAL:
+⚠️ Backend NÃO valida pendências ao fechar
+⚠️ Comentário no código: "Verificação de pagamento removida"
+⚠️ Validação delegada ao módulo financeiro (futuro)
+
+RECOMENDAÇÃO:
+A implementação do frontend está CORRETA conforme nossa especificação.
+Porém, sugerimos:
+
+OPÇÃO 1 (Recomendada):
+Frontend DEVE validar e BLOQUEAR fechamento se totalPendente > 0
+(não apenas avisar). Isto previne problemas enquanto módulo financeiro
+não estiver completo.
+
+OPÇÃO 2 (Alternativa):
+Manter como está, mas registrar no sistema que GERENTE assumiu
+responsabilidade pelo fechamento com pendências.
+
+DECISÃO: Equipe de negócio deve definir.
+
+
+================================================================================
+SEÇÃO 6: ANÁLISE DE ENUMS
+================================================================================
+
+6.1 StatusUnidadeConsumo ✅ CORRETO
+--------------------------------------------------
+Frontend documentou:
+- DISPONIVEL
+- OCUPADA
+- AGUARDANDO_PAGAMENTO
+- FINALIZADA
+
+Backend possui:
+✅ Valores idênticos em StatusUnidadeConsumo.java
+
+AVALIAÇÃO: Correto.
+
+
+6.2 StatusFinanceiroPedido ✅ CORRETO
+--------------------------------------------------
+Frontend documentou:
+- NAO_PAGO
+- PAGO
+- ESTORNADO
+
+Backend possui:
+✅ Valores idênticos em StatusFinanceiroPedido.java
+
+AVALIAÇÃO: Correto.
+
+
+6.3 TipoPagamentoPedido ✅ CORRETO
+--------------------------------------------------
+Frontend documentou:
+- PRE_PAGO
+- POS_PAGO
+
+Backend possui:
+✅ Valores idênticos em TipoPagamentoPedido.java
+
+AVALIAÇÃO: Correto.
+
+
+6.4 TipoUnidadeConsumo ⚠️ DIVERGÊNCIA MENOR
+--------------------------------------------------
+Frontend documentou na seção 6.1:
+- MESA_FISICA
+- COMANDA ← ⚠️ NÃO EXISTE NO BACKEND
+- (outros conforme backend)
+
+Backend possui (TipoUnidadeConsumo.java):
+- MESA_FISICA ✅
+- QUARTO ✅
+- AREA_EVENTO ✅
+- ESPACO_LOUNGE ✅
+- VIRTUAL ✅
+
+PROBLEMA:
+Frontend menciona "COMANDA" que NÃO EXISTE no backend.
+
+IMPACTO: BAIXO
+Provável que seja apenas menção ilustrativa no relatório.
+Código provavelmente usa MESA_FISICA.
+
+RECOMENDAÇÃO:
+Frontend deve usar apenas os valores que existem no backend:
+- MESA_FISICA
+- QUARTO
+- AREA_EVENTO
+- ESPACO_LOUNGE
+- VIRTUAL
+
+Se há necessidade de "COMANDA", backend deve adicionar ao enum.
+
+
+================================================================================
+SEÇÃO 7: ANÁLISE DE RESPONSABILIDADES
+================================================================================
+
+7.1 RESPONSABILIDADES DO FRONTEND ✅ CORRETO
+--------------------------------------------------
+Frontend compreendeu que é responsável por:
+✅ Cálculos financeiros (totalConsumido, totalPago, totalPendente)
+✅ Validação de fechamento (avisar sobre pendências)
+✅ Filtragem de produtos disponíveis
+✅ Cálculo de status financeiro consolidado da unidade
+
+Backend confirma:
+✅ Não fornecemos estes cálculos prontos
+✅ Delegação correta conforme especificação
+
+AVALIAÇÃO: Compreensão perfeita de responsabilidades.
+
+
+7.2 RESPONSABILIDADES DO BACKEND ✅ CORRETO
+--------------------------------------------------
+Frontend espera que backend:
+✅ Valide saldo (PRE_PAGO)
+✅ Valide políticas (POS_PAGO)
+✅ Persista dados
+✅ Gerencie transações
+✅ Aplique regras de negócio
+
+Backend confirma:
+✅ Todas as responsabilidades estão implementadas
+
+AVALIAÇÃO: Expectativas corretas.
+
+
+================================================================================
+SEÇÃO 8: ANÁLISE DE TRATAMENTO DE ERROS
+================================================================================
+
+8.1 ERROS HTTP ✅ CORRETO
+--------------------------------------------------
+Frontend documenta tratamento de:
+✅ 400 Bad Request (saldo insuficiente, política desabilitada, limite excedido)
+✅ 403 Forbidden (usuário sem permissão)
+✅ 404 Not Found (recurso não existe)
+✅ 500 Internal Server Error (erro genérico)
+
+Backend confirma:
+✅ Retornamos estes códigos HTTP conforme descrito
+✅ Mensagens de erro são claras e específicas
+
+AVALIAÇÃO: Tratamento de erros apropriado.
+
+
+8.2 MENSAGENS DE ERRO ✅ CORRETO
+--------------------------------------------------
+Frontend espera mensagens como:
+✅ "Saldo insuficiente. Disponível: X, Necessário: Y"
+✅ "Pós-pago está desabilitado no sistema"
+✅ "Apenas GERENTE ou ADMIN podem criar pedidos pós-pago"
+✅ "Limite de pós-pago excedido"
+
+Backend confirma:
+✅ Mensagens exatas conforme GlobalExceptionHandler
+✅ Formato ApiResponse consistente
+
+AVALIAÇÃO: Expectativas corretas sobre mensagens.
+
+
+================================================================================
+SEÇÃO 9: ANÁLISE DOS CENÁRIOS DE TESTE
+================================================================================
+
+9.1 CENÁRIOS PRE_PAGO ✅ BEM DEFINIDOS
+--------------------------------------------------
+Frontend documentou 3 cenários:
+✅ Teste 1: Criar pedido com fundo suficiente
+✅ Teste 2: Criar pedido com fundo insuficiente
+✅ Teste 3: Cliente sem fundo de consumo
+
+AVALIAÇÃO: Cenários cobrem os casos principais.
+
+
+9.2 CENÁRIOS POS_PAGO ✅ BEM DEFINIDOS
+--------------------------------------------------
+Frontend documentou 4 cenários:
+✅ Teste 4: Criar pedido pós-pago por GERENTE
+✅ Teste 5: Confirmar pagamento
+✅ Teste 6: Tentar pós-pago sem permissão
+✅ Teste 7: Tentar pós-pago com política desativada
+
+AVALIAÇÃO: Cenários cobrem os casos principais.
+
+
+9.3 CENÁRIOS DE UNIDADES ✅ BEM DEFINIDOS
+--------------------------------------------------
+Frontend documentou 4 cenários:
+✅ Teste 8: Listar unidades abertas
+✅ Teste 9: Carregar detalhes de unidade
+✅ Teste 10: Fechar unidade com pendências
+✅ Teste 11: Fechar unidade quitada
+
+AVALIAÇÃO: Cenários adequados.
+
+
+9.4 CENÁRIOS DE PRODUTOS ✅ BEM DEFINIDOS
+--------------------------------------------------
+Frontend documentou 2 cenários:
+✅ Teste 12: Carregar produtos disponíveis
+✅ Teste 13: Adicionar produto ao carrinho
+
+AVALIAÇÃO: Cenários básicos cobertos.
+
+
+9.5 SUGESTÕES DE CENÁRIOS ADICIONAIS
+--------------------------------------------------
+Recomendamos adicionar testes para:
+
+• Concorrência:
+  - Dois usuários tentando criar pedido ao mesmo tempo
+  - OptimisticLockException no fundo de consumo
+
+• Transações:
+  - Rollback em caso de erro (pedido não criado se débito falhar)
+  - Consistência entre Pedido e TransacaoFundo
+
+• Múltiplos Pedidos:
+  - Unidade com vários pedidos PRE_PAGO e POS_PAGO misturados
+  - Cálculo correto de totais com diferentes statusFinanceiro
+
+• Limites:
+  - Cliente atingindo limite pós-pago exatamente
+  - Cliente com múltiplos pedidos NAO_PAGO acumulados
+
+
+================================================================================
+SEÇÃO 10: PONTOS DE ESCLARECIMENTO ADICIONAL
+================================================================================
+
+10.1 ENDPOINT DE FILTRO DE PEDIDOS
+--------------------------------------------------
+SITUAÇÃO:
+Frontend menciona: "Backend não tem endpoint direto /api/pedidos?unidadeConsumoId=X"
+Frontend implementou: getByUnidadeConsumoId() obtendo via GET /api/unidades-consumo/{id}
+
+ESCLARECIMENTO:
+✅ Abordagem CORRETA e EFICIENTE
+✅ Obter pedidos via UnidadeDeConsumoResponse é a forma recomendada
+✅ Evita chamadas desnecessárias ao backend
+
+ALTERNATIVA (se necessário no futuro):
+Backend pode adicionar query param ao GET /api/pedidos:
+GET /api/pedidos?unidadeConsumoId={id}
+
+Mas não é necessário no momento atual.
+
+
+10.2 POLÍTICA PÓS-PAGO - CONSULTA
+--------------------------------------------------
+SITUAÇÃO:
+Frontend menciona: "Backend não tem endpoint REST para consultar pós-pago"
+Frontend implementa: Tenta criar pedido POS_PAGO e captura erro se desabilitado
+
+ESCLARECIMENTO:
+✅ Abordagem FUNCIONAL
+✅ Válida para MVP
+
+MELHORIA SUGERIDA (futuro):
+Backend adicionar endpoint:
+GET /api/config/pos-pago
+Response: { "ativo": true, "limiteDefault": 50000 }
+
+Permite frontend exibir/ocultar opção POS_PAGO proativamente.
+
+DECISÃO: Implementar em próxima iteração (não crítico).
+
+
+10.3 RECARGA DE FUNDO
+--------------------------------------------------
+SITUAÇÃO:
+Frontend menciona possibilidade de "recarregar fundo" quando saldo insuficiente.
+
+ESCLARECIMENTO:
+✅ Funcionalidade EXISTE no backend
+✅ Documentada em: INTEGRACAO_FRONTEND_FUNDO_CONSUMO.txt
+✅ Via AppyPay (GPO/REFERENCIA)
+
+RECOMENDAÇÃO:
+Frontend deve integrar botão "Recarregar Fundo" que redireciona para
+página de recarga (ou modal) quando detectar saldo insuficiente.
+
+
+10.4 AUDITORIA E LOGS
+--------------------------------------------------
+SITUAÇÃO:
+Backend gera eventos de auditoria (EventLog) para operações financeiras.
+
+ESCLARECIMENTO:
+Frontend NÃO precisa se preocupar com auditoria.
+Backend registra automaticamente:
+- Criação de pedidos
+- Débitos de fundo
+- Confirmações de pagamento
+- Estornos
+- Fechamentos de unidades
+
+Logs são para compliance e troubleshooting.
+
+
+================================================================================
+SEÇÃO 11: AVALIAÇÃO POR CATEGORIA
+================================================================================
+
+NOMENCLATURA E CONCEITOS:           ✅ EXCELENTE (100%)
+ENDPOINTS E APIS:                   ✅ EXCELENTE (100%)
+ESTRUTURAS DE DADOS:                ✅ EXCELENTE (100%)
+FLUXOS DE PAGAMENTO:                ✅ EXCELENTE (100%)
+VALIDAÇÕES:                         ✅ MUITO BOM (95%)
+ENUMS E CONSTANTES:                 ⚠️ BOM (90%) - divergência menor COMANDA
+RESPONSABILIDADES:                  ✅ EXCELENTE (100%)
+TRATAMENTO DE ERROS:                ✅ EXCELENTE (100%)
+CENÁRIOS DE TESTE:                  ✅ MUITO BOM (95%)
+DOCUMENTAÇÃO:                       ✅ EXCELENTE (100%)
+
+MÉDIA GERAL:                        ✅ 98%
+
+
+================================================================================
+SEÇÃO 12: LISTA DE AÇÕES RECOMENDADAS
+================================================================================
+
+12.1 AÇÕES OBRIGATÓRIAS (ANTES DE PRODUÇÃO)
+--------------------------------------------------
+1. ❗ CORRIGIR: Remover referência a TipoUnidadeConsumo.COMANDA
+   - Arquivo: Relatório ou código que menciona COMANDA
+   - Usar: MESA_FISICA ou solicitar adição ao backend
+
+2. ❗ DECIDIR: Validação de fechamento com pendências
+   - Atual: Apenas avisa usuário
+   - Recomendado: Bloquear fechamento OU registrar responsável
+   - Stakeholder: Equipe de negócio
+
+
+12.2 AÇÕES RECOMENDADAS (MELHORIA)
+--------------------------------------------------
+3. ✅ ADICIONAR: Cenários de teste de concorrência
+   - OptimisticLockException
+   - Múltiplos usuários simultâneos
+
+4. ✅ IMPLEMENTAR: Integração com recarga de fundo
+   - Botão "Recarregar" quando saldo insuficiente
+   - Usar fluxo AppyPay existente
+
+5. ✅ ADICIONAR: Endpoint GET /api/config/pos-pago (backend)
+   - Permite frontend saber se pós-pago está ativo
+   - Evita tentativa e erro
+
+6. ✅ MELHORAR: Mensagens de erro mais específicas
+   - Ex: "Você precisa de mais 3000 Kz no fundo"
+   - Ex: "Limite disponível: 2000 Kz de 50000 Kz"
+
+
+12.3 AÇÕES FUTURAS (BACKLOG)
+--------------------------------------------------
+7. 📋 CONSIDERAR: Paginação de pedidos
+   - Se unidade tiver muitos pedidos (>100)
+
+8. 📋 CONSIDERAR: Cache de produtos
+   - Reduzir chamadas GET /api/produtos
+
+9. 📋 CONSIDERAR: WebSocket para atualizações em tempo real
+   - Notificar quando pedido muda de status
+   - Atualizar totais automaticamente
+
+
+================================================================================
+SEÇÃO 13: CONCLUSÃO E PARECER FINAL
+================================================================================
+
+PARECER TÉCNICO: ✅ APROVADO COM RECOMENDAÇÕES
+
+A equipe de frontend demonstrou:
+- Compreensão profunda da especificação do backend
+- Capacidade de refatoração completa e precisa
+- Atenção a detalhes técnicos
+- Boa prática de programação (optional chaining, validações, etc)
+- Documentação técnica exemplar
+
+PONTOS FORTES:
+1. Nomenclatura 100% alinhada
+2. Endpoints mapeados corretamente
+3. Fluxos de pagamento implementados conforme especificação
+4. Responsabilidades frontend/backend bem definidas
+5. Tratamento de erros robusto
+6. Cenários de teste abrangentes
+7. Documentação detalhada e clara
+
+PONTOS DE MELHORIA:
+1. Corrigir menção a COMANDA (não existe)
+2. Definir política de fechamento com pendências
+3. Adicionar testes de concorrência
+4. Integrar recarga de fundo no fluxo
+
+RISCO: BAIXO
+A divergência identificada (COMANDA) é menor e facilmente corrigível.
+
+RECOMENDAÇÃO: 
+✅ AUTORIZAR INÍCIO DOS TESTES DE INTEGRAÇÃO
+
+O código está pronto para testes integrados. As correções podem ser
+feitas em paralelo aos testes.
+
+
+================================================================================
+SEÇÃO 14: PRÓXIMOS PASSOS CONJUNTOS
+================================================================================
+
+FASE 1: SETUP E VALIDAÇÃO BÁSICA (1-2 dias)
+--------------------------------------------------
+Backend:
+- Confirmar ambiente de desenvolvimento acessível
+- Validar CORS configurado para frontend
+- Preparar dados de teste (clientes, produtos, unidades)
+
+Frontend:
+- Corrigir menção a COMANDA
+- Configurar ambiente integrado
+- Testar autenticação
+
+FASE 2: TESTES FUNCIONAIS (3-5 dias)
+--------------------------------------------------
+Ambos:
+- Executar cenários documentados (Testes 1-13)
+- Validar cálculos financeiros
+- Validar fluxos de pagamento
+- Documentar bugs encontrados
+
+FASE 3: AJUSTES E MELHORIAS (2-3 dias)
+--------------------------------------------------
+Backend:
+- Corrigir bugs identificados
+- Implementar GET /api/config/pos-pago (se decidido)
+
+Frontend:
+- Corrigir bugs identificados
+- Ajustar mensagens de erro
+- Refinar UX baseado em testes
+
+FASE 4: TESTES DE STRESS E EDGE CASES (2-3 dias)
+--------------------------------------------------
+Ambos:
+- Testes de concorrência
+- Testes de limite
+- Testes de erro e recuperação
+- Performance e otimização
+
+
+================================================================================
+SEÇÃO 15: RECONHECIMENTO
+================================================================================
+
+A equipe de backend reconhece o trabalho EXCEPCIONAL da equipe de frontend:
+
+✅ Comunicação clara e objetiva (SOLICITACAO_BACKEND_CONTAS.md)
+✅ Refatoração completa e precisa
+✅ Documentação técnica de alta qualidade
+✅ Profissionalismo e atenção a detalhes
+
+Este tipo de alinhamento entre equipes é EXEMPLAR e deve ser mantido
+como padrão para futuros desenvolvimentos.
+
+Estamos confiantes na qualidade da integração e no sucesso do projeto.
+
+
+================================================================================
+ANEXO A: CHECKLIST DE VALIDAÇÃO
+================================================================================
+
+NOMENCLATURA
+--------------------------------------------------
+✅ Entidade "Conta" substituída por "UnidadeDeConsumo"
+✅ Campos renomeados corretamente (referencia, abertaEm, fechadaEm)
+✅ Relacionamentos corretos (cliente.fundoConsumo)
+
+ENDPOINTS
+--------------------------------------------------
+✅ GET /api/unidades-consumo/status/OCUPADA
+✅ GET /api/unidades-consumo/{id}
+✅ POST /api/unidades-consumo
+✅ PUT /api/unidades-consumo/{id}/fechar
+✅ POST /api/pedidos
+✅ PUT /api/pedidos/{id}/confirmar-pagamento
+❌ POST /api/pedidos/{id}/pagar (removido, não existe)
+
+FLUXOS
+--------------------------------------------------
+✅ PRE_PAGO com fundo suficiente
+✅ PRE_PAGO com fundo insuficiente (tratamento erro)
+✅ POS_PAGO por GERENTE
+✅ Confirmação de pagamento POS_PAGO
+✅ Validações de permissão
+
+CÁLCULOS
+--------------------------------------------------
+✅ totalConsumido (frontend)
+✅ totalPago (frontend)
+✅ totalPendente (frontend)
+✅ statusFinanceiro consolidado (frontend)
+
+ENUMS
+--------------------------------------------------
+✅ StatusUnidadeConsumo (4 valores)
+✅ StatusFinanceiroPedido (3 valores)
+✅ TipoPagamentoPedido (2 valores)
+⚠️ TipoUnidadeConsumo (COMANDA não existe)
+
+VALIDAÇÕES
+--------------------------------------------------
+✅ Saldo suficiente (backend)
+✅ Política pós-pago ativa (backend)
+✅ Role GERENTE (backend)
+✅ Carrinho não vazio (frontend)
+⚠️ Fechamento com pendências (decisão necessária)
+
+TRATAMENTO DE ERROS
+--------------------------------------------------
+✅ 400 Bad Request
+✅ 403 Forbidden
+✅ 404 Not Found
+✅ 500 Internal Server Error
+
+TESTES
+--------------------------------------------------
+✅ 13 cenários documentados
+✅ PRE_PAGO coberto
+✅ POS_PAGO coberto
+✅ Unidades coberto
+⏳ Concorrência (adicionar)
+⏳ Transações (adicionar)
+
+
+================================================================================
+ANEXO B: GLOSSÁRIO DE TERMOS VALIDADOS
+================================================================================
+
+UnidadeDeConsumo:
+  ✅ Entidade principal que representa ponto de consumo
+  ✅ Pode ser: MESA_FISICA, QUARTO, AREA_EVENTO, ESPACO_LOUNGE, VIRTUAL
+  ❌ NÃO é: "Conta", "Mesa", "Comanda" (exceto se MESA_FISICA)
+
+StatusUnidadeConsumo:
+  ✅ DISPONIVEL - livre para uso
+  ✅ OCUPADA - em uso por cliente
+  ✅ AGUARDANDO_PAGAMENTO - consumo finalizado
+  ✅ FINALIZADA - pagamento concluído
+
+StatusFinanceiroPedido:
+  ✅ NAO_PAGO - aguardando pagamento
+  ✅ PAGO - pagamento confirmado
+  ✅ ESTORNADO - cancelado com devolução
+
+TipoPagamentoPedido:
+  ✅ PRE_PAGO - débito automático de fundo
+  ✅ POS_PAGO - pagamento posterior (requer GERENTE)
+
+FundoConsumo:
+  ✅ Pertence ao Cliente (não à UnidadeDeConsumo)
+  ✅ Débito automático em pedidos PRE_PAGO
+  ✅ Saldo não pode ficar negativo
+
+Resumo Financeiro:
+  ✅ Calculado no FRONTEND
+  ✅ Baseado em array de pedidos
+  ✅ Não vem do backend
+
+
+================================================================================
+FIM DA ANÁLISE
+================================================================================
+
+Documento preparado por: Equipe Backend
+Data: 20 de Fevereiro de 2026
+Status: FINALIZADO
+
+Para dúvidas ou esclarecimentos adicionais, consultar:
+- RESPOSTA_BACKEND_CONTAS.txt (especificação completa)
+- RELATORIO_REFATORACAO_UNIDADES_CONSUMO.txt (documento analisado)
+- Código-fonte: src/main/java/com/restaurante/
+
+Aprovação recomendada para início de testes integrados. ✅

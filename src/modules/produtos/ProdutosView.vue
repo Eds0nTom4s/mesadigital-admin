@@ -1,83 +1,600 @@
 <script setup>
+import { ref, computed, onMounted, watch } from 'vue'
 import { useCurrency } from '@/utils/currency'
+import { useAuthStore } from '@/store/auth'
+import { useNotificationStore } from '@/store/notifications'
+import api from '@/services/api'
 
 const { formatCurrency } = useCurrency()
+const authStore = useAuthStore()
+const notificationStore = useNotificationStore()
+
+// Estado
+const produtos = ref([])
+const loading = ref(false)
+const categoriaFiltro = ref('TODAS')
+const buscaTexto = ref('')
+const mostrarModal = ref(false)
+const modoEdicao = ref(false)
+const produtoEditando = ref(null)
+const buscaTimeout = ref(null)
+
+// Formulário
+const form = ref({
+  codigo: '',
+  nome: '',
+  descricao: '',
+  preco: '',
+  categoria: 'LANCHE',
+  urlImagem: '',
+  tempoPreparoMinutos: '',
+  disponivel: true
+})
+
+const formErros = ref({})
+
+// Categorias conforme documentação
+const categorias = [
+  { valor: 'TODAS', label: 'Todas Categorias', cor: '#9E9E9E' },
+  { valor: 'ENTRADA', label: 'Entrada', cor: '#4CAF50' },
+  { valor: 'PRATO_PRINCIPAL', label: 'Prato Principal', cor: '#2196F3' },
+  { valor: 'ACOMPANHAMENTO', label: 'Acompanhamento', cor: '#FFC107' },
+  { valor: 'SOBREMESA', label: 'Sobremesa', cor: '#E91E63' },
+  { valor: 'BEBIDA_ALCOOLICA', label: 'Bebida Alcoólica', cor: '#9C27B0' },
+  { valor: 'BEBIDA_NAO_ALCOOLICA', label: 'Bebida Não Alcoólica', cor: '#00BCD4' },
+  { valor: 'LANCHE', label: 'Lanche', cor: '#FF5722' },
+  { valor: 'PIZZA', label: 'Pizza', cor: '#F44336' },
+  { valor: 'OUTROS', label: 'Outros', cor: '#9E9E9E' }
+]
+
+// Computed
+const isGerente = computed(() => {
+  return authStore.user?.role === 'Administrador' || authStore.user?.role === 'GERENTE'
+})
+
+const categoriasExibicao = computed(() => categorias.filter(c => c.valor !== 'TODAS'))
+
+const getCorCategoria = (categoria) => {
+  const cat = categorias.find(c => c.valor === categoria)
+  return cat?.cor || '#9E9E9E'
+}
+
+const getLabelCategoria = (categoria) => {
+  const cat = categorias.find(c => c.valor === categoria)
+  return cat?.label || categoria
+}
+
+// Carregar produtos
+const carregarProdutos = async () => {
+  try {
+    loading.value = true
+    let response
+    
+    if (categoriaFiltro.value === 'TODAS') {
+      response = await api.get('/produtos')
+    } else {
+      response = await api.get(`/produtos/categoria/${categoriaFiltro.value}`)
+    }
+    
+    produtos.value = response.data.data || response.data || []
+  } catch (error) {
+    console.error('[ProdutosView] Erro ao carregar produtos:', error)
+    notificationStore.erro('Erro ao carregar produtos')
+  } finally {
+    loading.value = false
+  }
+}
+
+// Buscar produtos com debounce
+const buscarProdutos = async (termo) => {
+  if (!termo || termo.length < 2) {
+    carregarProdutos()
+    return
+  }
+  
+  try {
+    loading.value = true
+    const response = await api.get(`/produtos/buscar?nome=${encodeURIComponent(termo)}`)
+    produtos.value = response.data.data || response.data || []
+  } catch (error) {
+    console.error('[ProdutosView] Erro ao buscar produtos:', error)
+    notificationStore.erro('Erro ao buscar produtos')
+  } finally {
+    loading.value = false
+  }
+}
+
+// Watch com debounce para busca
+watch(buscaTexto, (novoValor) => {
+  if (buscaTimeout.value) {
+    clearTimeout(buscaTimeout.value)
+  }
+  
+  buscaTimeout.value = setTimeout(() => {
+    buscarProdutos(novoValor)
+  }, 500)
+})
+
+watch(categoriaFiltro, () => {
+  if (!buscaTexto.value) {
+    carregarProdutos()
+  }
+})
+
+// Abrir modal para criar
+const abrirModalCriar = () => {
+  modoEdicao.value = false
+  produtoEditando.value = null
+  limparFormulario()
+  mostrarModal.value = true
+}
+
+// Abrir modal para editar
+const abrirModalEditar = (produto) => {
+  modoEdicao.value = true
+  produtoEditando.value = produto
+  form.value = {
+    codigo: produto.codigo,
+    nome: produto.nome,
+    descricao: produto.descricao || '',
+    preco: produto.preco.toString(),
+    categoria: produto.categoria,
+    urlImagem: produto.urlImagem || '',
+    tempoPreparoMinutos: produto.tempoPreparoMinutos?.toString() || '',
+    disponivel: produto.disponivel
+  }
+  formErros.value = {}
+  mostrarModal.value = true
+}
+
+// Fechar modal
+const fecharModal = () => {
+  mostrarModal.value = false
+  limparFormulario()
+}
+
+// Limpar formulário
+const limparFormulario = () => {
+  form.value = {
+    codigo: '',
+    nome: '',
+    descricao: '',
+    preco: '',
+    categoria: 'LANCHE',
+    urlImagem: '',
+    tempoPreparoMinutos: '',
+    disponivel: true
+  }
+  formErros.value = {}
+}
+
+// Validar formulário
+const validarFormulario = () => {
+  formErros.value = {}
+  
+  if (!form.value.codigo || form.value.codigo.length > 50) {
+    formErros.value.codigo = 'Código é obrigatório (máx 50 caracteres)'
+  }
+  
+  if (!form.value.nome || form.value.nome.length < 3 || form.value.nome.length > 150) {
+    formErros.value.nome = 'Nome é obrigatório (3-150 caracteres)'
+  }
+  
+  const preco = parseFloat(form.value.preco)
+  if (!form.value.preco || isNaN(preco) || preco < 0.01) {
+    formErros.value.preco = 'Preço é obrigatório e deve ser maior que 0'
+  }
+  
+  if (!form.value.categoria) {
+    formErros.value.categoria = 'Categoria é obrigatória'
+  }
+  
+  if (form.value.descricao && form.value.descricao.length > 500) {
+    formErros.value.descricao = 'Descrição deve ter no máximo 500 caracteres'
+  }
+  
+  if (form.value.tempoPreparoMinutos && parseInt(form.value.tempoPreparoMinutos) < 1) {
+    formErros.value.tempoPreparoMinutos = 'Tempo de preparo deve ser maior que 0'
+  }
+  
+  return Object.keys(formErros.value).length === 0
+}
+
+// Salvar produto
+const salvarProduto = async () => {
+  if (!validarFormulario()) {
+    notificationStore.aviso('Por favor, corrija os erros no formulário')
+    return
+  }
+  
+  try {
+    loading.value = true
+    
+    const payload = {
+      codigo: form.value.codigo,
+      nome: form.value.nome,
+      descricao: form.value.descricao || null,
+      preco: parseFloat(form.value.preco),
+      categoria: form.value.categoria,
+      urlImagem: form.value.urlImagem || null,
+      tempoPreparoMinutos: form.value.tempoPreparoMinutos ? parseInt(form.value.tempoPreparoMinutos) : null,
+      disponivel: form.value.disponivel
+    }
+    
+    if (modoEdicao.value && produtoEditando.value) {
+      await api.put(`/produtos/${produtoEditando.value.id}`, payload)
+      notificationStore.sucesso('Produto atualizado com sucesso')
+    } else {
+      await api.post('/produtos', payload)
+      notificationStore.sucesso('Produto criado com sucesso')
+    }
+    
+    fecharModal()
+    carregarProdutos()
+  } catch (error) {
+    console.error('[ProdutosView] Erro ao salvar produto:', error)
+    if (error.response?.data?.validationErrors) {
+      formErros.value = error.response.data.validationErrors
+    }
+    notificationStore.erro(error.response?.data?.message || 'Erro ao salvar produto')
+  } finally {
+    loading.value = false
+  }
+}
+
+// Alterar disponibilidade
+const alterarDisponibilidade = async (produto) => {
+  try {
+    const novaDisponibilidade = !produto.disponivel
+    await api.patch(`/produtos/${produto.id}/disponibilidade?disponivel=${novaDisponibilidade}`)
+    produto.disponivel = novaDisponibilidade
+    notificationStore.sucesso(`Produto marcado como ${novaDisponibilidade ? 'disponível' : 'indisponível'}`)
+  } catch (error) {
+    console.error('[ProdutosView] Erro ao alterar disponibilidade:', error)
+    notificationStore.erro('Erro ao alterar disponibilidade')
+  }
+}
+
+// Excluir produto
+const excluirProduto = async (produto) => {
+  if (!confirm(`Tem certeza que deseja remover "${produto.nome}" do cardápio?\n\nEsta ação é permanente e o produto não aparecerá mais nas listagens.`)) {
+    return
+  }
+  
+  try {
+    await api.delete(`/produtos/${produto.id}`)
+    notificationStore.sucesso('Produto removido do cardápio')
+    carregarProdutos()
+  } catch (error) {
+    console.error('[ProdutosView] Erro ao excluir produto:', error)
+    notificationStore.erro('Erro ao excluir produto')
+  }
+}
+
+onMounted(() => {
+  carregarProdutos()
+})
 
 /**
- * Produtos View - Módulo de gestão de produtos
- * 
- * Funcionalidades (placeholder):
- * - Catálogo de produtos
- * - Filtros por categoria
- * - Controle de estoque
- * - Edição de produtos
+ * Produtos View - Gestão completa do cardápio
+ * Conforme especificação: INSTRUCOES_FRONTEND_PAGINA_PRODUTOS.txt
  */
 </script>
 
 <template>
   <div class="space-y-6">
+    <!-- Header -->
     <div class="flex items-center justify-between">
       <div>
-        <h2 class="text-2xl font-bold text-text-primary">Gestão de Produtos</h2>
-        <p class="text-text-secondary mt-1">Catálogo de produtos e estoque</p>
+        <h2 class="text-2xl font-bold text-text-primary">Cardápio</h2>
+        <p class="text-text-secondary mt-1">Gestão completa do cardápio e produtos</p>
       </div>
-      <button class="btn-primary">
-        + Adicionar Produto
+      <button v-if="isGerente" 
+              @click="abrirModalCriar" 
+              class="btn-primary flex items-center space-x-2">
+        <span class="text-xl">+</span>
+        <span>Adicionar Produto</span>
       </button>
     </div>
 
+    <!-- Filtros -->
     <div class="card">
-      <div class="flex items-center justify-between mb-4">
-        <div class="flex space-x-2">
-          <select class="input-field w-48">
-            <option>Todas Categorias</option>
-            <option>Bebidas</option>
-            <option>Comidas</option>
-            <option>Sobremesas</option>
-          </select>
+      <!-- Campo de Busca -->
+      <div class="mb-4">
+        <div class="relative">
+          <input v-model="buscaTexto" 
+                 type="text" 
+                 placeholder="Buscar produtos por nome..." 
+                 class="input-field w-full pl-10" />
+          <svg class="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-text-secondary" 
+               fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
         </div>
-        <input type="text" placeholder="Buscar produtos..." class="input-field w-64" />
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div class="border border-border rounded-lg p-4 hover:shadow-md transition-shadow">
-          <div class="flex items-center justify-between mb-3">
-            <span class="badge-success">Disponível</span>
-            <span class="text-sm text-text-secondary">Stock: 45</span>
+      <!-- Tabs de Categorias -->
+      <div class="flex space-x-2 overflow-x-auto pb-2">
+        <button v-for="categoria in categorias" 
+                :key="categoria.valor"
+                @click="categoriaFiltro = categoria.valor"
+                :class="[
+                  'px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors',
+                  categoriaFiltro === categoria.valor 
+                    ? 'bg-primary text-white' 
+                    : 'bg-background text-text-secondary hover:bg-gray-200'
+                ]">
+          {{ categoria.label }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div v-if="loading && produtos.length === 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div v-for="i in 6" :key="i" class="card animate-pulse">
+        <div class="h-48 bg-gray-200 rounded-lg mb-4"></div>
+        <div class="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
+        <div class="h-4 bg-gray-200 rounded w-1/2"></div>
+      </div>
+    </div>
+
+    <!-- Empty State -->
+    <div v-else-if="produtos.length === 0 && !loading" class="card text-center py-16">
+      <div class="text-6xl mb-4">🍽️</div>
+      <p class="text-xl font-semibold text-text-primary mb-2">Nenhum produto encontrado</p>
+      <p class="text-text-secondary">
+        {{ buscaTexto ? 'Tente ajustar sua busca' : 'Comece adicionando produtos ao cardápio' }}
+      </p>
+    </div>
+
+    <!-- Grid de Produtos -->
+    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div v-for="produto in produtos" 
+           :key="produto.id"
+           class="card hover:shadow-lg transition-shadow"
+           :class="{ 'opacity-60': !produto.disponivel }">
+        <!-- Imagem -->
+        <div class="relative mb-4 h-48 bg-gray-100 rounded-lg overflow-hidden">
+          <img v-if="produto.urlImagem" 
+               :src="produto.urlImagem" 
+               :alt="produto.nome"
+               class="w-full h-full object-cover"
+               @error="$event.target.src = 'https://via.placeholder.com/300x200?text=Sem+Imagem'" />
+          <div v-else class="w-full h-full flex items-center justify-center text-6xl">
+            🍽️
           </div>
-          <h3 class="font-semibold text-text-primary mb-1">Cerveja Super Bock</h3>
-          <p class="text-text-secondary text-sm mb-3">Bebida | 33cl</p>
-          <div class="flex items-center justify-between">
-            <span class="text-xl font-bold text-primary">{{ formatCurrency(2.50) }}</span>
-            <button class="text-primary hover:underline text-sm">Editar</button>
+          
+          <!-- Badge de Categoria -->
+          <div class="absolute top-2 left-2">
+            <span class="px-3 py-1 rounded-full text-xs font-semibold text-white"
+                  :style="{ backgroundColor: getCorCategoria(produto.categoria) }">
+              {{ getLabelCategoria(produto.categoria) }}
+            </span>
+          </div>
+
+          <!-- Badge de Disponibilidade -->
+          <div v-if="!produto.disponivel" class="absolute top-2 right-2">
+            <span class="px-3 py-1 rounded-full text-xs font-semibold bg-error text-white">
+              Indisponível
+            </span>
           </div>
         </div>
 
-        <div class="border border-border rounded-lg p-4 hover:shadow-md transition-shadow">
-          <div class="flex items-center justify-between mb-3">
-            <span class="badge-success">Disponível</span>
-            <span class="text-sm text-text-secondary">Stock: 22</span>
-          </div>
-          <h3 class="font-semibold text-text-primary mb-1">Francesinha</h3>
-          <p class="text-text-secondary text-sm mb-3">Comida | Prato Principal</p>
+        <!-- Informações -->
+        <div class="space-y-3">
+          <!-- Nome -->
+          <h3 class="font-semibold text-lg text-text-primary line-clamp-1">
+            {{ produto.nome }}
+          </h3>
+
+          <!-- Descrição -->
+          <p class="text-sm text-text-secondary line-clamp-2 min-h-[2.5rem]">
+            {{ produto.descricao || 'Sem descrição' }}
+          </p>
+
+          <!-- Preço e Tempo -->
           <div class="flex items-center justify-between">
-            <span class="text-xl font-bold text-primary">{{ formatCurrency(12.50) }}</span>
-            <button class="text-primary hover:underline text-sm">Editar</button>
+            <span class="text-2xl font-bold text-primary">
+              {{ formatCurrency(produto.preco) }}
+            </span>
+            <span v-if="produto.tempoPreparoMinutos" 
+                  class="text-sm text-text-secondary flex items-center space-x-1">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <span>~{{ produto.tempoPreparoMinutos }} min</span>
+            </span>
           </div>
+
+          <!-- Ações (somente GERENTE) -->
+          <div v-if="isGerente" class="flex items-center space-x-2 pt-3 border-t border-border">
+            <!-- Toggle Disponibilidade -->
+            <label class="flex items-center space-x-2 cursor-pointer flex-1">
+              <div class="relative">
+                <input type="checkbox" 
+                       :checked="produto.disponivel"
+                       @change="alterarDisponibilidade(produto)"
+                       class="sr-only peer">
+                <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-success"></div>
+              </div>
+              <span class="text-sm text-text-secondary">
+                {{ produto.disponivel ? 'Disponível' : 'Indisponível' }}
+              </span>
+            </label>
+
+            <!-- Botão Editar -->
+            <button @click="abrirModalEditar(produto)"
+                    class="p-2 text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                    title="Editar produto">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+              </svg>
+            </button>
+
+            <!-- Botão Excluir -->
+            <button @click="excluirProduto(produto)"
+                    class="p-2 text-error hover:bg-error/10 rounded-lg transition-colors"
+                    title="Remover produto">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal de Criar/Editar -->
+    <div v-if="mostrarModal" 
+         class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+         @click.self="fecharModal">
+      <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <!-- Header do Modal -->
+        <div class="sticky top-0 bg-white border-b border-border p-6 flex items-center justify-between">
+          <h3 class="text-2xl font-bold text-text-primary">
+            {{ modoEdicao ? 'Editar Produto' : 'Novo Produto' }}
+          </h3>
+          <button @click="fecharModal" 
+                  class="text-text-secondary hover:text-text-primary text-2xl font-bold">
+            ×
+          </button>
         </div>
 
-        <div class="border border-border rounded-lg p-4 hover:shadow-md transition-shadow">
-          <div class="flex items-center justify-between mb-3">
-            <span class="badge-warning">Stock Baixo</span>
-            <span class="text-sm text-text-secondary">Stock: 5</span>
+        <!-- Formulário -->
+        <form @submit.prevent="salvarProduto" class="p-6 space-y-4">
+          <!-- Código -->
+          <div>
+            <label class="block text-sm font-medium text-text-primary mb-1">
+              Código *
+            </label>
+            <input v-model="form.codigo" 
+                   type="text" 
+                   maxlength="50"
+                   class="input-field w-full"
+                   :class="{ 'border-error': formErros.codigo }"
+                   placeholder="Ex: PROD-001" />
+            <p v-if="formErros.codigo" class="text-error text-sm mt-1">{{ formErros.codigo }}</p>
           </div>
-          <h3 class="font-semibold text-text-primary mb-1">Pastel de Nata</h3>
-          <p class="text-text-secondary text-sm mb-3">Sobremesa | Unidade</p>
-          <div class="flex items-center justify-between">
-            <span class="text-xl font-bold text-primary">{{ formatCurrency(1.20) }}</span>
-            <button class="text-primary hover:underline text-sm">Editar</button>
+
+          <!-- Nome -->
+          <div>
+            <label class="block text-sm font-medium text-text-primary mb-1">
+              Nome *
+            </label>
+            <input v-model="form.nome" 
+                   type="text" 
+                   maxlength="150"
+                   class="input-field w-full"
+                   :class="{ 'border-error': formErros.nome }"
+                   placeholder="Nome do produto" />
+            <p v-if="formErros.nome" class="text-error text-sm mt-1">{{ formErros.nome }}</p>
           </div>
-        </div>
+
+          <!-- Descrição -->
+          <div>
+            <label class="block text-sm font-medium text-text-primary mb-1">
+              Descrição
+            </label>
+            <textarea v-model="form.descricao" 
+                      maxlength="500"
+                      rows="3"
+                      class="input-field w-full"
+                      :class="{ 'border-error': formErros.descricao }"
+                      placeholder="Descrição detalhada do produto"></textarea>
+            <p v-if="formErros.descricao" class="text-error text-sm mt-1">{{ formErros.descricao }}</p>
+            <p class="text-text-secondary text-xs mt-1">{{ form.descricao?.length || 0 }}/500 caracteres</p>
+          </div>
+
+          <!-- Preço e Categoria (lado a lado) -->
+          <div class="grid grid-cols-2 gap-4">
+            <!-- Preço -->
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-1">
+                Preço (Kz) *
+              </label>
+              <input v-model="form.preco" 
+                     type="number" 
+                     step="0.01"
+                     min="0.01"
+                     class="input-field w-full"
+                     :class="{ 'border-error': formErros.preco }"
+                     placeholder="0,00" />
+              <p v-if="formErros.preco" class="text-error text-sm mt-1">{{ formErros.preco }}</p>
+            </div>
+
+            <!-- Categoria -->
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-1">
+                Categoria *
+              </label>
+              <select v-model="form.categoria" 
+                      class="input-field w-full"
+                      :class="{ 'border-error': formErros.categoria }">
+                <option v-for="cat in categoriasExibicao" 
+                        :key="cat.valor" 
+                        :value="cat.valor">
+                  {{ cat.label }}
+                </option>
+              </select>
+              <p v-if="formErros.categoria" class="text-error text-sm mt-1">{{ formErros.categoria }}</p>
+            </div>
+          </div>
+
+          <!-- URL da Imagem -->
+          <div>
+            <label class="block text-sm font-medium text-text-primary mb-1">
+              URL da Imagem
+            </label>
+            <input v-model="form.urlImagem" 
+                   type="url" 
+                   class="input-field w-full"
+                   placeholder="https://exemplo.com/imagem.jpg" />
+          </div>
+
+          <!-- Tempo de Preparo e Disponível -->
+          <div class="grid grid-cols-2 gap-4">
+            <!-- Tempo de Preparo -->
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-1">
+                Tempo de Preparo (minutos)
+              </label>
+              <input v-model="form.tempoPreparoMinutos" 
+                     type="number" 
+                     min="1"
+                     class="input-field w-full"
+                     :class="{ 'border-error': formErros.tempoPreparoMinutos }"
+                     placeholder="15" />
+              <p v-if="formErros.tempoPreparoMinutos" class="text-error text-sm mt-1">{{ formErros.tempoPreparoMinutos }}</p>
+            </div>
+
+            <!-- Disponível -->
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-1">
+                Disponibilidade
+              </label>
+              <label class="flex items-center space-x-3 mt-2 cursor-pointer">
+                <input v-model="form.disponivel" 
+                       type="checkbox" 
+                       class="w-5 h-5 text-primary rounded focus:ring-primary" />
+                <span class="text-sm text-text-primary">Produto disponível</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Botões -->
+          <div class="flex space-x-3 pt-4">
+            <button type="button" 
+                    @click="fecharModal"
+                    class="flex-1 px-4 py-2 bg-background text-text-primary rounded-lg hover:bg-gray-200 transition-colors">
+              Cancelar
+            </button>
+            <button type="submit" 
+                    :disabled="loading"
+                    class="flex-1 btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+              {{ loading ? 'Salvando...' : (modoEdicao ? 'Salvar Alterações' : 'Criar Produto') }}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   </div>

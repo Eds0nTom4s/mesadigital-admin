@@ -19,10 +19,9 @@ const props = defineProps({
     type: Number,
     required: true
   },
-  status: {
-    type: String,
-    default: 'ATIVO',
-    validator: (value) => ['ATIVO', 'ENCERRADO', 'EXPIRADO'].includes(value)
+  ativo: {
+    type: Boolean,
+    default: true
   },
   fundoMinimo: {
     type: Number,
@@ -46,8 +45,8 @@ const badgeClass = computed(() => {
     lg: 'px-4 py-2 text-base'
   }
   
-  // Status inativo
-  if (props.status !== 'ATIVO') {
+  // Fundo inativo
+  if (!props.ativo) {
     return `${baseClasses} ${sizeClasses[props.tamanho]} bg-gray-200 text-gray-600`
   }
   

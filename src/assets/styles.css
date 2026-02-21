@@ -11,6 +11,20 @@
   body {
     @apply bg-background text-text-primary antialiased;
   }
+
+  /* Melhor indicação de foco para acessibilidade */
+  *:focus-visible {
+    @apply outline-2 outline-offset-2 outline-primary;
+  }
+
+  /* Garante que links e botões tenham foco visível */
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    @apply ring-2 ring-primary ring-offset-2;
+  }
 }
 
 /* Componentes reutilizáveis */

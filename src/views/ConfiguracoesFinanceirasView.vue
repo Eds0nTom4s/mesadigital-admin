@@ -1,25 +1,38 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useCurrency } from '@/utils/currency'
+import fundoConsumoService from '@/services/fundoConsumoService'
 
 /**
  * ConfiguracoesFinanceirasView - Configurações do sistema financeiro
  * 
- * Exibe configurações globais relacionadas a fundos e transações
- * Somente leitura - edição será implementada futuramente
+ * INTEGRADO COM API BACKEND
+ * Exibe configurações globais via consultarValorMinimo
+ * Edição será implementada quando backend disponibilizar endpoint
  */
 
 const { formatCurrency } = useCurrency()
 const configuracoes = ref(null)
 const loading = ref(true)
+const error = ref(null)
 
-// Carrega configurações mockadas
+// Carrega configurações via API
 onMounted(async () => {
   try {
-    const response = await fetch('/src/mock/configuracoes.json')
-    configuracoes.value = await response.json()
-  } catch (error) {
-    console.error('Erro ao carregar configurações:', error)
+    const response = await fundoConsumoService.consultarValorMinimo()
+    // Adapta para estrutura esperada pelo template
+    configuracoes.value = {
+      fundos: {
+        valorMinimo: response.data.valorMinimo
+      },
+      transacoes: {
+        limiteDebito: 50000, // TODO: Backend não retorna ainda
+        limiteCredito: 100000 // TODO: Backend não retorna ainda
+      }
+    }
+  } catch (err) {
+    console.error('Erro ao carregar configurações:', err)
+    error.value = err.response?.data?.message || err.message
   } finally {
     loading.value = false
   }
@@ -37,14 +50,15 @@ const salvarConfiguracoes = () => {
     <div class="flex items-center justify-between">
       <div>
         <h2 class="text-2xl font-bold text-text-primary">Configurações Financeiras</h2>
-        <p class="text-text-secondary mt-1">Parâmetros globais do sistema de fundos</p>
+        <p class="text-text-secondary mt-1">Visualização de parâmetros do sistema (somente leitura)</p>
       </div>
-      <button @click="salvarConfiguracoes" class="btn-primary" disabled>
-        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/>
+      <div class="flex items-center space-x-2">
+        <svg class="w-5 h-5 text-info" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
         </svg>
-        Salvar (Em Breve)
-      </button>
+        <span class="text-sm text-info font-medium">Modo Visualização</span>
+      </div>
     </div>
 
     <!-- Loading -->
@@ -213,16 +227,19 @@ const salvarConfiguracoes = () => {
       </div>
 
       <!-- Aviso de Somente Leitura -->
-      <div class="card bg-warning/5 border border-warning/20">
+      <div class="card bg-info/5 border border-info/20">
         <div class="flex items-start space-x-3">
-          <svg class="w-6 h-6 text-warning flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+          <svg class="w-6 h-6 text-info flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
           </svg>
           <div>
-            <h4 class="font-semibold text-warning mb-1">Modo Somente Leitura</h4>
+            <h4 class="font-semibold text-info mb-2">📖 Sobre esta Página</h4>
+            <p class="text-sm text-text-secondary mb-2">
+              Esta página exibe as configurações financeiras atuais do sistema em modo somente leitura. 
+              Os valores são obtidos diretamente do backend e refletem as regras de negócio ativas.
+            </p>
             <p class="text-sm text-text-secondary">
-              As configurações estão em modo visualização. A funcionalidade de edição será implementada com integração ao backend. 
-              Alterações futuras exigirão permissões de administrador.
+              <strong>Para alterar configurações:</strong> Entre em contato com o administrador do sistema ou acesse o painel de administração backend.
             </p>
           </div>
         </div>

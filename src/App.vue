@@ -1,10 +1,26 @@
 <template>
   <router-view />
+  <ToastNotifications />
 </template>
 
 <script setup>
-// Ponto de entrada principal do painel administrativo
-// O roteamento controla qual layout será exibido
+import { onMounted } from 'vue'
+import { useWebSocketStore } from '@/store/websocket'
+import ToastNotifications from '@/components/shared/ToastNotifications.vue'
+
+/**
+ * Ponto de entrada principal do painel administrativo
+ * 
+ * Inicializa conexão WebSocket global ao montar a aplicação
+ * Componente ToastNotifications está sempre ativo para exibir notificações
+ */
+
+// Conectar ao WebSocket quando aplicação iniciar
+onMounted(() => {
+  console.log('[App] Inicializando conexão WebSocket...')
+  const wsStore = useWebSocketStore()
+  wsStore.conectar()
+})
 </script>
 
 <style>

@@ -1,0 +1,798 @@
+================================================================================
+  INSTRUÇÕES FRONTEND - PÁGINA DE PRODUTOS (CARDÁPIO)
+================================================================================
+
+Data: 20 de Fevereiro de 2026
+Sistema: Sistema de Restauração
+Versão: 1.0
+
+================================================================================
+1. VISÃO GERAL
+================================================================================
+
+A página de Produtos permite a gestão completa do cardápio do restaurante.
+Possui diferentes níveis de acesso:
+
+PERFIS DE USUÁRIO:
+- GERENTE: Acesso total (criar, editar, desativar, alterar disponibilidade)
+- ATENDENTE: Visualização apenas de produtos disponíveis
+- CLIENTE: Visualização apenas de produtos disponíveis
+
+FUNCIONALIDADES PRINCIPAIS:
+- Listar todos os produtos disponíveis
+- Filtrar produtos por categoria
+- Buscar produtos por nome
+- Criar novo produto (somente GERENTE)
+- Editar produto existente (somente GERENTE)
+- Alterar disponibilidade temporária (somente GERENTE)
+- Desativar produto permanentemente (somente GERENTE)
+
+================================================================================
+2. ESTRUTURA DE DADOS
+================================================================================
+
+2.1 PRODUTO (Entidade Principal)
+---------------------------------
+
+CAMPOS:
+- id: Identificador único (Long)
+- codigo: Código interno do produto (String, máx 50 caracteres)
+- nome: Nome do produto (String, 3-150 caracteres)
+- descricao: Descrição detalhada (String, máx 500 caracteres)
+- preco: Valor em Kwanzas (Decimal, mínimo 0.01)
+- categoria: Categoria do produto (Enum - ver seção 2.2)
+- urlImagem: URL da imagem do produto (String, opcional)
+- tempoPreparoMinutos: Tempo estimado de preparo (Integer, opcional)
+- disponivel: Disponibilidade temporária (Boolean, padrão: true)
+- ativo: Status de ativação permanente (Boolean, padrão: true)
+- createdAt: Data/hora de criação (DateTime)
+- updatedAt: Data/hora da última atualização (DateTime)
+
+OBSERVAÇÕES:
+- "disponivel" pode ser alterado rapidamente pelo gerente (produto acabou temporariamente)
+- "ativo" é uma desativação permanente (produto foi removido do cardápio)
+- Produtos com ativo=false NÃO aparecem nas listagens
+- Produtos com disponivel=false aparecem mas marcados como "Indisponível"
+
+
+2.2 CATEGORIAS DISPONÍVEIS
+---------------------------
+
+VALORES VÁLIDOS:
+- ENTRADA (Descrição: "Entrada")
+- PRATO_PRINCIPAL (Descrição: "Prato Principal")
+- ACOMPANHAMENTO (Descrição: "Acompanhamento")
+- SOBREMESA (Descrição: "Sobremesa")
+- BEBIDA_ALCOOLICA (Descrição: "Bebida Alcoólica")
+- BEBIDA_NAO_ALCOOLICA (Descrição: "Bebida Não Alcoólica")
+- LANCHE (Descrição: "Lanche")
+- PIZZA (Descrição: "Pizza")
+- OUTROS (Descrição: "Outros")
+
+OBSERVAÇÃO: Sempre enviar o valor do enum (ex: PRATO_PRINCIPAL), não a descrição.
+
+
+2.3 FORMATO DE RESPOSTA PADRÃO DA API
+--------------------------------------
+
+Todas as respostas seguem o padrão ApiResponse:
+
+{
+  "success": true,
+  "message": "Mensagem descritiva",
+  "data": { ... dados do produto ou lista de produtos ... },
+  "timestamp": "2026-02-20T14:30:00"
+}
+
+Em caso de erro:
+
+{
+  "success": false,
+  "message": "Descrição do erro",
+  "data": null,
+  "timestamp": "2026-02-20T14:30:00"
+}
+
+================================================================================
+3. ENDPOINTS DA API
+================================================================================
+
+BASE URL: http://localhost:8080/api/produtos
+
+AUTENTICAÇÃO: 
+- Incluir header: Authorization: Bearer {JWT_TOKEN}
+- Token obtido no endpoint de autenticação
+
+
+3.1 LISTAR TODOS OS PRODUTOS DISPONÍVEIS
+-----------------------------------------
+
+MÉTODO: GET
+ENDPOINT: /api/produtos
+AUTENTICAÇÃO: Sim (qualquer perfil autenticado)
+PERMISSÕES: Todos os perfis
+
+DESCRIÇÃO:
+Retorna lista de todos os produtos ativos (ativo=true).
+Inclui produtos indisponíveis temporariamente (disponivel=false).
+
+PARÂMETROS: Nenhum
+
+EXEMPLO DE REQUISIÇÃO:
+GET http://localhost:8080/api/produtos
+Headers:
+  Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "Produtos listados com sucesso",
+  "data": [
+    {
+      "id": 1,
+      "codigo": "PROD-001",
+      "nome": "Hambúrguer Clássico",
+      "descricao": "Hambúrguer artesanal de 180g com queijo, alface, tomate",
+      "preco": 2500.00,
+      "categoria": "LANCHE",
+      "urlImagem": "https://exemplo.com/imagens/hamburguer.jpg",
+      "tempoPreparoMinutos": 15,
+      "disponivel": true,
+      "ativo": true,
+      "createdAt": "2026-02-15T10:00:00",
+      "updatedAt": "2026-02-20T09:30:00"
+    },
+    {
+      "id": 2,
+      "codigo": "PROD-002",
+      "nome": "Refrigerante Cola 350ml",
+      "descricao": "Refrigerante de cola gelado",
+      "preco": 450.00,
+      "categoria": "BEBIDA_NAO_ALCOOLICA",
+      "urlImagem": null,
+      "tempoPreparoMinutos": 1,
+      "disponivel": false,
+      "ativo": true,
+      "createdAt": "2026-02-15T10:05:00",
+      "updatedAt": "2026-02-20T11:00:00"
+    }
+  ],
+  "timestamp": "2026-02-20T14:30:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Exibir produtos em cards/grid organizado por categoria
+- Produtos com disponivel=false devem ter badge "Indisponível"
+- Desabilitar botão "Adicionar ao carrinho" para produtos indisponíveis
+- Mostrar preço formatado: 2.500,00 Kz (usar ponto como separador de milhares)
+
+
+3.2 LISTAR PRODUTOS POR CATEGORIA
+----------------------------------
+
+MÉTODO: GET
+ENDPOINT: /api/produtos/categoria/{categoria}
+AUTENTICAÇÃO: Sim
+PERMISSÕES: Todos os perfis
+
+DESCRIÇÃO:
+Filtra produtos ativos por categoria específica.
+
+PARÂMETROS:
+- categoria (path): Uma das categorias válidas (ver seção 2.2)
+
+EXEMPLO DE REQUISIÇÃO:
+GET http://localhost:8080/api/produtos/categoria/LANCHE
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "Produtos listados com sucesso",
+  "data": [
+    {
+      "id": 1,
+      "codigo": "PROD-001",
+      "nome": "Hambúrguer Clássico",
+      "descricao": "Hambúrguer artesanal de 180g com queijo, alface, tomate",
+      "preco": 2500.00,
+      "categoria": "LANCHE",
+      "urlImagem": "https://exemplo.com/imagens/hamburguer.jpg",
+      "tempoPreparoMinutos": 15,
+      "disponivel": true,
+      "ativo": true,
+      "createdAt": "2026-02-15T10:00:00",
+      "updatedAt": "2026-02-20T09:30:00"
+    }
+  ],
+  "timestamp": "2026-02-20T14:35:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Criar menu/tabs com as categorias disponíveis
+- Ao clicar em uma categoria, carregar apenas produtos daquela categoria
+- Manter categoria selecionada visualmente destacada
+
+
+3.3 BUSCAR PRODUTOS POR NOME
+-----------------------------
+
+MÉTODO: GET
+ENDPOINT: /api/produtos/buscar?nome={termo}
+AUTENTICAÇÃO: Sim
+PERMISSÕES: Todos os perfis
+
+DESCRIÇÃO:
+Busca produtos cujo nome contenha o termo informado (case-insensitive).
+
+PARÂMETROS:
+- nome (query): Termo de busca (mínimo 2 caracteres recomendado)
+
+EXEMPLO DE REQUISIÇÃO:
+GET http://localhost:8080/api/produtos/buscar?nome=hambur
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "Produtos encontrados",
+  "data": [
+    {
+      "id": 1,
+      "codigo": "PROD-001",
+      "nome": "Hambúrguer Clássico",
+      "descricao": "Hambúrguer artesanal de 180g com queijo, alface, tomate",
+      "preco": 2500.00,
+      "categoria": "LANCHE",
+      "urlImagem": "https://exemplo.com/imagens/hamburguer.jpg",
+      "tempoPreparoMinutos": 15,
+      "disponivel": true,
+      "ativo": true,
+      "createdAt": "2026-02-15T10:00:00",
+      "updatedAt": "2026-02-20T09:30:00"
+    },
+    {
+      "id": 5,
+      "codigo": "PROD-005",
+      "nome": "Hambúrguer Vegetariano",
+      "descricao": "Hambúrguer de grão-de-bico e quinoa",
+      "preco": 2800.00,
+      "categoria": "LANCHE",
+      "urlImagem": "https://exemplo.com/imagens/hamburguer-veg.jpg",
+      "tempoPreparoMinutos": 18,
+      "disponivel": true,
+      "ativo": true,
+      "createdAt": "2026-02-16T11:00:00",
+      "updatedAt": "2026-02-18T15:20:00"
+    }
+  ],
+  "timestamp": "2026-02-20T14:40:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Campo de busca com debounce (aguardar 500ms após usuário parar de digitar)
+- Mostrar loader durante busca
+- Se nenhum resultado, exibir mensagem: "Nenhum produto encontrado"
+- Limpar resultados quando campo de busca for esvaziado
+
+
+3.4 CRIAR NOVO PRODUTO (SOMENTE GERENTE)
+-----------------------------------------
+
+MÉTODO: POST
+ENDPOINT: /api/produtos
+AUTENTICAÇÃO: Sim
+PERMISSÕES: Somente GERENTE
+
+DESCRIÇÃO:
+Cria um novo produto no cardápio.
+
+HEADERS:
+- Authorization: Bearer {token}
+- Content-Type: application/json
+
+PAYLOAD (REQUEST BODY):
+{
+  "codigo": "PROD-010",
+  "nome": "Pizza Margherita",
+  "descricao": "Pizza tradicional com molho de tomate, mussarela e manjericão",
+  "preco": 4500.00,
+  "categoria": "PIZZA",
+  "urlImagem": "https://exemplo.com/imagens/pizza-margherita.jpg",
+  "tempoPreparoMinutos": 25,
+  "disponivel": true
+}
+
+VALIDAÇÕES OBRIGATÓRIAS (frontend deve implementar):
+- codigo: Obrigatório, máximo 50 caracteres
+- nome: Obrigatório, mínimo 3 caracteres, máximo 150
+- preco: Obrigatório, deve ser maior que 0.01
+- categoria: Obrigatório, deve ser uma das categorias válidas
+- descricao: Opcional, máximo 500 caracteres
+- urlImagem: Opcional
+- tempoPreparoMinutos: Opcional, se informado deve ser > 0
+- disponivel: Opcional, se não enviado assume true
+
+EXEMPLO DE RESPOSTA (201 CREATED):
+{
+  "success": true,
+  "message": "Produto criado com sucesso",
+  "data": {
+    "id": 10,
+    "codigo": "PROD-010",
+    "nome": "Pizza Margherita",
+    "descricao": "Pizza tradicional com molho de tomate, mussarela e manjericão",
+    "preco": 4500.00,
+    "categoria": "PIZZA",
+    "urlImagem": "https://exemplo.com/imagens/pizza-margherita.jpg",
+    "tempoPreparoMinutos": 25,
+    "disponivel": true,
+    "ativo": true,
+    "createdAt": "2026-02-20T14:45:00",
+    "updatedAt": "2026-02-20T14:45:00"
+  },
+  "timestamp": "2026-02-20T14:45:00"
+}
+
+EXEMPLO DE ERRO (400 BAD REQUEST):
+{
+  "success": false,
+  "message": "Dados inválidos fornecidos",
+  "data": null,
+  "validationErrors": {
+    "nome": "Nome é obrigatório",
+    "preco": "Preço deve ser maior que zero"
+  },
+  "timestamp": "2026-02-20T14:45:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Formulário modal ou página separada
+- Campos obrigatórios marcados com asterisco (*)
+- Validação em tempo real (mostrar erros antes de enviar)
+- Dropdown para categoria com descrições em português
+- Campo preço formatado com separador de milhar e 2 casas decimais
+- Após sucesso, fechar modal e atualizar lista
+- Em caso de erro, exibir mensagens abaixo dos campos correspondentes
+
+
+3.5 ATUALIZAR PRODUTO EXISTENTE (SOMENTE GERENTE)
+--------------------------------------------------
+
+MÉTODO: PUT
+ENDPOINT: /api/produtos/{id}
+AUTENTICAÇÃO: Sim
+PERMISSÕES: Somente GERENTE
+
+DESCRIÇÃO:
+Atualiza dados de um produto existente.
+
+PARÂMETROS:
+- id (path): ID do produto a ser atualizado
+
+HEADERS:
+- Authorization: Bearer {token}
+- Content-Type: application/json
+
+PAYLOAD (REQUEST BODY):
+{
+  "codigo": "PROD-001",
+  "nome": "Hambúrguer Clássico Premium",
+  "descricao": "Hambúrguer artesanal de 200g com queijo suíço, alface e tomate",
+  "preco": 2800.00,
+  "categoria": "LANCHE",
+  "urlImagem": "https://exemplo.com/imagens/hamburguer-premium.jpg",
+  "tempoPreparoMinutos": 18,
+  "disponivel": true
+}
+
+VALIDAÇÕES: Mesmas do endpoint de criação (seção 3.4)
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "Produto atualizado com sucesso",
+  "data": {
+    "id": 1,
+    "codigo": "PROD-001",
+    "nome": "Hambúrguer Clássico Premium",
+    "descricao": "Hambúrguer artesanal de 200g com queijo suíço, alface e tomate",
+    "preco": 2800.00,
+    "categoria": "LANCHE",
+    "urlImagem": "https://exemplo.com/imagens/hamburguer-premium.jpg",
+    "tempoPreparoMinutos": 18,
+    "disponivel": true,
+    "ativo": true,
+    "createdAt": "2026-02-15T10:00:00",
+    "updatedAt": "2026-02-20T15:00:00"
+  },
+  "timestamp": "2026-02-20T15:00:00"
+}
+
+EXEMPLO DE ERRO (404 NOT FOUND):
+{
+  "success": false,
+  "message": "Produto não encontrado",
+  "data": null,
+  "timestamp": "2026-02-20T15:00:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Mesmo formulário da criação, pré-preenchido com dados atuais
+- Botão "Salvar Alterações" ao invés de "Criar"
+- Após sucesso, fechar modal e atualizar item na lista
+- Exibir toast de confirmação: "Produto atualizado com sucesso"
+
+
+3.6 ALTERAR DISPONIBILIDADE (SOMENTE GERENTE)
+----------------------------------------------
+
+MÉTODO: PATCH
+ENDPOINT: /api/produtos/{id}/disponibilidade?disponivel={true|false}
+AUTENTICAÇÃO: Sim
+PERMISSÕES: Somente GERENTE
+
+DESCRIÇÃO:
+Altera rapidamente a disponibilidade temporária de um produto.
+Útil quando produto acabou temporariamente ou voltou ao estoque.
+
+PARÂMETROS:
+- id (path): ID do produto
+- disponivel (query): true para disponível, false para indisponível
+
+EXEMPLO DE REQUISIÇÃO:
+PATCH http://localhost:8080/api/produtos/1/disponibilidade?disponivel=false
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "Disponibilidade atualizada",
+  "data": {
+    "id": 1,
+    "codigo": "PROD-001",
+    "nome": "Hambúrguer Clássico",
+    "descricao": "Hambúrguer artesanal de 180g com queijo, alface, tomate",
+    "preco": 2500.00,
+    "categoria": "LANCHE",
+    "urlImagem": "https://exemplo.com/imagens/hamburguer.jpg",
+    "tempoPreparoMinutos": 15,
+    "disponivel": false,
+    "ativo": true,
+    "createdAt": "2026-02-15T10:00:00",
+    "updatedAt": "2026-02-20T15:10:00"
+  },
+  "timestamp": "2026-02-20T15:10:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Toggle switch ou botão rápido no card do produto
+- Alteração imediata na UI (otimistic update)
+- Em caso de erro, reverter estado na UI
+- Badge visual "Disponível" (verde) / "Indisponível" (vermelho)
+
+
+3.7 DESATIVAR PRODUTO (SOMENTE GERENTE)
+----------------------------------------
+
+MÉTODO: DELETE
+ENDPOINT: /api/produtos/{id}
+AUTENTICAÇÃO: Sim
+PERMISSÕES: Somente GERENTE
+
+DESCRIÇÃO:
+Desativa permanentemente um produto (soft delete).
+Produto deixa de aparecer em todas as listagens.
+Usado quando produto foi removido do cardápio definitivamente.
+
+PARÂMETROS:
+- id (path): ID do produto a ser desativado
+
+EXEMPLO DE REQUISIÇÃO:
+DELETE http://localhost:8080/api/produtos/1
+Headers:
+  Authorization: Bearer {token}
+
+EXEMPLO DE RESPOSTA (200 OK):
+{
+  "success": true,
+  "message": "Produto desativado com sucesso",
+  "data": null,
+  "timestamp": "2026-02-20T15:15:00"
+}
+
+EXEMPLO DE ERRO (404 NOT FOUND):
+{
+  "success": false,
+  "message": "Produto não encontrado",
+  "data": null,
+  "timestamp": "2026-02-20T15:15:00"
+}
+
+COMPORTAMENTO ESPERADO NA UI:
+- Modal de confirmação: "Tem certeza que deseja remover este produto?"
+- Explicar que é permanente (produto sairá do cardápio)
+- Após confirmação e sucesso, remover item da lista
+- Toast de confirmação: "Produto removido do cardápio"
+- Não permitir desfazer (é soft delete no backend, mas irreversível na UI)
+
+================================================================================
+4. TRATAMENTO DE ERROS
+================================================================================
+
+4.1 CÓDIGOS HTTP E SEUS SIGNIFICADOS
+-------------------------------------
+
+200 OK: Operação bem-sucedida
+201 CREATED: Recurso criado com sucesso (POST)
+400 BAD REQUEST: Dados inválidos enviados pelo cliente
+401 UNAUTHORIZED: Token JWT ausente ou inválido
+403 FORBIDDEN: Usuário não tem permissão para esta operação
+404 NOT FOUND: Produto não encontrado
+409 CONFLICT: Conflito de dados (ex: código de produto duplicado)
+500 INTERNAL SERVER ERROR: Erro no servidor
+
+4.2 MENSAGENS DE ERRO PARA EXIBIR AO USUÁRIO
+--------------------------------------------
+
+ERRO 401 (Não Autenticado):
+- Mensagem: "Sua sessão expirou. Por favor, faça login novamente."
+- Ação: Redirecionar para tela de login
+
+ERRO 403 (Sem Permissão):
+- Mensagem: "Você não tem permissão para realizar esta ação."
+- Ação: Desabilitar botões de ações restritas
+
+ERRO 404 (Produto Não Encontrado):
+- Mensagem: "Este produto não existe ou foi removido."
+- Ação: Remover item da lista se ainda estiver visível
+
+ERRO 400 (Dados Inválidos):
+- Mensagem: Exibir erros específicos de cada campo
+- Ação: Destacar campos com erro em vermelho
+
+ERRO 409 (Conflito):
+- Mensagem: "Já existe um produto com este código."
+- Ação: Destacar campo "código" e sugerir outro
+
+ERRO 500 (Erro Interno):
+- Mensagem: "Ocorreu um erro inesperado. Tente novamente em alguns instantes."
+- Ação: Permitir usuário tentar novamente
+
+================================================================================
+5. REQUISITOS DE UI/UX
+================================================================================
+
+5.1 LAYOUT E ORGANIZAÇÃO
+-------------------------
+
+PÁGINA PRINCIPAL (Listagem):
+- Header com título "Cardápio" ou "Produtos"
+- Campo de busca no topo (ícone de lupa)
+- Menu de categorias (tabs ou chips horizontais)
+- Grid responsivo de cards de produtos (3 colunas desktop, 2 tablet, 1 mobile)
+- Botão flutuante "+" (somente GERENTE) para adicionar novo produto
+
+CARD DE PRODUTO:
+- Imagem do produto (placeholder se urlImagem null)
+- Nome do produto (destaque)
+- Descrição (texto secundário, 2 linhas máximo com reticências)
+- Preço (grande, formatado)
+- Badge de categoria (pequeno, colorido)
+- Badge "Indisponível" se aplicável (vermelho)
+- Tempo de preparo (ícone relógio + "~15 min")
+- Botões de ação (somente GERENTE):
+  * Editar (ícone lápis)
+  * Toggle disponibilidade (switch)
+  * Excluir (ícone lixeira)
+
+
+5.2 CORES E ESTILOS
+-------------------
+
+CATEGORIAS (sugestão de cores para badges):
+- ENTRADA: #4CAF50 (verde)
+- PRATO_PRINCIPAL: #2196F3 (azul)
+- ACOMPANHAMENTO: #FFC107 (amarelo)
+- SOBREMESA: #E91E63 (rosa)
+- BEBIDA_ALCOOLICA: #9C27B0 (roxo)
+- BEBIDA_NAO_ALCOOLICA: #00BCD4 (ciano)
+- LANCHE: #FF5722 (laranja)
+- PIZZA: #F44336 (vermelho)
+- OUTROS: #9E9E9E (cinza)
+
+ESTADOS:
+- Disponível: Badge verde (#4CAF50) com texto "Disponível"
+- Indisponível: Badge vermelho (#F44336) com texto "Indisponível"
+- Produto desabilitado: Opacidade 0.6, sem interação
+
+
+5.3 FORMULÁRIOS (Criar/Editar)
+-------------------------------
+
+CAMPOS:
+1. Código: Input text, obrigatório, máx 50 chars
+2. Nome: Input text, obrigatório, 3-150 chars
+3. Descrição: Textarea, opcional, máx 500 chars
+4. Preço: Input number formatado, obrigatório, min 0.01, sufixo "Kz"
+5. Categoria: Dropdown/Select, obrigatório, mostrar descrições em PT
+6. URL Imagem: Input text, opcional, placeholder "https://..."
+7. Tempo Preparo: Input number, opcional, sufixo "minutos"
+8. Disponível: Checkbox ou Toggle, padrão marcado
+
+VALIDAÇÕES EM TEMPO REAL:
+- Mostrar erro abaixo do campo ao sair (onBlur)
+- Desabilitar botão "Salvar" se houver erros
+- Destacar campos obrigatórios não preenchidos
+
+BOTÕES:
+- "Cancelar" (secundário, fecha modal)
+- "Salvar" (primário, desabilitado se inválido)
+
+
+5.4 RESPONSIVIDADE
+------------------
+
+DESKTOP (>= 1024px):
+- Grid 3 colunas
+- Sidebar com categorias à esquerda
+- Modal de formulário 600px largura
+
+TABLET (768px - 1023px):
+- Grid 2 colunas
+- Categorias em tabs horizontais no topo
+- Modal de formulário 500px largura
+
+MOBILE (< 768px):
+- Grid 1 coluna (lista)
+- Categorias em carrossel horizontal
+- Modal de formulário tela cheia
+
+================================================================================
+6. FLUXO DE INTEGRAÇÃO (PASSO A PASSO)
+================================================================================
+
+ETAPA 1: CONFIGURAÇÃO INICIAL
+------------------------------
+1. Configurar interceptor HTTP para adicionar token JWT em todos os requests
+2. Criar service/api module para centralizar chamadas aos endpoints
+3. Configurar tratamento global de erros HTTP
+4. Implementar loading states (spinners)
+
+ETAPA 2: LISTAGEM DE PRODUTOS
+------------------------------
+1. Criar componente de card de produto
+2. Implementar chamada GET /api/produtos
+3. Renderizar produtos em grid responsivo
+4. Adicionar loading state durante carregamento
+5. Tratar caso de lista vazia (mensagem "Nenhum produto cadastrado")
+
+ETAPA 3: FILTROS E BUSCA
+-------------------------
+1. Criar componente de menu de categorias
+2. Implementar chamada GET /api/produtos/categoria/{categoria}
+3. Criar campo de busca com debounce
+4. Implementar chamada GET /api/produtos/buscar?nome={termo}
+5. Atualizar grid ao aplicar filtros
+
+ETAPA 4: CRIAR PRODUTO (GERENTE)
+---------------------------------
+1. Verificar se usuário é GERENTE (esconder botão se não for)
+2. Criar formulário modal de criação
+3. Implementar validações no frontend
+4. Implementar chamada POST /api/produtos
+5. Atualizar lista após criação bem-sucedida
+6. Exibir mensagens de erro/sucesso
+
+ETAPA 5: EDITAR PRODUTO (GERENTE)
+----------------------------------
+1. Adicionar botão "Editar" no card (somente GERENTE)
+2. Abrir formulário pré-preenchido com dados atuais
+3. Implementar chamada PUT /api/produtos/{id}
+4. Atualizar card na lista após edição
+5. Tratar erros de validação
+
+ETAPA 6: ALTERAR DISPONIBILIDADE (GERENTE)
+-------------------------------------------
+1. Adicionar toggle switch no card (somente GERENTE)
+2. Implementar chamada PATCH /api/produtos/{id}/disponibilidade
+3. Atualizar estado na UI imediatamente (optimistic update)
+4. Reverter em caso de erro
+5. Exibir badge visual de disponibilidade
+
+ETAPA 7: DESATIVAR PRODUTO (GERENTE)
+-------------------------------------
+1. Adicionar botão "Excluir" no card (somente GERENTE)
+2. Implementar modal de confirmação
+3. Implementar chamada DELETE /api/produtos/{id}
+4. Remover card da lista após sucesso
+5. Exibir toast de confirmação
+
+ETAPA 8: TESTES E REFINAMENTOS
+-------------------------------
+1. Testar com diferentes perfis de usuário
+2. Testar responsividade em diferentes dispositivos
+3. Testar cenários de erro (sem conexão, servidor fora, etc)
+4. Validar formatação de preços e datas
+5. Revisar acessibilidade (navegação por teclado, leitores de tela)
+
+================================================================================
+7. CHECKLIST DE VALIDAÇÃO
+================================================================================
+
+FUNCIONALIDADES:
+☐ Listar todos os produtos disponíveis
+☐ Filtrar produtos por categoria
+☐ Buscar produtos por nome (com debounce)
+☐ Criar novo produto (somente GERENTE)
+☐ Editar produto existente (somente GERENTE)
+☐ Alterar disponibilidade rapidamente (somente GERENTE)
+☐ Desativar produto permanentemente (somente GERENTE)
+
+VALIDAÇÕES:
+☐ Campos obrigatórios não podem ficar vazios
+☐ Nome deve ter 3-150 caracteres
+☐ Preço deve ser maior que 0.01
+☐ Categoria deve ser uma das opções válidas
+☐ Código deve ter máximo 50 caracteres
+☐ Descrição deve ter máximo 500 caracteres
+
+SEGURANÇA:
+☐ Token JWT enviado em todas as requisições
+☐ Botões de gerente ocultos para outros perfis
+☐ Redirecionamento para login se token expirar
+☐ Mensagem clara se usuário não tiver permissão
+
+UI/UX:
+☐ Loading state durante requisições
+☐ Mensagens de erro claras e específicas
+☐ Confirmação antes de deletar
+☐ Toast de sucesso após operações
+☐ Grid responsivo (3/2/1 colunas)
+☐ Produtos indisponíveis marcados visualmente
+☐ Formatação correta de preço (2.500,00 Kz)
+☐ Imagens com fallback se URL inválida
+
+TESTES:
+☐ Testar com usuário GERENTE
+☐ Testar com usuário ATENDENTE (sem botões de edição)
+☐ Testar com usuário CLIENTE (sem botões de edição)
+☐ Testar sem internet (mensagem de erro)
+☐ Testar com produto sem imagem (exibir placeholder)
+☐ Testar busca sem resultados (mensagem "Nenhum produto encontrado")
+
+================================================================================
+8. GLOSSÁRIO DE TERMOS
+================================================================================
+
+ATIVO: Status permanente do produto. Se false, produto foi removido do cardápio.
+DISPONÍVEL: Status temporário. Se false, produto acabou mas voltará.
+SOFT DELETE: Desativação lógica (marca ativo=false), não remove do banco.
+DEBOUNCE: Técnica para aguardar usuário parar de digitar antes de buscar.
+OPTIMISTIC UPDATE: Atualizar UI antes da confirmação do servidor.
+TOAST: Notificação temporária que aparece e desaparece automaticamente.
+JWT: JSON Web Token, token de autenticação enviado no header.
+PAYLOAD: Corpo da requisição HTTP (JSON enviado ao servidor).
+
+================================================================================
+9. CONTATOS E SUPORTE
+================================================================================
+
+DÚVIDAS SOBRE A API:
+- Consultar documentação Swagger: http://localhost:8080/swagger-ui.html
+- Verificar logs do servidor em caso de erro 500
+
+DÚVIDAS SOBRE MODELO DE DADOS:
+- Consultar arquivo: /docs/model_conceitual.txt
+
+PROBLEMAS TÉCNICOS:
+- Backend: Verificar se servidor está rodando na porta 8080
+- Autenticação: Verificar se token JWT está sendo enviado corretamente
+- CORS: Backend já configurado para aceitar requisições do frontend
+
+================================================================================
+FIM DO DOCUMENTO
+================================================================================

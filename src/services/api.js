@@ -10,27 +10,52 @@ import axios from 'axios'
 // Base URL da API (configurar conforme ambiente)
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api'
 
+// Configuração do Axios
+export const API_CONFIG = {
+  BASE_URL: API_BASE_URL,
+  TIMEOUT: 30000
+}
+
 // Instância do Axios configurada
 const api = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 30000,
+  baseURL: API_CONFIG.BASE_URL,
+  timeout: API_CONFIG.TIMEOUT,
   headers: {
     'Content-Type': 'application/json'
   }
 })
 
-// Request Interceptor - Adiciona token de autenticação
+// Request Interceptor - Adiciona token JWT de autenticação
 api.interceptors.request.use(
   (config) => {
-    // Obter token do localStorage ou store
-    const token = localStorage.getItem('auth_token')
+    // Obter token do localStorage (usado pela auth store)
+    const token = localStorage.getItem('token')
     
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
+      
+      // Debug: decodificar e mostrar conteúdo do token
+      if (import.meta.env.DEV) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]))
+          console.log(`[API] Token JWT enviado:`, {
+            sub: payload.sub,
+            roles: payload.roles,
+            unidadeAtendimentoId: payload.unidadeAtendimentoId,
+            exp: new Date(payload.exp * 1000).toLocaleString()
+          })
+        } catch (e) {
+          console.warn('[API] Erro ao decodificar token:', e)
+        }
+      }
+    } else {
+      console.warn('[API] Nenhum token encontrado no localStorage')
     }
     
-    // Log de requisições (remover em produção)
-    console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`)
+    // Log de requisições em desenvolvimento
+    if (import.meta.env.DEV) {
+      console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`)
+    }
     
     return config
   },
@@ -43,19 +68,29 @@ api.interceptors.request.use(
 // Response Interceptor - Trata erros globalmente
 api.interceptors.response.use(
   (response) => {
-    // Log de respostas (remover em produção)
-    console.log(`[API] Response from ${response.config.url}:`, response.status)
+    // Log de respostas em desenvolvimento
+    if (import.meta.env.DEV) {
+      console.log(`[API] Response from ${response.config.url}:`, response.status)
+    }
     return response
   },
   (error) => {
     // Tratamento de erros por código HTTP
     if (error.response) {
-      switch (error.response.status) {
+      const { status, data } = error.response
+      
+      switch (status) {
         case 401:
-          // Token inválido ou expirado
-          console.error('[API] Não autenticado - redirecionando para login')
-          localStorage.removeItem('auth_token')
-          window.location.href = '/login'
+          // Token inválido ou expirado - redireciona para login
+          console.error('[API] Token inválido ou expirado')
+          sessionStorage.removeItem('auth_token')
+          sessionStorage.removeItem('auth_token_expires')
+          sessionStorage.removeItem('auth_user')
+          
+          // Evita loop infinito se já estiver na tela de login
+          if (!window.location.pathname.includes('/login')) {
+            window.location.href = '/login'
+          }
           break
         
         case 403:
@@ -63,11 +98,11 @@ api.interceptors.response.use(
           break
         
         case 404:
-          console.error('[API] Recurso não encontrado')
+          console.error('[API] Recurso não encontrado:', data?.message)
           break
         
         case 500:
-          console.error('[API] Erro interno do servidor')
+          console.error('[API] Erro interno do servidor:', data?.message)
           break
         
         default:

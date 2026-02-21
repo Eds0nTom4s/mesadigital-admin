@@ -1,0 +1,618 @@
+================================================================================
+INSTRUÇÕES FRONTEND - PÁGINA DE UNIDADES DE CONSUMO
+================================================================================
+Data: 21 de Fevereiro de 2026
+Sistema: Gestão de Restauração
+Endpoint Base: /api/unidades-consumo
+
+================================================================================
+1. ENDPOINTS REST
+================================================================================
+
+1.1. CRIAR UNIDADE DE CONSUMO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+POST /api/unidades-consumo
+Authorization: Bearer {token}
+Content-Type: application/json
+
+REQUEST BODY:
+{
+  "referencia": "Mesa 15",           // OBRIGATÓRIO
+  "tipo": "MESA_FISICA",             // Opcional (default: MESA_FISICA)
+  "numero": 15,                      // Opcional
+  "telefoneCliente": "+244923456789", // OBRIGATÓRIO
+  "unidadeAtendimentoId": 1,         // OBRIGATÓRIO
+  "qrCode": "QR12345",               // Opcional
+  "capacidade": 4,                   // Opcional
+  "atendenteId": 10                  // Opcional (se criada manualmente)
+}
+
+RESPONSE (201 Created):
+{
+  "success": true,
+  "message": "Unidade de consumo criada com sucesso",
+  "data": {
+    "id": 101,
+    "referencia": "Mesa 15",
+    "tipo": "MESA_FISICA",
+    "numero": 15,
+    "qrCode": "QR12345",
+    "status": "OCUPADA",
+    "capacidade": 4,
+    "cliente": {
+      "id": 50,
+      "nome": "João Silva",
+      "telefone": "+244923456789"
+    },
+    "pedidos": [],
+    "total": 0.00,
+    "abertaEm": "2026-02-21T10:30:00",
+    "fechadaEm": null
+  }
+}
+
+ERROS:
+400 - "Cliente já possui uma unidade ativa"
+400 - "Referência é obrigatória"
+400 - "Telefone do cliente é obrigatório"
+400 - "Unidade de atendimento é obrigatória"
+404 - "Unidade de atendimento não encontrada"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.2. BUSCAR POR ID
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GET /api/unidades-consumo/{id}
+Authorization: Bearer {token}
+
+RESPONSE (200 OK):
+{
+  "success": true,
+  "message": "Sucesso",
+  "data": {
+    "id": 101,
+    "referencia": "Mesa 15",
+    "tipo": "MESA_FISICA",
+    "numero": 15,
+    "status": "OCUPADA",
+    "cliente": { ... },
+    "pedidos": [ ... ],
+    "total": 15000.00
+  }
+}
+
+ERROS:
+404 - "Unidade de consumo não encontrada"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.3. BUSCAR POR QR CODE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GET /api/unidades-consumo/qrcode/{qrCode}
+Authorization: Bearer {token}
+
+Exemplo: GET /api/unidades-consumo/qrcode/QR12345
+
+RESPONSE (200 OK):
+{
+  "success": true,
+  "message": "Sucesso",
+  "data": { ... }
+}
+
+ERROS:
+404 - "Unidade de consumo não encontrada"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.4. LISTAR TODAS (ADMIN)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GET /api/unidades-consumo
+Authorization: Bearer {token}
+
+COMPORTAMENTO:
+- Retorna TODAS as unidades (visão global)
+- Usar apenas para ADMIN
+
+RESPONSE (200 OK):
+{
+  "success": true,
+  "message": "Sucesso",
+  "data": [
+    {
+      "id": 10,
+      "referencia": "Mesa 10",
+      "status": "OCUPADA",
+      "total": 25000.00
+    },
+    {
+      "id": 15,
+      "referencia": "Mesa 15",
+      "status": "AGUARDANDO_PAGAMENTO",
+      "total": 30000.00
+    }
+  ]
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.5. LISTAR MINHAS UNIDADES (FILTRO AUTOMÁTICO) ⭐ RECOMENDADO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GET /api/unidades-consumo/minhas
+Authorization: Bearer {token}
+
+COMPORTAMENTO:
+- ADMIN: retorna TODAS as unidades (visão global)
+- GERENTE/ATENDENTE: retorna apenas unidades da sua UnidadeAtendimento
+- Filtro automático baseado no token JWT
+
+RESPONSE (200 OK):
+{
+  "success": true,
+  "message": "Sucesso",
+  "data": [ ... ]
+}
+
+ERROS:
+401 - "Usuário não autenticado"
+400 - "Unidade de atendimento não identificada"
+
+LÓGICA FRONTEND:
+- Sempre usar este endpoint por padrão
+- Detectar role no token (opcional, para ajustar UI)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.6. LISTAR POR STATUS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GET /api/unidades-consumo/status/{status}
+Authorization: Bearer {token}
+
+Valores de status: DISPONIVEL | OCUPADA | AGUARDANDO_PAGAMENTO | FINALIZADA
+
+Exemplo: GET /api/unidades-consumo/status/OCUPADA
+
+RESPONSE (200 OK):
+{
+  "success": true,
+  "message": "Sucesso",
+  "data": [ ... ]
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.7. LISTAR DISPONÍVEIS POR TIPO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GET /api/unidades-consumo/disponiveis/{tipo}
+Authorization: Bearer {token}
+
+Valores de tipo: MESA_FISICA | QUARTO | AREA_EVENTO | ESPACO_LOUNGE | VIRTUAL
+
+Exemplo: GET /api/unidades-consumo/disponiveis/MESA_FISICA
+
+COMPORTAMENTO:
+- Retorna apenas unidades com status = DISPONIVEL
+- Filtradas pelo tipo especificado
+
+RESPONSE (200 OK):
+{
+  "success": true,
+  "message": "Sucesso",
+  "data": [ ... ]
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.8. LISTAR POR UNIDADE DE ATENDIMENTO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GET /api/unidades-consumo/unidade-atendimento/{unidadeAtendimentoId}
+Authorization: Bearer {token}
+
+Exemplo: GET /api/unidades-consumo/unidade-atendimento/1
+
+COMPORTAMENTO:
+- Filtro manual por ID de UnidadeAtendimento
+- Usar para ADMIN que quer filtrar manualmente
+
+RESPONSE (200 OK):
+{
+  "success": true,
+  "message": "Sucesso",
+  "data": [ ... ]
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.9. FECHAR UNIDADE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PUT /api/unidades-consumo/{id}/fechar
+Authorization: Bearer {token}
+
+COMPORTAMENTO:
+- Altera status para FINALIZADA
+- Define fechadaEm = timestamp atual
+
+RESPONSE (200 OK):
+{
+  "success": true,
+  "message": "Unidade de consumo fechada com sucesso",
+  "data": {
+    "id": 101,
+    "status": "FINALIZADA",
+    "fechadaEm": "2026-02-21T15:30:00"
+  }
+}
+
+ERROS:
+404 - "Unidade de consumo não encontrada"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.10. ATUALIZAR STATUS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PUT /api/unidades-consumo/{id}/atualizar-status
+Authorization: Bearer {token}
+
+COMPORTAMENTO:
+- Recalcula status baseado nos pedidos
+- Regra:
+  * Sem pedidos → OCUPADA
+  * Todos pedidos FINALIZADOS → AGUARDANDO_PAGAMENTO
+  * Caso contrário → OCUPADA
+
+RESPONSE (200 OK):
+{
+  "success": true,
+  "message": "Sucesso",
+  "data": { ... }
+}
+
+================================================================================
+2. ENUMS
+================================================================================
+
+2.1. StatusUnidadeConsumo
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DISPONIVEL           - Livre e disponível para uso
+OCUPADA              - Em uso por cliente(s)
+AGUARDANDO_PAGAMENTO - Consumo finalizado, aguardando pagamento
+FINALIZADA           - Pagamento concluído, pronta para liberar
+
+2.2. TipoUnidadeConsumo
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MESA_FISICA   - Mesa física de restaurante
+QUARTO        - Quarto de hotel (room service)
+AREA_EVENTO   - Área de evento
+ESPACO_LOUNGE - Espaço lounge
+VIRTUAL       - Virtual/Delivery
+
+================================================================================
+3. ESTRUTURA DE RESPONSE
+================================================================================
+
+3.1. UnidadeConsumoResponse
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{
+  "id": Long,
+  "referencia": String,                    // "Mesa 15"
+  "tipo": TipoUnidadeConsumo,              // "MESA_FISICA"
+  "numero": Integer,                       // 15 (nullable)
+  "qrCode": String,                        // "QR12345" (nullable)
+  "status": StatusUnidadeConsumo,          // "OCUPADA"
+  "capacidade": Integer,                   // 4 (nullable)
+  "cliente": {
+    "id": Long,
+    "nome": String,
+    "telefone": String,
+    "email": String
+  },
+  "pedidos": [
+    {
+      "id": Long,
+      "status": StatusPedido,
+      "total": BigDecimal,
+      "criadoEm": LocalDateTime
+    }
+  ],
+  "total": BigDecimal,                     // Soma de todos pedidos
+  "abertaEm": LocalDateTime,               // "2026-02-21T10:30:00"
+  "fechadaEm": LocalDateTime               // null ou timestamp
+}
+
+================================================================================
+4. REGRAS DE NEGÓCIO
+================================================================================
+
+4.1. CRIAÇÃO DE UNIDADE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Cliente só pode ter UMA unidade ativa por vez
+✓ Telefone do cliente é obrigatório (busca ou cria cliente)
+✓ UnidadeAtendimentoId é obrigatório
+✓ Status inicial sempre = OCUPADA
+✓ Se atendenteId fornecido, vincula atendente à unidade
+
+4.2. FILTRO AUTOMÁTICO POR ROLE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Endpoint /minhas:
+- ADMIN: vê TODAS as unidades (global)
+- GERENTE: vê apenas unidades da sua UnidadeAtendimento
+- ATENDENTE: vê apenas unidades da sua UnidadeAtendimento
+
+Lógica baseada em claim "unidadeAtendimentoId" do token JWT
+
+4.3. CÁLCULO DE TOTAL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+total = soma de todos pedidos.total da unidade
+
+Calcular no FRONTEND:
+const total = unidade.pedidos.reduce((acc, pedido) => acc + pedido.total, 0)
+
+4.4. MÁQUINA DE ESTADOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DISPONIVEL
+    ↓ (cliente escaneia QR ou atendente cria)
+OCUPADA
+    ↓ (todos pedidos finalizados)
+AGUARDANDO_PAGAMENTO
+    ↓ (pagamento confirmado + fechar)
+FINALIZADA
+
+================================================================================
+5. CENÁRIOS DE USO
+================================================================================
+
+5.1. LISTAR UNIDADES ATIVAS (PÁGINA PRINCIPAL)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GET /api/unidades-consumo/minhas
+
+Filtrar localmente por status:
+- Mostrar badges: Ocupada (verde), Aguardando Pagamento (amarelo)
+- Contador: "X unidades abertas"
+
+5.2. CRIAR NOVA UNIDADE MANUALMENTE (ATENDENTE)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Solicitar telefone do cliente
+2. Selecionar tipo de unidade (mesa, quarto, etc)
+3. Informar referência ("Mesa 15")
+4. POST /api/unidades-consumo
+
+5.3. VISUALIZAR DETALHES DA UNIDADE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GET /api/unidades-consumo/{id}
+
+Exibir:
+- Informações do cliente
+- Lista de pedidos (status, total, horário)
+- Total geral consumido
+- Botão "Fechar" se status = AGUARDANDO_PAGAMENTO
+
+5.4. FILTRAR UNIDADES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Por status:
+GET /api/unidades-consumo/status/OCUPADA
+GET /api/unidades-consumo/status/AGUARDANDO_PAGAMENTO
+
+Por tipo:
+GET /api/unidades-consumo/disponiveis/MESA_FISICA
+
+5.5. FECHAR UNIDADE (APÓS PAGAMENTO)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PUT /api/unidades-consumo/{id}/fechar
+
+Validar antes:
+- Status deve ser AGUARDANDO_PAGAMENTO
+- Todos pedidos devem estar pagos
+
+================================================================================
+6. INTEGRAÇÃO COM OUTRAS PÁGINAS
+================================================================================
+
+6.1. PÁGINA DE PEDIDOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Ao criar pedido:
+- Selecionar unidade de consumo ativa
+- GET /api/unidades-consumo/status/OCUPADA
+
+Ao finalizar pedido:
+- PUT /api/unidades-consumo/{id}/atualizar-status (recalcula status)
+
+6.2. PÁGINA DE PAGAMENTOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Listar unidades aguardando pagamento:
+- GET /api/unidades-consumo/status/AGUARDANDO_PAGAMENTO
+
+Após pagamento confirmado:
+- PUT /api/unidades-consumo/{id}/fechar
+
+6.3. QR CODE (CLIENTE)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Cliente escaneia QR Code:
+- GET /api/unidades-consumo/qrcode/{qrCode}
+- Verifica status
+- Redireciona para cardápio se OCUPADA
+
+================================================================================
+7. VALIDAÇÕES FRONTEND
+================================================================================
+
+7.1. CRIAR UNIDADE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Referência não pode ser vazia
+✓ Telefone deve ter formato: +244XXXXXXXXX (9 dígitos após 244)
+✓ UnidadeAtendimentoId deve ser selecionada
+✓ Número deve ser inteiro positivo (se informado)
+✓ Capacidade deve ser inteiro positivo (se informado)
+
+7.2. FECHAR UNIDADE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Status deve ser AGUARDANDO_PAGAMENTO
+✓ Todos pedidos devem ter statusFinanceiro = PAGO
+✓ Confirmação do usuário antes de fechar
+
+================================================================================
+8. UI/UX - PÁGINA PRINCIPAL
+================================================================================
+
+8.1. CABEÇALHO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ADMIN:
+  Título: "Gestão de Unidades - Visão Global"
+  Filtro: Dropdown de UnidadeAtendimento
+
+GERENTE/ATENDENTE:
+  Título: "Gestão de Unidades - {Nome da Unidade}"
+  Contador: "{X} unidades abertas"
+
+8.2. CARDS DE UNIDADE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┌────────────────────────────────────────┐
+│ Mesa 15 - Salão Principal       [•]    │ ← Badge status
+│ Cliente: João Silva                    │
+│ Total: 25.000,00 Kz                    │
+│ 2 pedido(s) | Aberta há 1h30min       │
+│ [Ver Detalhes] [Novo Pedido] [Fechar] │
+└────────────────────────────────────────┘
+
+Badge cores:
+- OCUPADA: verde
+- AGUARDANDO_PAGAMENTO: amarelo
+- FINALIZADA: cinza
+- DISPONIVEL: azul
+
+8.3. FILTROS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Status: [Todas | Ocupadas | Aguardando Pagamento | Finalizadas]
+- Tipo: [Todas | Mesa | Quarto | Área Evento | Lounge | Virtual]
+- Busca: Por referência ou nome do cliente
+
+8.4. AÇÕES RÁPIDAS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[+ Nova Unidade] - Modal para criar manualmente
+[Atualizar]      - Refresh da lista
+[Exportar]       - CSV/PDF das unidades ativas
+
+================================================================================
+9. PERMISSÕES POR ROLE
+================================================================================
+
+9.1. ADMIN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Criar unidade em qualquer UnidadeAtendimento
+✓ Visualizar TODAS as unidades
+✓ Fechar qualquer unidade
+✓ Filtrar por UnidadeAtendimento
+
+9.2. GERENTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Criar unidade na sua UnidadeAtendimento
+✓ Visualizar apenas unidades da sua UnidadeAtendimento
+✓ Fechar unidades da sua UnidadeAtendimento
+✗ NÃO vê unidades de outras UnidadeAtendimento
+
+9.3. ATENDENTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Criar unidade na sua UnidadeAtendimento
+✓ Visualizar apenas unidades da sua UnidadeAtendimento
+✗ NÃO pode fechar unidades (apenas GERENTE/ADMIN)
+
+9.4. CLIENTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Visualizar apenas SUA unidade ativa
+✗ NÃO pode criar/fechar unidades
+
+================================================================================
+10. DETECÇÃO DE ROLE NO FRONTEND
+================================================================================
+
+Decodificar token JWT:
+
+import jwtDecode from 'jwt-decode'
+
+const token = localStorage.getItem('token')
+const decoded = jwtDecode(token)
+
+const role = decoded.roles // "ROLE_ADMIN" ou "ROLE_GERENTE"
+const unidadeAtendimentoId = decoded.unidadeAtendimentoId // Long ou null
+
+// Lógica de endpoint
+const endpoint = role.includes('ADMIN') 
+  ? '/api/unidades-consumo'        // Global
+  : '/api/unidades-consumo/minhas' // Filtrado
+
+// Ajustar UI
+const showFiltroUnidade = role.includes('ADMIN')
+const showBotaoFechar = role.includes('ADMIN') || role.includes('GERENTE')
+
+================================================================================
+11. TRATAMENTO DE ERROS
+================================================================================
+
+11.1. ERROS COMUNS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+400 - "Cliente já possui uma unidade ativa"
+      → Informar que cliente precisa fechar unidade anterior
+
+400 - "Referência é obrigatória"
+      → Validar campo no formulário
+
+404 - "Unidade de consumo não encontrada"
+      → Atualizar lista (pode ter sido fechada por outro usuário)
+
+404 - "Unidade de atendimento não encontrada"
+      → Verificar se UnidadeAtendimento existe/está ativa
+
+401 - "Usuário não autenticado"
+      → Redirecionar para login
+
+400 - "Unidade de atendimento não identificada"
+      → Token inválido (GERENTE sem unidadeAtendimentoId)
+      → Contatar administrador
+
+11.2. TRATAMENTO NO FRONTEND
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+try {
+  const response = await api.post('/api/unidades-consumo', data)
+  // Sucesso
+} catch (error) {
+  if (error.response?.status === 400) {
+    // Mostrar mensagem de validação
+    showError(error.response.data.message)
+  } else if (error.response?.status === 404) {
+    // Recurso não encontrado
+    showError('Recurso não encontrado')
+  } else if (error.response?.status === 401) {
+    // Não autenticado
+    redirectToLogin()
+  } else {
+    // Erro genérico
+    showError('Erro ao processar solicitação')
+  }
+}
+
+================================================================================
+12. CHECKLIST DE IMPLEMENTAÇÃO
+================================================================================
+
+BACKEND (✅ Concluído):
+✅ Entity UnidadeDeConsumo
+✅ Controller com 10 endpoints
+✅ Service com lógica de negócio
+✅ Filtro automático por role (/minhas)
+✅ DTOs (Request/Response)
+✅ Enums (Status, Tipo)
+
+FRONTEND (Pendente):
+□ Service de API (unidadesConsumoService.js)
+□ Página de listagem (UnidadesConsumoView.vue)
+□ Modal de criação
+□ Modal de detalhes
+□ Filtros por status/tipo
+□ Detecção de role
+□ Ajuste de UI por role (título, filtros, botões)
+□ Validação de formulários
+□ Tratamento de erros
+□ Integração com página de pedidos
+
+================================================================================
+FIM DO DOCUMENTO
+================================================================================
