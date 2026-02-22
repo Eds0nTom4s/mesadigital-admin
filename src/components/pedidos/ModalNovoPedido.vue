@@ -7,6 +7,12 @@
       </div>
 
       <div class="modal-body">
+        <!-- Loading inicial -->
+        <div v-if="carregandoFundo || carregandoSaldoAberto" class="loading-overlay">
+          <div class="spinner"></div>
+          <p class="loading-text">Carregando dados...</p>
+        </div>
+
         <!-- Informações da Unidade -->
         <div class="info-unidade">
           <div class="info-item">
@@ -67,6 +73,27 @@
           <button @click="abrirModalRecarregar" class="btn btn-sm btn-primary">
             Recarregar
           </button>
+        </div>
+
+        <!-- Alerta: Limite de Pós-Pago Excedido -->
+        <div v-if="saldoEmAberto > 0 || (saldoEmAberto + totalCarrinho) > limitePosPago" class="alert alert-error">
+          <div class="alert-content">
+            <svg class="alert-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <div>
+              <p class="alert-title">Atenção: Limite de Pós-Pago</p>
+              <p class="alert-message">
+                <strong>Saldo em aberto:</strong> {{ formatCurrency(saldoEmAberto) }}<br>
+                <strong>Total deste pedido:</strong> {{ formatCurrency(totalCarrinho) }}<br>
+                <strong>Total geral:</strong> {{ formatCurrency(saldoEmAberto + totalCarrinho) }}<br>
+                <strong>Limite permitido:</strong> {{ formatCurrency(limitePosPago) }}
+              </p>
+              <p v-if="(saldoEmAberto + totalCarrinho) > limitePosPago" class="alert-message text-red-600 font-semibold mt-2">
+                ⚠️ Pós-Pago bloqueado! Regularize as contas pendentes ou use Pré-Pago.
+              </p>
+            </div>
+          </div>
         </div>
 
         <!-- Tipo de Pagamento -->
@@ -229,6 +256,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useCurrency } from '@/utils/currency'
+import api from '@/services/api'
 import pedidosBalcaoService from '@/services/pedidosBalcaoService'
 import fundoConsumoService from '@/services/fundoConsumoService'
 import { useNotificationStore } from '@/store/notifications'
@@ -251,11 +279,35 @@ const loading = ref(false)
 const tipoPagamento = ref('PRE_PAGO')
 const fundoConsumo = ref(null)
 const carregandoFundo = ref(false)
+const saldoEmAberto = ref(0)
+const limitePosPago = ref(50000) // 500 AOA por padrão
+const carregandoSaldoAberto = ref(false)
 
 // Buscar fundo do cliente ao montar
 onMounted(async () => {
-  if (props.unidade?.cliente?.id) {
-    await buscarFundoCliente()
+  // Validar se tem unidade e cliente antes de buscar
+  if (!props.unidade?.id || !props.unidade?.cliente?.id) {
+    console.log('[ModalNovoPedido] Unidade sem cliente, pulando busca de fundo/saldo')
+    return
+  }
+  
+  try {
+    // Buscar fundo e saldo em paralelo com timeout
+    await Promise.race([
+      Promise.all([
+        buscarFundoCliente().catch(err => {
+          console.warn('[ModalNovoPedido] Erro ao buscar fundo:', err)
+        }),
+        buscarSaldoEmAberto().catch(err => {
+          console.warn('[ModalNovoPedido] Erro ao buscar saldo aberto:', err)
+        })
+      ]),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout ao buscar dados')), 5000)
+      )
+    ])
+  } catch (err) {
+    console.warn('[ModalNovoPedido] Timeout ou erro ao buscar dados:', err.message)
   }
   
   // Se usuário não pode usar POS_PAGO e for o default, forçar PRE_PAGO (se disponível)
@@ -265,6 +317,43 @@ onMounted(async () => {
     }
   }
 })
+
+const buscarSaldoEmAberto = async () => {
+  try {
+    carregandoSaldoAberto.value = true
+    
+    // Buscar pedidos em aberto do cliente (POS_PAGO não pagos)
+    const response = await api.get(`/pedidos`, {
+      params: {
+        unidadeConsumoId: props.unidade.id,
+        statusFinanceiro: 'NAO_PAGO'
+      }
+    })
+    
+    // Calcular total em aberto
+    const pedidosAbertos = response.data || []
+    saldoEmAberto.value = pedidosAbertos
+      .filter(p => p.tipoPagamento === 'POS_PAGO')
+      .reduce((sum, p) => sum + (p.total || 0), 0)
+    
+    console.log('[ModalNovoPedido] Saldo em aberto:', saldoEmAberto.value)
+    
+    // Buscar limite de pós-pago (do endpoint de configuração)
+    try {
+      const configResponse = await api.get('/configuracao-financeira')
+      if (configResponse.data?.limitePosPago) {
+        limitePosPago.value = configResponse.data.limitePosPago
+      }
+    } catch (err) {
+      console.warn('[ModalNovoPedido] Não foi possível buscar limite de pós-pago, usando padrão')
+    }
+  } catch (error) {
+    console.error('[ModalNovoPedido] Erro ao buscar saldo em aberto:', error)
+    saldoEmAberto.value = 0
+  } finally {
+    carregandoSaldoAberto.value = false
+  }
+}
 
 const buscarFundoCliente = async () => {
   try {
@@ -317,14 +406,30 @@ const tooltipPrePago = computed(() => {
 // Validar se pode usar POS_PAGO (apenas ADMIN e GERENTE)
 const podeUsarPosPago = computed(() => {
   const role = authStore.user?.role
-  return role === 'ADMIN' || role === 'GERENTE'
+  const temPermissao = role === 'ADMIN' || role === 'GERENTE'
+  
+  // Verificar se não excedeu o limite
+  const totalComNovoPedido = saldoEmAberto.value + totalCarrinho.value
+  const dentroDoLimite = totalComNovoPedido <= limitePosPago.value
+  
+  return temPermissao && dentroDoLimite
 })
 
 // Mensagem de tooltip quando POS_PAGO está desabilitado
 const tooltipPosPago = computed(() => {
-  if (!podeUsarPosPago.value) {
+  const role = authStore.user?.role
+  const temPermissao = role === 'ADMIN' || role === 'GERENTE'
+  
+  if (!temPermissao) {
     return 'Apenas Gerente ou Admin podem usar Pós-Pago'
   }
+  
+  // Verificar limite
+  const totalComNovoPedido = saldoEmAberto.value + totalCarrinho.value
+  if (totalComNovoPedido > limitePosPago.value) {
+    return `Limite excedido! Em aberto: ${formatCurrency(saldoEmAberto.value)} + Pedido: ${formatCurrency(totalCarrinho.value)} = ${formatCurrency(totalComNovoPedido)} (Limite: ${formatCurrency(limitePosPago.value)})`
+  }
+  
   return ''
 })
 
@@ -458,7 +563,20 @@ const criarPedido = async () => {
   // Validação de permissão para PÓS-PAGO
   if (tipoPagamento.value === 'POS_PAGO') {
     if (!podeUsarPosPago.value) {
-      notificationStore.erro('Apenas Gerente ou Admin podem criar pedidos Pós-Pago')
+      const totalComNovoPedido = saldoEmAberto.value + totalCarrinho.value
+      
+      if (totalComNovoPedido > limitePosPago.value) {
+        notificationStore.erro(
+          `Limite de Pós-Pago excedido!\n` +
+          `Saldo em aberto: ${formatCurrency(saldoEmAberto.value)}\n` +
+          `Pedido atual: ${formatCurrency(totalCarrinho.value)}\n` +
+          `Total: ${formatCurrency(totalComNovoPedido)}\n` +
+          `Limite: ${formatCurrency(limitePosPago.value)}\n\n` +
+          `Regularize as contas pendentes ou use Pré-Pago.`
+        )
+      } else {
+        notificationStore.erro('Apenas Gerente ou Admin podem criar pedidos Pós-Pago')
+      }
       return
     }
   }
@@ -511,11 +629,21 @@ const criarPedido = async () => {
       const limiteMatch = mensagemBackend.match(/Limite: ([0-9.,]+)/)
       const abertoMatch = mensagemBackend.match(/Total aberto: ([0-9.,]+)/)
       
-      if (limiteMatch && abertoMatch) {
-        notificationStore.erro(`Limite de crédito excedido! Já existe ${abertoMatch[1]} em aberto. Limite: ${limiteMatch[1]}`)
-      } else {
-        notificationStore.erro(mensagemBackend)
-      }
+      notificationStore.erro(
+        `❌ Limite de Crédito Excedido!\n\n` +
+        `Você já possui ${abertoMatch ? abertoMatch[1] : 'valor'} em contas pendentes.\n` +
+        `Limite máximo: ${limiteMatch ? limiteMatch[1] : 'não disponível'}\n\n` +
+        `⚠️ Soluções:\n` +
+        `• Regularize as contas pendentes primeiro\n` +
+        `• Use pagamento Pré-Pago (Fundo de Consumo)\n` +
+        `• Recarregue o fundo do cliente`,
+        {
+          duration: 8000
+        }
+      )
+      
+      // Atualizar saldo em aberto
+      await buscarSaldoEmAberto()
     } else if (mensagemBackend.includes('Valor de débito deve ser maior que zero')) {
       notificationStore.erro('Erro ao processar pagamento. Verifique se o fundo possui saldo e tente novamente.')
     } else if (mensagemBackend.includes('Saldo insuficiente')) {
@@ -908,6 +1036,11 @@ const criarPedido = async () => {
   border: 1px solid #ffb74d;
 }
 
+.alert-error {
+  background: #ffebee;
+  border: 2px solid #ef5350;
+}
+
 .alert-content {
   display: flex;
   align-items: flex-start;
@@ -927,6 +1060,10 @@ const criarPedido = async () => {
 
 .alert-warning .alert-icon {
   color: #f57c00;
+}
+
+.alert-error .alert-icon {
+  color: #d32f2f;
 }
 
 .alert-title {
@@ -1028,5 +1165,36 @@ const criarPedido = async () => {
 
 .text-warning {
   color: #f57c00 !important;
+}
+
+/* Loading Overlay */
+.loading-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #e0e0e0;
+  border-top-color: #1976d2;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  margin-top: 12px;
+  font-size: 14px;
+  color: #666;
 }
 </style>

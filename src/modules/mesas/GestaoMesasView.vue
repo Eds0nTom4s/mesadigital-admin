@@ -344,6 +344,7 @@ const carregarMesas = async () => {
     mesas.value = response.data || response
     
     console.log('[GestaoMesasView] Mesas carregadas:', mesas.value.length)
+    console.log('[GestaoMesasView] Primeira mesa (exemplo):', mesas.value[0])
   } catch (error) {
     console.error('[GestaoMesasView] Erro ao carregar mesas:', error)
     notificationStore.erro('Erro ao carregar mesas: ' + (error.response?.data?.message || error.message))
@@ -423,16 +424,26 @@ const fecharModalNova = () => {
 // Abrir detalhes da mesa
 const abrirDetalhesMesa = async (mesa) => {
   try {
+    // Primeiro abre o modal com dados básicos
     mesaSelecionada.value = mesa
     modalDetalhesAberto.value = true
+    
+    // Depois busca dados completos em background
+    try {
+      const mesaCompleta = await unidadesConsumoService.getById(mesa.id)
+      mesaSelecionada.value = mesaCompleta
+      console.log('[GestaoMesasView] Mesa completa:', mesaCompleta)
+    } catch (err) {
+      console.warn('[GestaoMesasView] Erro ao buscar detalhes completos, usando dados básicos:', err)
+    }
     
     // Buscar dados adicionais em paralelo
     const promises = []
     
     // Buscar fundo se cliente tem
-    if (mesa.cliente?.id) {
+    if (mesaCompleta.cliente?.id) {
       promises.push(
-        fundoConsumoService.buscarFundoPorCliente(mesa.cliente.id)
+        fundoConsumoService.buscarFundoPorCliente(mesaCompleta.cliente.id)
           .then(fundo => { fundoSelecionado.value = fundo })
           .catch(() => { fundoSelecionado.value = null })
       )
@@ -442,7 +453,7 @@ const abrirDetalhesMesa = async (mesa) => {
     
     // Buscar QR Code
     promises.push(
-      qrcodeService.buscarQrCodeUnidade(mesa.id)
+      qrcodeService.buscarQrCodeUnidade(mesaCompleta.id)
         .then(qrCodes => { 
           qrCodeSelecionado.value = qrCodes.length > 0 ? qrCodes[0] : null 
         })
@@ -479,15 +490,40 @@ const fecharMesa = async (mesa) => {
 }
 
 // Novo pedido
-const novoPedido = (mesa) => {
-  unidadeParaPedido.value = {
-    id: mesa.id,
-    referencia: mesa.referencia,
-    tipo: mesa.tipo,
-    cliente: mesa.cliente,
-    fundoConsumo: fundoSelecionado.value
+const novoPedido = async (mesa) => {
+  try {
+    let mesaParaPedido = mesa
+    
+    // Tentar buscar dados completos (com timeout de 3 segundos)
+    try {
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout')), 3000)
+      )
+      const dadosPromise = unidadesConsumoService.getById(mesa.id)
+      
+      mesaParaPedido = await Promise.race([dadosPromise, timeoutPromise])
+      console.log('[GestaoMesasView] Mesa completa para pedido:', mesaParaPedido)
+    } catch (err) {
+      console.warn('[GestaoMesasView] Usando dados básicos da mesa (não foi possível buscar completos):', err.message)
+      // Usa dados básicos que já temos
+      mesaParaPedido = mesa
+    }
+    
+    unidadeParaPedido.value = {
+      id: mesaParaPedido.id,
+      referencia: mesaParaPedido.referencia,
+      tipo: mesaParaPedido.tipo,
+      cliente: mesaParaPedido.cliente || null,
+      fundoConsumo: fundoSelecionado.value
+    }
+    
+    console.log('[GestaoMesasView] Unidade para pedido:', unidadeParaPedido.value)
+    
+    modalNovoPedidoAberto.value = true
+  } catch (error) {
+    console.error('[GestaoMesasView] Erro ao preparar pedido:', error)
+    notificationStore.erro('Erro ao abrir modal de pedido')
   }
-  modalNovoPedidoAberto.value = true
 }
 
 // Fechar modal de novo pedido
