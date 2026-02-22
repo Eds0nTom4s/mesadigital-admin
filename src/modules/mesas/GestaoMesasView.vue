@@ -428,9 +428,11 @@ const abrirDetalhesMesa = async (mesa) => {
     mesaSelecionada.value = mesa
     modalDetalhesAberto.value = true
     
+    let mesaCompleta = mesa // Usar dados básicos como fallback
+    
     // Depois busca dados completos em background
     try {
-      const mesaCompleta = await unidadesConsumoService.getById(mesa.id)
+      mesaCompleta = await unidadesConsumoService.getById(mesa.id)
       mesaSelecionada.value = mesaCompleta
       console.log('[GestaoMesasView] Mesa completa:', mesaCompleta)
     } catch (err) {

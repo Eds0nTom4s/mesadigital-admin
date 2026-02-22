@@ -426,6 +426,11 @@ const getStatusFinanceiroLabel = (status) => {
 // Ações QR Code
 const gerarQrCode = async () => {
   try {
+    if (!props.mesa?.id) {
+      notificationStore.erro('Mesa não identificada')
+      return
+    }
+    
     loadingQrCode.value = true
     
     const novoQrCode = await qrcodeService.gerarQrCode({
