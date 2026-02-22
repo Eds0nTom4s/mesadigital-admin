@@ -237,8 +237,9 @@
 
     <!-- Modal: Novo Pedido -->
     <ModalNovoPedido
+      v-if="modalNovoPedidoAberto"
       :is-open="modalNovoPedidoAberto"
-      :unidade-consumo="unidadeParaPedido"
+      :unidade="unidadeParaPedido"
       @close="fecharModalNovoPedido"
       @pedido-criado="pedidoCriado"
     />
@@ -493,6 +494,15 @@ const fecharMesa = async (mesa) => {
 
 // Novo pedido
 const novoPedido = async (mesa) => {
+  // VALIDAÇÃO CRÍTICA: Verificar se mesa existe
+  if (!mesa || !mesa.id) {
+    console.error('[GestaoMesasView] ERRO: novoPedido chamado sem mesa válida')
+    notificationStore.erro('Mesa não identificada. Tente novamente.')
+    return
+  }
+  
+  console.log('[GestaoMesasView] Iniciando novo pedido para mesa:', mesa.id)
+  
   try {
     let mesaParaPedido = mesa
     
@@ -509,6 +519,11 @@ const novoPedido = async (mesa) => {
       console.warn('[GestaoMesasView] Usando dados básicos da mesa (não foi possível buscar completos):', err.message)
       // Usa dados básicos que já temos
       mesaParaPedido = mesa
+    }
+    
+    // Validação adicional após fetch
+    if (!mesaParaPedido || !mesaParaPedido.id) {
+      throw new Error('Dados da mesa inválidos após fetch')
     }
     
     unidadeParaPedido.value = {

@@ -34,7 +34,7 @@
             <!-- Botões de ação principais -->
             <div class="flex gap-2">
               <button 
-                @click="$emit('novoPedido', mesa)" 
+                @click="abrirModalNovoPedido" 
                 class="btn-primary flex-1 font-semibold shadow-lg hover:shadow-xl"
               >
                 <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -280,6 +280,22 @@ const emit = defineEmits([
 
 const filtroPedidoAtivo = ref('TODOS')
 const loadingQrCode = ref(false)
+
+// Função para abrir modal de novo pedido com validação
+const abrirModalNovoPedido = () => {
+  if (!props.mesa || !props.mesa.id) {
+    notificationStore.erro('Mesa não identificada. Feche e reabra o modal.')
+    return
+  }
+  
+  if (!props.isOpen) {
+    console.warn('[ModalDetalhesMesa] Tentativa de abrir novo pedido com modal fechado')
+    return
+  }
+  
+  console.log('[ModalDetalhesMesa] Abrindo novo pedido para mesa:', props.mesa.id)
+  emit('novoPedido', props.mesa)
+}
 
 const filtrosPedidos = [
   { label: 'Todos', value: 'TODOS' },

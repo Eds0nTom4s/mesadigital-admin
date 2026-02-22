@@ -268,7 +268,19 @@ const carregandoSaldoAberto = ref(false)
 
 // Buscar fundo do cliente ao montar (SIMPLIFICADO - sem travamento)
 onMounted(() => {
+  // CRÍTICO: Não executar se modal não está aberto
+  if (!props.isOpen) {
+    console.log('[ModalNovoPedido] Modal renderizado mas não aberto - ignorando onMounted')
+    return
+  }
+  
   console.log('[ModalNovoPedido] Modal montado, unidade:', props.unidade)
+  
+  // VALIDAÇÃO: Verificar se unidade existe
+  if (!props.unidade) {
+    console.error('[ModalNovoPedido] ERRO: Modal aberto sem unidade definida')
+    return
+  }
   
   // Se usuário não pode usar POS_PAGO, forçar PRE_PAGO (se disponível)
   if (!podeUsarPosPago.value && tipoPagamento.value === 'POS_PAGO') {
