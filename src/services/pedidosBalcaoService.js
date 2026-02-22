@@ -16,12 +16,12 @@ export const pedidosBalcaoService = {
    * - Cria SubPedidos (um por Cozinha)
    * - Cria ItemPedidos associados aos SubPedidos
    * - Calcula totais
-   * - Processa pagamento (se FUNDO_CONSUMO)
+   * - Processa pagamento (se PRE_PAGO - débito imediato do fundo)
    * 
    * @param {Object} dados
    * @param {number} dados.unidadeConsumoId - ID da unidade de consumo
    * @param {Array} dados.itens - Array [{produtoId, quantidade, observacoes?}]
-   * @param {string} dados.tipoPagamento - FUNDO_CONSUMO (default) ou POS_PAGO
+   * @param {string} dados.tipoPagamento - PRE_PAGO (débito do fundo) ou POS_PAGO (pagar depois)
    * @param {string} dados.observacoes - Observações opcionais
    */
   async criar(dados) {

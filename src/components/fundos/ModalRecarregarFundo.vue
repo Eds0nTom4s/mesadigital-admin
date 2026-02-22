@@ -1,9 +1,9 @@
 <template>
-  <div class="modal-overlay" @click.self="$emit('fechar')">
+  <div v-if="isOpen" class="modal-overlay" @click.self="$emit('close')">
     <div class="modal-dialog">
       <div class="modal-header">
         <h3>Recarregar Fundo de Consumo</h3>
-        <button @click="$emit('fechar')" class="btn-close">✕</button>
+        <button @click="$emit('close')" class="btn-close">✕</button>
       </div>
 
       <div class="modal-body">
@@ -145,13 +145,17 @@ import { useNotificationStore } from '@/store/notifications'
 import fundoConsumoService from '@/services/fundoConsumoService'
 
 const props = defineProps({
+  isOpen: {
+    type: Boolean,
+    default: false
+  },
   fundo: {
     type: Object,
     required: true
   }
 })
 
-const emit = defineEmits(['fechar', 'recarga-criada'])
+const emit = defineEmits(['close', 'recarga-realizada'])
 
 const { formatCurrency } = useCurrency()
 const notificationStore = useNotificationStore()
@@ -209,7 +213,7 @@ const confirmarRecarga = async () => {
       notificationStore.sucesso('Referência bancária gerada com sucesso!')
     }
 
-    emit('recarga-criada', pagamento)
+    emit('recarga-realizada', pagamento)
   } catch (error) {
     const mensagem = error.response?.data?.message || error.message || 'Erro ao criar recarga'
     notificationStore.erro(mensagem)

@@ -447,9 +447,13 @@ const handleRecargaCriada = async (pagamento) => {
   // Recarregar unidade selecionada para atualizar saldo (quando pagamento for confirmado)
   if (unidadeSelecionada.value) {
     setTimeout(async () => {
-      await selecionarUnidade(unidadeSelecionada.value)
+      await selecionarUnidade(unidadeSelecionada.value.id)
     }, 2000)
   }
+const handleRecarregarFundo = (fundo) => {
+  console.log('[PedidosBalcao] Solicita recarga de fundo:', fundo)
+  notificationStore.info('Funcionalidade de recarga em desenvolvimento. Acesse o módulo Fundos de Consumo.')
+  // TODO: Implementar modal de recarga ou redirecionar para módulo de fundos
 }
 
 const abrirModalAdicionarProdutos = () => {

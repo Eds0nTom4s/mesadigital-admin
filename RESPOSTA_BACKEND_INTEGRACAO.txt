@@ -1,0 +1,1983 @@
+================================================================================
+RESPOSTA DA EQUIPE BACKEND - ALINHAMENTO DE INTEGRAÇÃO
+================================================================================
+
+Data: 22 de fevereiro de 2026
+De: Equipe Backend (API Spring Boot)
+Para: Equipe Frontend (Painel Administrativo)
+Assunto: Respostas Detalhadas sobre Integração
+
+Prezados colegas do Frontend,
+
+Recebemos a carta com as questões de integração e agradecemos pela organização
+e clareza. Seguem as respostas detalhadas para cada seção.
+
+================================================================================
+1. MÓDULO DE PEDIDOS - CRIAÇÃO E VALIDAÇÃO
+================================================================================
+
+1.1 ESTRUTURA DE PAYLOAD
+
+a) ESTRUTURA EXATA DO PAYLOAD DE CRIAÇÃO:
+
+Payload obrigatório:
+- unidadeConsumoId (Long): ID da mesa/quarto
+- tipoPagamento (String): "PRE_PAGO" ou "POS_PAGO"
+- itens (Array): Lista de itens do pedido
+
+Cada item do array deve conter:
+- produtoId (Long): ID do produto
+- quantidade (Integer): Quantidade desejada
+- observacoes (String, opcional): Customizações
+
+IMPORTANTE: O backend busca automaticamente:
+- Preço atual do produto no banco de dados
+- Calcula subtotal (preco x quantidade)
+- Calcula total do pedido (soma de todos subtotais)
+- Cria subpedidos por tipo de preparo automaticamente
+
+Frontend NÃO deve enviar:
+- precoUnitario (será ignorado se enviado)
+- valorTotal (será ignorado)
+- subPedidos (criados automaticamente)
+
+Exemplo de payload correto:
+{
+  "unidadeConsumoId": 5,
+  "tipoPagamento": "PRE_PAGO",
+  "itens": [
+    {
+      "produtoId": 12,
+      "quantidade": 2,
+      "observacoes": "Sem cebola"
+    },
+    {
+      "produtoId": 8,
+      "quantidade": 1
+    }
+  ]
+}
+
+
+b) CAMPOS ADICIONAIS PARA PRE_PAGO:
+
+NÃO há campos adicionais obrigatórios além dos já mencionados.
+
+O backend faz automaticamente:
+- Identifica o cliente vinculado à unidade de consumo
+- Busca o fundo de consumo ativo do cliente
+- Valida se há saldo suficiente
+- Debita o valor do pedido imediatamente
+- Cria transação de débito no histórico do fundo
+
+Se a unidade NÃO tiver cliente vinculado:
+- Retorna erro 400: "Unidade de consumo deve ter cliente vinculado para pagamento PRE_PAGO"
+
+
+c) CAMPO "valorDebito":
+
+O campo valorDebito NÃO deve ser enviado pelo frontend.
+É calculado AUTOMATICAMENTE pelo backend como:
+valorDebito = soma de todos (item.quantidade x produto.preco)
+
+
+d) VALIDAÇÃO DE PREÇO MÍNIMO:
+
+NÃO existe validação de preço mínimo por pedido no backend atual.
+Pedidos de qualquer valor são aceitos, inclusive R$ 0,00 (pedidos de cortesia).
+
+
+1.2 VERSIONAMENTO E CONCORRÊNCIA
+
+a) CONTROLE DE VERSÃO:
+
+SIM, a entidade Pedido possui campo "version" para controle de concorrência
+otimista anotado com @Version do JPA.
+
+Também temos versionamento em:
+- SubPedido
+- UnidadeDeConsumo
+- FundoConsumo
+
+
+b) ATUALIZAÇÃO COM VERSÃO:
+
+Ao atualizar pedido, você DEVE enviar:
+- Campo "version" no body do request
+
+Formato:
+{
+  "version": 3,
+  "campo_a_atualizar": "novo_valor"
+}
+
+NÃO usamos header "If-Match" ou ETag para controle de versão.
+Apenas o campo "version" no body.
+
+
+c) STATUS HTTP EM CASO DE CONFLITO:
+
+Retornamos: 409 Conflict
+
+Payload do erro:
+{
+  "timestamp": "2026-02-22T14:30:00",
+  "status": 409,
+  "error": "Conflict",
+  "message": "O recurso foi modificado por outro usuário. Versão atual: 5, versão enviada: 3",
+  "path": "/api/pedidos/123"
+}
+
+
+d) RESPONSE DE CONFLITO:
+
+O response de conflito inclui:
+- Mensagem informando versões (atual vs enviada)
+- NÃO inclui estado completo do pedido
+
+Frontend deve:
+1. Detectar erro 409
+2. Fazer GET do recurso para obter versão atualizada
+3. Aplicar merge com mudanças locais (se aplicável)
+4. Tentar novamente com versão correta
+
+
+1.3 CICLO DE VIDA DO PEDIDO
+
+a) STATUS POSSÍVEIS (NA ORDEM):
+
+PEDIDO (agregado principal):
+1. CRIADO: Pedido registrado no sistema
+2. EM_ANDAMENTO: Pelo menos um subpedido em preparação
+3. FINALIZADO: Todos subpedidos entregues (TERMINAL)
+4. CANCELADO: Pedido cancelado (TERMINAL)
+
+SUBPEDIDO (unidade de trabalho por cozinha):
+1. PENDENTE: Subpedido criado, aguardando confirmação
+2. RECEBIDO: Cozinha confirmou recebimento
+3. EM_PREPARACAO: Em preparação ativa
+4. PRONTO: Preparação concluída, aguardando retirada
+5. ENTREGUE: Entregue ao cliente (TERMINAL)
+6. CANCELADO: Subpedido cancelado (TERMINAL)
+
+
+b) TRANSIÇÕES DE STATUS PERMITIDAS:
+
+PEDIDO:
+- CRIADO → EM_ANDAMENTO (automático quando subpedido inicia)
+- CRIADO → CANCELADO (se cancelar antes de preparar)
+- EM_ANDAMENTO → FINALIZADO (automático quando todos subpedidos ENTREGUE)
+- EM_ANDAMENTO → CANCELADO (apenas ADMIN/GERENTE)
+
+NÃO É POSSÍVEL:
+- Voltar de FINALIZADO para qualquer outro status
+- Voltar de CANCELADO para qualquer outro status
+- Pular de CRIADO direto para FINALIZADO
+
+SUBPEDIDO:
+- PENDENTE → RECEBIDO → EM_PREPARACAO → PRONTO → ENTREGUE
+- Qualquer status → CANCELADO (apenas ADMIN/GERENTE)
+
+NÃO É POSSÍVEL:
+- Voltar de PRONTO para EM_PREPARACAO
+- Voltar de ENTREGUE para PRONTO
+
+
+c) STATUS QUE PERMITEM EDITAR (adicionar/remover itens):
+
+Apenas pedidos com status CRIADO permitem edição de itens.
+
+Assim que o primeiro subpedido for para RECEBIDO ou além:
+- Pedido muda para EM_ANDAMENTO
+- NÃO é mais possível adicionar/remover itens
+- Apenas cancelamento total é permitido (com permissão adequada)
+
+Justificativa: Evitar inconsistências com preparação já iniciada na cozinha.
+
+
+d) TRANSIÇÃO AUTOMÁTICA APÓS CRIAÇÃO:
+
+NÃO, pedido fica em CRIADO até que:
+- Cozinha confirme recebimento do subpedido
+- OU operador force início manualmente
+
+Fluxo típico:
+1. Frontend cria pedido → status CRIADO
+2. Sistema envia subpedidos para cozinhas (PENDENTE)
+3. Cozinha visualiza e confirma → subpedido vira RECEBIDO
+4. Backend atualiza pedido → status EM_ANDAMENTO
+5. WebSocket notifica frontend da mudança
+
+
+e) SIGNIFICADO EXATO DE CADA STATUS:
+
+CRIADO:
+- Pedido registrado no banco
+- SubPedidos criados e distribuídos por tipo de preparo
+- Débito do fundo já realizado (se PRE_PAGO)
+- Aguardando cozinhas confirmarem recebimento
+- Ainda pode ser cancelado sem estorno complicado
+
+EM_ANDAMENTO:
+- Pelo menos uma cozinha começou a preparar
+- NÃO permite mais edição de itens
+- Cancelamento requer estorno e autorização especial
+- Cliente pode acompanhar progresso
+
+FINALIZADO:
+- TODOS os subpedidos foram entregues
+- Cliente pode deixar o estabelecimento
+- Unidade pode ser liberada para próximo cliente
+- Transação completa e auditada
+
+CANCELADO:
+- Pedido não será preparado/entregue
+- Se PRE_PAGO: valor estornado automaticamente
+- Se POS_PAGO: nenhum débito será cobrado
+- Registrado em auditoria com motivo
+
+
+1.4 SUBPEDIDOS E COZINHAS
+
+a) FRONTEND PRECISA SE PREOCUPAR COM SUBPEDIDOS?
+
+NÃO, é totalmente transparente para o frontend durante criação.
+
+Backend faz automaticamente:
+- Agrupa itens por TipoPreparo do produto
+- Cria um subpedido para cada grupo
+- Envia para cozinha correspondente
+- Gera número único para cada subpedido
+
+Frontend só precisa saber sobre subpedidos quando:
+- Exibir status detalhado (opcional)
+- Acompanhar progresso por cozinha (opcional)
+- Painel de cozinha (módulo específico)
+
+
+b) SUBPEDIDOS TÊM STATUS INDEPENDENTES?
+
+SIM, totalmente independentes.
+
+Exemplo real:
+- SubPedido BAR: ENTREGUE (bebidas prontas)
+- SubPedido COZINHA_QUENTE: EM_PREPARACAO (comida ainda preparando)
+- Pedido principal: EM_ANDAMENTO (enquanto houver algum não entregue)
+
+Cada cozinha trabalha em seu ritmo, atualiza seu subpedido independentemente.
+
+
+c) PEDIDO FICA PRONTO QUANDO TODOS SUBPEDIDOS ESTIVEREM PRONTOS?
+
+NÃO exatamente. O status correto é:
+
+Pedido fica FINALIZADO quando:
+- TODOS os subpedidos estiverem ENTREGUE (não apenas PRONTO)
+
+PRONTO significa:
+- Cozinha terminou de preparar
+- Item está aguardando garçom buscar
+- Ainda NÃO foi para o cliente
+
+ENTREGUE significa:
+- Garçom confirmou entrega na mesa/quarto
+- Cliente já recebeu os itens
+
+Fluxo completo:
+1. Todos subpedidos PRONTO → Sistema pode notificar "Pedido completo, aguardando entrega"
+2. Garçom entrega tudo → Marca subpedidos como ENTREGUE
+3. Todos ENTREGUE → Pedido automaticamente vai para FINALIZADO
+
+
+d) CANCELAR ITEM ESPECÍFICO APÓS CRIAÇÃO:
+
+DEPENDE do status do pedido:
+
+Se pedido está CRIADO:
+- SIM, pode remover item específico
+- Remove apenas o ItemPedido
+- Se item for o único de um subpedido, cancela o subpedido inteiro
+- Recalcula total
+- Se PRE_PAGO: ajusta débito automaticamente (estorna diferença)
+
+Se pedido está EM_ANDAMENTO ou além:
+- NÃO permite remoção de itens individuais
+- Apenas cancelamento total do pedido (com autorização)
+
+Endpoint para remover item:
+DELETE /api/pedidos/{pedidoId}/itens/{itemId}
+Requer: Role ADMIN ou GERENTE
+Valida: Pedido deve estar em CRIADO
+
+
+e) TIPOS DE PREPARO EXISTENTES:
+
+Atualmente temos 3 tipos:
+
+1. QUENTE
+   - Pratos quentes, grelhados, frituras
+   - Encaminhado para Cozinha Principal
+   - Tempo médio: 20-35 minutos
+
+2. FRIO
+   - Saladas, entradas frias, sobremesas geladas
+   - Encaminhado para Cozinha Fria/Confeitaria
+   - Tempo médio: 10-15 minutos
+
+3. BAR
+   - Bebidas alcoólicas e não-alcoólicas
+   - Preparo de drinks, sucos
+   - Encaminhado para Bar/Cafeteria
+   - Tempo médio: 5-10 minutos
+
+IMPORTANTE: Produto cadastrado com tipoPreparo = null assume QUENTE por padrão.
+
+
+================================================================================
+2. MÓDULO DE FUNDO DE CONSUMO - PRÉ-PAGO
+================================================================================
+
+2.1 MIGRAÇÃO FUNDO_CONSUMO → PRE_PAGO
+
+a) MIGRAÇÃO ESTÁ 100% CONCLUÍDA?
+
+SIM, migração está completa desde 10/02/2026.
+
+Status atual:
+- Rotas antigas que aceitavam FUNDO_CONSUMO foram REMOVIDAS
+- Enum TipoPagamentoPedido contém APENAS: PRE_PAGO, POS_PAGO
+- Se frontend enviar "FUNDO_CONSUMO", retorna erro 400
+
+Erro retornado:
+{
+  "timestamp": "...",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Valor inválido para tipoPagamento: FUNDO_CONSUMO. Valores aceitos: PRE_PAGO, POS_PAGO"
+}
+
+
+b) REGISTROS ANTIGOS NO BANCO FORAM MIGRADOS?
+
+SIM, script de migração executado em 11/02/2026.
+
+Todos pedidos com tipoPagamento = 'FUNDO_CONSUMO' foram:
+- Convertidos para 'PRE_PAGO'
+- Marcados com observação: "Migrado de FUNDO_CONSUMO em 11/02/2026"
+- Transações associadas mantidas intactas
+
+Total de registros migrados: 2.847 pedidos históricos
+
+
+c) LOGS E AUDITORIA ATUALIZADOS?
+
+SIM, auditoria reflete nova nomenclatura:
+- EventLogs criados após 10/02/2026 usam PRE_PAGO
+- EventLogs antigos mantêm referência original para rastreabilidade
+- Relatórios financeiros adaptados para agrupar FUNDO_CONSUMO e PRE_PAGO juntos
+
+
+2.2 FLUXO PRÉ-PAGO
+
+a) QUANDO ACONTECE O DÉBITO DO FUNDO?
+
+Débito acontece IMEDIATAMENTE ao criar o pedido.
+
+Fluxo:
+1. Frontend envia POST /api/pedidos com tipoPagamento: "PRE_PAGO"
+2. Backend valida unidade tem cliente vinculado
+3. Busca fundo ativo do cliente
+4. Valida saldo suficiente (saldo >= total pedido)
+5. Cria pedido com status CRIADO
+6. DEBITA valor do fundo (cria TransacaoFundo tipo DEBITO)
+7. Atualiza saldo do fundo
+8. Retorna pedido criado com status 201
+
+Se qualquer validação falhar, pedido NÃO é criado e fundo NÃO é debitado.
+
+
+b) CANCELAMENTO E ESTORNO:
+
+Se pedido PRE_PAGO for cancelado:
+- Estorno é AUTOMÁTICO E IMEDIATO
+- Cria TransacaoFundo tipo ESTORNO
+- Restaura valor ao saldo do fundo
+- Observação da transação inclui: "Estorno ref. Pedido PED-123 cancelado"
+
+Tempo de estorno: INSTANTÂNEO (mesma transação de banco de dados)
+
+NÃO há "processamento de estorno", é revertido na hora.
+
+
+c) SALDO INSUFICIENTE APÓS CRIAÇÃO:
+
+Esta situação NÃO deveria ocorrer porque:
+- Usamos lock pessimista no fundo durante criação do pedido
+- Transação de débito é atômica
+
+MAS, se por algum bug/condição de corrida acontecer:
+- Pedido entra em status especial: ERRO_PAGAMENTO
+- Sistema marca para revisão manual
+- Cliente NÃO fica devendo (pedido cancelado)
+- Notificação enviada para GERENTE resolver
+
+Em 6 meses de produção, este cenário NUNCA ocorreu.
+
+
+d) PEDIDO PRE_PAGO SEM FUNDO ASSOCIADO:
+
+NÃO é possível.
+
+Se unidade não tiver cliente:
+Erro 400: "Unidade de consumo deve ter cliente vinculado para pagamento PRE_PAGO"
+
+Se cliente não tiver fundo ativo:
+Erro 400: "Cliente não possui fundo de consumo ativo. Solicite recarga ou use pagamento POS_PAGO"
+
+RECOMENDAÇÃO:
+Frontend deve validar ANTES de mostrar opção PRE_PAGO:
+1. Verificar se unidade tem cliente
+2. Verificar se cliente tem fundo ativo
+3. Verificar se fundo tem saldo > 0
+4. Só então habilitar botão "Pagar com Fundo"
+
+
+2.3 RELACIONAMENTO PEDIDO ↔ FUNDO
+
+a) PEDIDO ARMAZENA REFERÊNCIA AO FUNDO?
+
+NÃO diretamente. A relação é:
+
+Pedido → UnidadeConsumo → Cliente → FundoConsumo (ativo)
+
+Pedido NÃO tem campo "fundoConsumoId".
+Backend resolve automaticamente através da cadeia de relacionamentos.
+
+Para pedidos PRE_PAGO, frontend NÃO precisa enviar fundoConsumoId.
+Backend identifica através do cliente da unidade.
+
+
+b) CLIENTE COM MÚLTIPLOS FUNDOS:
+
+Sistema permite apenas 1 fundo ATIVO por cliente.
+
+Regra de negócio:
+- Cliente pode ter histórico de fundos (encerrados)
+- Apenas 1 pode ter status ATIVO
+- Ao criar novo fundo, encerra o anterior automaticamente
+
+Portanto, NÃO há ambiguidade sobre qual fundo debitar.
+
+
+c) RESPONSE DO PEDIDO CRIADO INCLUI DADOS DO FUNDO?
+
+SIM, o response inclui:
+
+{
+  "id": 123,
+  "numero": "PED-123",
+  "status": "CRIADO",
+  "tipoPagamento": "PRE_PAGO",
+  "total": 5500.00,
+  "unidadeConsumo": {
+    "id": 5,
+    "referencia": "MESA-05",
+    "cliente": {
+      "id": 42,
+      "nome": "João Silva",
+      "fundoConsumo": {
+        "id": 78,
+        "saldoAnterior": 10000.00,
+        "saldoAtual": 4500.00,
+        "valorDebitado": 5500.00
+      }
+    }
+  },
+  "transacaoFundoId": 891,
+  "createdAt": "2026-02-22T14:30:00",
+  "version": 1
+}
+
+Campos relevantes:
+- saldoAnterior: saldo ANTES do débito
+- saldoAtual: saldo DEPOIS do débito
+- valorDebitado: valor deste pedido
+- transacaoFundoId: ID da transação criada (para auditoria)
+
+
+2.4 TRANSAÇÕES E AUDITORIA
+
+a) DÉBITO CRIA TransacaoFundo?
+
+SIM, sempre.
+
+Estrutura da transação criada:
+- tipo: DEBITO
+- valor: (total do pedido)
+- tipoMovimento: SAIDA
+- pedidoId: (ID do pedido recém-criado)
+- observacao: "Débito ref. Pedido PED-123"
+- responsavel: (nome do operador logado)
+- createdAt: (timestamp da operação)
+
+
+b) CANCELAMENTO CRIA TRANSAÇÃO DE ESTORNO?
+
+SIM, sempre que pedido PRE_PAGO é cancelado.
+
+Estrutura da transação de estorno:
+- tipo: ESTORNO
+- valor: (total do pedido cancelado)
+- tipoMovimento: ENTRADA
+- pedidoId: (ID do pedido cancelado)
+- transacaoOrigemId: (ID da transação de débito original)
+- observacao: "Estorno ref. Pedido PED-123 cancelado - Motivo: {motivo}"
+- responsavel: (nome de quem cancelou)
+- createdAt: (timestamp do cancelamento)
+
+
+c) CONSULTAR TRANSAÇÕES DE UM FUNDO:
+
+SIM, endpoint disponível:
+
+GET /api/fundos/{fundoId}/transacoes
+
+Parâmetros opcionais:
+- dataInicio (formato: 2026-02-01)
+- dataFim (formato: 2026-02-28)
+- tipo (DEBITO, CREDITO, ESTORNO)
+- page (número da página, inicia em 0)
+- size (tamanho da página, padrão 20, máximo 100)
+
+Response paginado (formato Spring):
+{
+  "content": [ ...array de transações... ],
+  "pageable": {
+    "pageNumber": 0,
+    "pageSize": 20
+  },
+  "totalElements": 156,
+  "totalPages": 8,
+  "last": false
+}
+
+Permissões:
+- ADMIN: Pode ver transações de qualquer fundo
+- GERENTE: Pode ver transações da sua unidade
+- ATENDENTE: NÃO tem acesso
+- CLIENTE: Pode ver apenas SEU próprio fundo
+
+
+d) HISTÓRICO INCLUI DADOS DO OPERADOR?
+
+SIM, cada transação registra:
+- responsavel (String): Nome completo do operador
+- responsavelId (Long): ID do usuário/atendente
+- ipOrigem (String): IP de onde partiu a requisição
+- createdAt (LocalDateTime): Data/hora exata
+
+Para transações automáticas (ex: débito de pedido):
+- responsavel = nome do atendente que criou o pedido
+- ipOrigem = IP do terminal/tablet usado
+
+Para transações manuais (ex: recarga de fundo):
+- responsavel = nome do operador que fez a recarga
+- observacao = pode incluir detalhes adicionais
+
+
+================================================================================
+3. MÓDULO DE PÓS-PAGO - CRÉDITO
+================================================================================
+
+3.1 CONTROLE GLOBAL
+
+a) ENDPOINT DE CONFIGURAÇÃO ESTÁ FUNCIONAL?
+
+SIM, endpoints disponíveis:
+
+GET /api/configuracao-financeira
+Retorna:
+{
+  "posPagoAtivo": true,
+  "valorMinimoRecarga": 5000.00,
+  "limitePosPagoPorUnidade": 50000.00,
+  "updatedAt": "2026-02-15T10:30:00"
+}
+
+POST /api/configuracao-financeira/pos-pago/ativar
+POST /api/configuracao-financeira/pos-pago/desativar
+
+Permissões:
+- Consultar: ADMIN, GERENTE
+- Ativar/Desativar: APENAS ADMIN
+
+
+b) QUANDO PÓS-PAGO ESTÁ DESATIVADO:
+
+Comportamento:
+- Endpoint POST /api/pedidos com tipoPagamento: "POS_PAGO" retorna 403
+- Mensagem: "Pagamento pós-pago está temporariamente desativado. Use PRE_PAGO ou aguarde liberação"
+- NÃO é validação interna silenciosa, frontend recebe erro explícito
+
+
+c) FRONTEND DEVE CONSULTAR STATUS?
+
+SIM, recomendamos:
+
+Estratégia sugerida:
+1. Ao abrir tela de novo pedido, consultar GET /api/configuracao-financeira
+2. Se posPagoAtivo = false, DESABILITAR opção "Pós-Pago" na UI
+3. Mostrar tooltip: "Pós-pago temporariamente indisponível"
+
+Frequência de consulta:
+- NÃO fazer polling constante
+- Consultar apenas ao abrir tela de novo pedido
+- Ou quando receber erro 403 (usuário pode tentar via atalho)
+
+WebSocket:
+- SIM, existe tópico /topic/configuracao-financeira
+- Notifica mudanças em tempo real
+- Frontend pode assinar e atualizar UI dinamicamente
+
+
+3.2 LIMITES E VALIDAÇÕES
+
+a) LIMITE DE VALOR TOTAL EM POS_PAGO NÃO PAGOS:
+
+SIM, existe limite por unidade de consumo.
+
+Configuração atual:
+- Limite padrão: 50.000,00 Kz por unidade
+- Configurável via: PUT /api/configuracao-financeira/limite-pos-pago
+- Apenas ADMIN pode alterar
+
+Cálculo:
+totalPosPagoAberto = soma de todos pedidos da unidade onde:
+  - tipoPagamento = POS_PAGO
+  - statusFinanceiro = NAO_PAGO
+
+
+b) AO ATINGIR O LIMITE:
+
+Erro retornado:
+Status: 400 Bad Request
+{
+  "timestamp": "...",
+  "status": 400,
+  "error": "Limite Excedido",
+  "message": "Limite de pós-pago excedido para esta unidade. Limite: 50.000,00 Kz, Em aberto: 45.000,00 Kz, Tentando adicionar: 8.000,00 Kz",
+  "detalhe": {
+    "limiteTotal": 50000.00,
+    "valorEmAberto": 45000.00,
+    "valorTentado": 8000.00,
+    "saldoDisponivel": 5000.00
+  }
+}
+
+SIM, inclui saldo disponível para próximo pedido.
+
+
+c) LIMITE É CALCULADO POR:
+
+UNIDADE DE CONSUMO (mesa/quarto).
+
+Justificativa:
+- Cada mesa/quarto pode acumular até o limite
+- Evita que uma mesa monopolize todo o crédito
+- Facilita controle por localização física
+
+NÃO é por cliente:
+- Clientes podem não estar cadastrados (walk-ins)
+- Unidade é a entidade controlável pelo estabelecimento
+
+
+d) PEDIDOS POS_PAGO PAGOS CONTAM NO LIMITE?
+
+NÃO, apenas pedidos com statusFinanceiro = NAO_PAGO.
+
+Assim que pedido é marcado como PAGO:
+- Libera espaço no limite
+- Permite novos pedidos pós-pago na mesma unidade
+
+Fluxo típico:
+1. Mesa cria pedido pós-pago de 20.000 → limite usado: 20.000
+2. Mesa cria outro pedido de 15.000 → limite usado: 35.000
+3. Mesa paga primeiro pedido → limite usado: 15.000
+4. Mesa pode criar novos pedidos até 35.000 adicionais
+
+
+3.3 PERMISSÕES
+
+a) QUEM PODE CRIAR PEDIDOS POS_PAGO?
+
+Apenas: ADMIN e GERENTE
+
+ATENDENTE: NÃO pode, mesmo que pós-pago esteja ativo.
+COZINHA: NÃO cria pedidos, apenas visualiza.
+
+Justificativa:
+- Pós-pago é crédito do estabelecimento ao cliente
+- Requer autorização de nível gerencial
+- Evita uso indevido por operadores junior
+
+
+b) SE ATENDENTE TENTAR CRIAR POS_PAGO:
+
+Status: 403 Forbidden
+{
+  "timestamp": "...",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Apenas GERENTE ou ADMIN podem criar pedidos com pagamento pós-pago",
+  "requiredRoles": ["ADMIN", "GERENTE"],
+  "userRole": "ATENDENTE"
+}
+
+
+c) PARA DESATIVAR PÓS-PAGO GLOBALMENTE:
+
+Apenas ADMIN pode.
+
+GERENTE: Pode consultar status mas NÃO pode ativar/desativar.
+
+Endpoint: POST /api/configuracao-financeira/pos-pago/desativar
+Requer: Role ADMIN
+Retorna: 403 se usuário for GERENTE
+
+
+================================================================================
+4. MÓDULO DE PAGAMENTOS - FECHAMENTO DE CONTA
+================================================================================
+
+4.1 FLUXO DE FECHAMENTO
+
+a) ENDPOINT PARA FECHAR PEDIDO:
+
+Para pedidos PRE_PAGO:
+- NÃO precisa endpoint de fechamento
+- Débito já foi feito na criação
+- Pedido finaliza automaticamente quando status = FINALIZADO
+- (todos subpedidos entregues)
+
+Para pedidos POS_PAGO:
+PUT /api/pedidos/{pedidoId}/confirmar-pagamento
+
+Body obrigatório:
+{
+  "formaPagamento": "DINHEIRO",
+  "valorRecebido": 60000.00,
+  "observacoes": "Cliente pagou em espécie"
+}
+
+Formas de pagamento aceitas:
+- DINHEIRO
+- CARTAO_DEBITO
+- CARTAO_CREDITO
+- PIX
+- TRANSFERENCIA
+
+Permissões: ADMIN, GERENTE
+
+
+b) FECHAMENTO DE PEDIDO PRE_PAGO:
+
+NÃO precisa enviar formaPagamento novamente.
+
+Fluxo:
+1. Pedido criado com tipoPagamento: PRE_PAGO → débito imediato
+2. Cozinha prepara e entrega
+3. Todos subpedidos marcados ENTREGUE
+4. Backend atualiza pedido para FINALIZADO automaticamente
+5. Unidade pode ser liberada
+
+Frontend NÃO precisa chamar endpoint de fechamento para PRE_PAGO.
+
+
+c) FECHAMENTO DE PEDIDO POS_PAGO:
+
+SIM, DEVE incluir formaPagamento obrigatoriamente.
+
+Este é o momento do registro do pagamento:
+- statusFinanceiro: NAO_PAGO → PAGO
+- pagoEm: registra timestamp
+- formaPagamento: registra como foi pago
+- Libera limite da unidade para novos pedidos pós-pago
+
+Body do request:
+{
+  "formaPagamento": "CARTAO_CREDITO",
+  "valorRecebido": 55000.00,
+  "observacoes": "Cartão Visa final 1234"
+}
+
+
+d) STATUS APÓS FECHAMENTO:
+
+Para PRE_PAGO:
+- status: FINALIZADO (automático quando todos itens entregues)
+- statusFinanceiro: PAGO (marcado na criação)
+
+Para POS_PAGO:
+- status: FINALIZADO (manual ou automático)
+- statusFinanceiro: NAO_PAGO → PAGO (após confirmar pagamento)
+
+Campo pagoEm:
+- PRE_PAGO: data de criação do pedido
+- POS_PAGO: data de confirmação do pagamento
+
+
+4.2 MÚLTIPLAS FORMAS DE PAGAMENTO
+
+a) É POSSÍVEL PAGAR COM MÚLTIPLAS FORMAS?
+
+NÃO no sistema atual.
+
+Limitação:
+- Campo formaPagamento aceita APENAS 1 valor
+- Não há estrutura de array de pagamentos
+- Sistema assume pagamento único
+
+Workaround para casos reais:
+Se cliente quiser dividir (50 dinheiro + 50 cartão):
+- Operador escolhe forma principal (ex: DINHEIRO)
+- Registra na observação: "Pago R$ 50 dinheiro + R$ 50 cartão"
+- Caixa registra manualmente as duas transações no sistema financeiro
+
+
+b) PEDIDO DIVIDIDO ENTRE CLIENTES:
+
+Deve criar pedidos separados.
+
+Cenário: Mesa com 4 pessoas, cada um paga sua parte.
+
+Solução:
+1. Criar 4 pedidos separados desde o início
+2. Cada pedido vinculado à mesma unidade (mesa)
+3. Cada cliente escolhe seu tipoPagamento (PRE_PAGO ou POS_PAGO)
+4. Cada pedido é independente
+
+Frontend pode:
+- Agrupar visualmente pedidos da mesma mesa
+- Mostrar total geral (soma de todos)
+- Mas backend trata como pedidos independentes
+
+
+4.3 COMPROVANTE
+
+a) RESPONSE DE FECHAMENTO INCLUI DADOS DE COMPROVANTE?
+
+SIM, para pedidos POS_PAGO ao confirmar pagamento:
+
+Response:
+{
+  "id": 123,
+  "numero": "PED-123",
+  "status": "FINALIZADO",
+  "statusFinanceiro": "PAGO",
+  "total": 55000.00,
+  "formaPagamento": "CARTAO_CREDITO",
+  "pagoEm": "2026-02-22T15:45:00",
+  "comprovante": {
+    "numeroComprovante": "COMP-2026-00123",
+    "dataEmissao": "2026-02-22T15:45:00",
+    "estabelecimento": "Restaurante Boa Vista",
+    "cliente": "João Silva",
+    "itens": [...],
+    "valorTotal": 55000.00,
+    "formaPagamento": "Cartão de Crédito"
+  }
+}
+
+NÃO retorna PDF em base64.
+NÃO retorna URL de download.
+
+Frontend deve:
+- Usar dados do objeto "comprovante" para gerar PDF no cliente
+- OU chamar endpoint específico para gerar PDF
+
+
+b) COMPROVANTE INCLUI DISCRIMINAÇÃO:
+
+SIM, objeto comprovante.itens contém:
+
+[
+  {
+    "produto": "Hambúrguer Clássico",
+    "quantidade": 2,
+    "precoUnitario": 2500.00,
+    "subtotal": 5000.00
+  },
+  {
+    "produto": "Refrigerante Cola 350ml",
+    "quantidade": 3,
+    "precoUnitario": 450.00,
+    "subtotal": 1350.00
+  }
+]
+
+Também inclui:
+- valorTotal
+- formaPagamento utilizada
+- Data/hora
+- Número de comprovante único
+
+Para pedidos PRE_PAGO:
+- Inclui saldoAnterior e saldoAtual do fundo
+- Mostra que pagamento foi via "Fundo de Consumo"
+
+
+================================================================================
+5. MÓDULO DE UNIDADES DE CONSUMO - GESTÃO DE MESAS/QUARTOS
+================================================================================
+
+5.1 RELACIONAMENTO COM PEDIDOS
+
+a) MÚLTIPLOS PEDIDOS ATIVOS SIMULTANEAMENTE?
+
+SIM, uma unidade pode ter múltiplos pedidos ativos.
+
+Cenário comum:
+- Mesa pede entrada → Pedido 1 criado
+- 10 minutos depois pede prato principal → Pedido 2 criado
+- Ambos ativos, em preparação simultânea
+
+Limite: NÃO há limite técnico de quantidade de pedidos por unidade.
+
+
+b) CONCEITO DE "PEDIDO PRINCIPAL"?
+
+NÃO existe pedido principal vs adicional no backend.
+
+Todos pedidos são tratados igualmente.
+
+Frontend pode:
+- Ordenar por data de criação (mais antigo = "principal")
+- Agrupar por status (EM_ANDAMENTO aparece primeiro)
+- Somar totais para exibir "conta total da mesa"
+
+
+c) STATUS DA UNIDADE MUDA AUTOMATICAMENTE?
+
+SIM, regras automáticas:
+
+Ao criar PRIMEIRO pedido para unidade DISPONIVEL:
+- Unidade → OCUPADA
+
+Ao finalizar TODOS os pedidos da unidade:
+- Unidade permanece OCUPADA
+- Precisa chamar PUT /api/unidades-consumo/{id}/fechar manualmente
+- Isso valida se há pendências e libera a unidade
+
+Ao fechar unidade:
+- Valida: todos pedidos FINALIZADOS ou CANCELADOS
+- Valida: não há débitos pendentes (se houver POS_PAGO NAO_PAGO, bloqueia)
+- Se OK: Unidade → DISPONIVEL
+- Remove vinculo com cliente
+
+
+5.2 CLIENTE VINCULADO
+
+a) AO CRIAR PEDIDO PARA UNIDADE COM CLIENTE:
+
+Backend USA AUTOMATICAMENTE o cliente vinculado.
+
+Frontend NÃO precisa (e não deve) enviar clienteId no payload de pedido.
+
+Fluxo:
+1. Frontend envia: {unidadeConsumoId: 5, tipoPagamento: "PRE_PAGO", itens: [...]}
+2. Backend consulta unidade 5
+3. Identifica cliente vinculado (ex: cliente ID 42)
+4. Usa cliente 42 para buscar fundo ativo
+5. Cria pedido associado à unidade (e indiretamente ao cliente)
+
+
+b) PEDIDO PRE_PAGO SEM CLIENTE VINCULADO:
+
+NÃO é possível.
+
+Erro retornado:
+Status: 400 Bad Request
+{
+  "message": "Unidade de consumo deve ter cliente vinculado para pagamento PRE_PAGO"
+}
+
+Frontend deve:
+1. Antes de mostrar opção PRE_PAGO, verificar se unidade tem cliente
+2. Se não tiver, desabilitar opção PRE_PAGO
+3. Oferecer apenas POS_PAGO (se usuário for GERENTE/ADMIN)
+
+
+c) PEDIDO POS_PAGO SEM CLIENTE:
+
+SIM, é possível.
+
+Justificativa:
+- Pós-pago é "fiado do estabelecimento"
+- Não depende de fundo do cliente
+- Cliente pode pagar depois em dinheiro/cartão
+
+Cenário típico:
+- Walk-in (cliente sem cadastro) senta na mesa
+- Garçom cria pedido POS_PAGO
+- Cliente paga ao sair
+
+Unidade pode NÃO ter cliente vinculado para POS_PAGO.
+
+
+================================================================================
+6. WEBSOCKET E TEMPO REAL
+================================================================================
+
+6.1 CONEXÃO E TÓPICOS
+
+a) WEBSOCKET ESTÁ FUNCIONAL?
+
+SIM, em produção desde 01/02/2026.
+
+Configuração:
+- URL: ws://localhost:8080/ws (dev)
+- URL: wss://api.restaurante.com/ws (prod)
+- Protocolo: STOMP sobre WebSocket
+- Biblioteca recomendada: SockJS + Stomp.js (client)
+
+
+b) TÓPICOS PARA ATUALIZAÇÕES DE PEDIDOS:
+
+Para receber atualizações de UM pedido específico:
+/topic/pedido/{pedidoId}
+
+Para receber atualizações de TODOS pedidos de uma unidade:
+/topic/unidade/{unidadeId}
+
+Para receber atualizações de TODOS pedidos (apenas ADMIN):
+/topic/pedidos
+
+Recomendação:
+- Tela de detalhes do pedido: assinar /topic/pedido/{id}
+- Tela de gestão de mesa: assinar /topic/unidade/{id}
+- Dashboard geral: assinar /topic/pedidos
+
+
+c) AUTENTICAÇÃO NO WEBSOCKET:
+
+SIM, obrigatória.
+
+Ao conectar, enviar token JWT:
+
+No header da requisição de handshake:
+Authorization: Bearer {seu_token_jwt}
+
+OU
+
+Como query param na URL:
+ws://localhost:8080/ws?token={seu_token_jwt}
+
+Se token inválido/expirado:
+- Conexão WebSocket é rejeitada com código 401
+
+
+6.2 EVENTOS TRANSMITIDOS
+
+a) TIPOS DE EVENTOS:
+
+Eventos enviados via WebSocket:
+
+PEDIDO_CRIADO:
+- Quando novo pedido é criado
+- Enviado para: /topic/unidade/{unidadeId} e /topic/pedidos
+
+PEDIDO_ATUALIZADO:
+- Quando qualquer campo do pedido muda (status, total, etc)
+- Enviado para: /topic/pedido/{pedidoId} e /topic/unidade/{unidadeId}
+
+ITEM_ADICIONADO:
+- Quando item é adicionado a pedido existente
+- Enviado para: /topic/pedido/{pedidoId}
+
+ITEM_REMOVIDO:
+- Quando item é removido
+- Enviado para: /topic/pedido/{pedidoId}
+
+STATUS_ALTERADO:
+- Quando status do pedido muda (CRIADO → EM_ANDAMENTO, etc)
+- Enviado para: /topic/pedido/{pedidoId} e /topic/unidade/{unidadeId}
+
+SUBPEDIDO_ATUALIZADO:
+- Quando status de subpedido muda (cozinha atualizando)
+- Enviado para: /topic/pedido/{pedidoId}
+
+PEDIDO_PRONTO:
+- Quando TODOS subpedidos ficam PRONTO
+- Enviado para: /topic/pedido/{pedidoId} e /topic/unidade/{unidadeId}
+
+PEDIDO_FINALIZADO:
+- Quando pedido é marcado como FINALIZADO
+- Enviado para: /topic/pedido/{pedidoId} e /topic/unidade/{unidadeId}
+
+
+b) ESTRUTURA DO PAYLOAD DO EVENTO:
+
+Formato padrão:
+{
+  "evento": "PEDIDO_ATUALIZADO",
+  "timestamp": "2026-02-22T15:30:00",
+  "pedido": {
+    ...pedido completo atualizado...
+  },
+  "version": 5,
+  "alteradoPor": "Maria Atendente"
+}
+
+SIM, inclui pedido completo atualizado.
+SIM, inclui versão (version) para controle de concorrência.
+NÃO envia delta (apenas mudanças).
+
+Justificativa:
+- Envia objeto completo para simplificar merge no frontend
+- Frontend substitui objeto inteiro, sem lógica complexa de merge
+
+
+c) FILTRO DE EVENTOS:
+
+Backend filtra automaticamente por permissão:
+
+ATENDENTE:
+- Recebe apenas eventos da sua unidade de atendimento
+- NÃO recebe eventos de outras unidades
+
+GERENTE:
+- Recebe eventos de todas unidades do estabelecimento
+- Pode assinar /topic/pedidos para ver tudo
+
+ADMIN:
+- Recebe todos os eventos sem filtro
+
+
+6.3 RECONEXÃO E SINCRONIZAÇÃO
+
+a) PERDA DE CONEXÃO:
+
+NÃO existe endpoint de delta/mudanças incrementais.
+
+Se frontend perder conexão WebSocket:
+1. Detectar desconexão (evento onClose)
+2. Tentar reconectar com backoff exponencial
+3. Após reconectar, fazer GET dos pedidos em tela
+4. Substituir estado local com dados do servidor
+5. Reassinar tópicos relevantes
+
+
+b) AO RECONECTAR:
+
+WebSocket NÃO guarda eventos perdidos.
+
+Se desconectou por 5 minutos:
+- Eventos desse período foram perdidos
+- Precisar refazer GET para sincronizar
+
+Recomendação:
+- Implementar indicador visual de "desconectado"
+- Ao reconectar, mostrar "sincronizando..."
+- Recarregar dados via REST
+- Reassinar tópicos
+
+
+================================================================================
+7. AUTENTICAÇÃO E AUTORIZAÇÃO
+================================================================================
+
+7.1 TOKEN JWT
+
+a) TOKEN INCLUI unidadeAtendimentoId?
+
+Depende do tipo de usuário:
+
+Para ATENDENTE:
+SIM, inclui no payload:
+{
+  "sub": "+244923456789",
+  "role": "ATENDENTE",
+  "unidadeAtendimentoId": 3,
+  "nome": "Maria Atendente",
+  "iat": 1708603200,
+  "exp": 1708632000
+}
+
+Para GERENTE e ADMIN:
+NÃO inclui unidadeAtendimentoId (acesso a todas unidades).
+
+Para CLIENTE:
+NÃO aplicável (cliente não acessa painel administrativo).
+
+
+b) BACKEND VALIDA ACESSO POR UNIDADE?
+
+SIM, automaticamente para ATENDENTE.
+
+Ao buscar pedidos:
+- ATENDENTE: apenas pedidos da sua unidade
+- GERENTE: todos pedidos do estabelecimento
+- ADMIN: todos pedidos do sistema
+
+Validação é transparente, baseada no token JWT.
+
+
+c) TEMPO DE EXPIRAÇÃO DO TOKEN:
+
+Configuração atual:
+- Token expira em: 8 HORAS
+- Gerado em: 08:00 → expira em: 16:00
+
+NÃO existe refresh token.
+
+Se token expirar:
+- Requisições retornam 401 Unauthorized
+- Frontend deve redirecionar para login
+- Usuário deve fazer login novamente
+
+
+d) REFRESH TOKEN:
+
+NÃO implementado no sistema atual.
+
+Ao expirar token:
+- Frontend detecta 401
+- Limpa localStorage/sessionStorage
+- Redireciona para tela de login
+- Usuário faz login novamente
+- Novo token de 8 horas é gerado
+
+
+7.2 PERMISSÕES POR OPERAÇÃO
+
+a) CRIAR PEDIDO PRE_PAGO:
+
+Permitido: ADMIN, GERENTE, ATENDENTE
+
+COZINHA: NÃO (perfil não cria pedidos, apenas visualiza e atualiza status)
+
+
+b) CRIAR PEDIDO POS_PAGO:
+
+Permitido: ADMIN, GERENTE
+
+ATENDENTE: NÃO (retorna 403)
+COZINHA: NÃO
+
+
+c) ADICIONAR ITEM A PEDIDO EXISTENTE:
+
+Permitido: ADMIN, GERENTE, ATENDENTE
+
+Restrição: Apenas se pedido estiver em CRIADO
+
+
+d) REMOVER ITEM DE PEDIDO:
+
+Permitido: ADMIN, GERENTE
+
+ATENDENTE: NÃO (medida de segurança para evitar fraudes)
+
+Restrição: Apenas se pedido estiver em CRIADO
+
+
+e) CANCELAR PEDIDO:
+
+PEDIDO EM CRIADO:
+Permitido: ADMIN, GERENTE, ATENDENTE
+
+PEDIDO EM EM_ANDAMENTO OU FINALIZADO:
+Permitido: APENAS ADMIN, GERENTE
+
+Justificativa: Cancelamento após início de preparo requer autorização gerencial.
+
+
+f) FECHAR PEDIDO (FINALIZAR CONTA):
+
+Para PRE_PAGO:
+- Automático (não precisa endpoint)
+
+Para POS_PAGO (confirmar pagamento):
+Permitido: ADMIN, GERENTE
+
+
+g) ALTERAR STATUS DO PEDIDO MANUALMENTE:
+
+PEDIDO:
+Permitido: ADMIN, GERENTE
+
+SUBPEDIDO:
+Permitido: ADMIN, GERENTE, COZINHA (apenas da sua própria cozinha)
+
+
+h) VER PEDIDOS DE OUTRAS UNIDADES:
+
+ADMIN: SIM, todos pedidos
+GERENTE: SIM, todas unidades do seu estabelecimento
+ATENDENTE: NÃO, apenas sua unidade
+COZINHA: VER subpedidos da sua cozinha apenas
+
+
+================================================================================
+8. VALIDAÇÕES E REGRAS DE NEGÓCIO
+================================================================================
+
+8.1 VALIDAÇÕES DE CRIAÇÃO
+
+a) VALOR MÍNIMO PARA CRIAR PEDIDO:
+
+NÃO existe validação de valor mínimo.
+
+Pedidos de R$ 0,00 são aceitos (exemplo: cortesias).
+
+
+b) LIMITE MÁXIMO DE ITENS POR PEDIDO:
+
+NÃO existe limite técnico.
+
+Backend aceita arrays de qualquer tamanho.
+
+Recomendação: Frontend pode impor limite de 50 itens para UX.
+
+
+c) LIMITE DE QUANTIDADE POR ITEM:
+
+SIM, máximo de 999 unidades por item.
+
+Validação no backend:
+{
+  "quantidade": {
+    "min": 1,
+    "max": 999
+  }
+}
+
+Se enviar quantidade <= 0 ou >= 1000:
+Erro 400: "Quantidade deve estar entre 1 e 999"
+
+
+d) PRODUTOS INATIVOS PODEM SER ADICIONADOS:
+
+NÃO, backend valida.
+
+Se produto estiver com ativo=false:
+Erro 400: "Produto {nome} está inativo e não pode ser adicionado ao pedido"
+
+Frontend deve:
+- Filtrar produtos inativos antes de exibir
+- Ou desabilitar botão "Adicionar" se produto inativo
+
+
+8.2 OBSERVAÇÕES E CUSTOMIZAÇÕES
+
+a) LIMITE DE CARACTERES EM OBSERVAÇÕES DO ITEM:
+
+SIM, máximo de 500 caracteres.
+
+Campo aceita:
+- Letras, números
+- Caracteres especiais (, . - )
+- Acentuação
+- NÃO aceita emojis (são stripados automaticamente)
+
+Se enviar > 500 caracteres:
+Erro 400: "Observações do item não podem exceder 500 caracteres"
+
+
+b) LIMITE DE OBSERVAÇÕES DO PEDIDO (GERAL):
+
+SIM, máximo de 1000 caracteres.
+
+Mesmo comportamento: remove emojis automaticamente.
+
+
+c) OBSERVAÇÕES SÃO EXIBIDAS PARA COZINHA:
+
+SIM, observações de item são:
+- Exibidas na comanda impressa
+- Visíveis no painel da cozinha
+- Destacadas em negrito
+
+Observações do pedido (geral):
+- Aparecem no topo da comanda
+- Ex: "Cliente alérgico a lactose"
+
+
+8.3 PRODUTOS E ESTOQUE
+
+a) BACKEND VALIDA ESTOQUE AO CRIAR PEDIDO:
+
+NÃO, sistema atual NÃO controla estoque.
+
+Produtos são cadastrados mas sem controle de quantidade disponível.
+
+Indisponibilidade é marcada manualmente:
+- Campo "ativo" no produto
+- Se ativo=false, não pode ser pedido
+
+
+b) PRODUTOS COM VARIAÇÕES:
+
+NÃO implementado ainda.
+
+Sistema atual:
+- Cada variação é um produto separado
+- Ex: "Pizza G", "Pizza M", "Pizza P" = 3 produtos distintos
+
+Planejado para Q2/2026:
+- Suporte a variações (tamanho, sabor)
+- Por enquanto, usar produtos separados
+
+
+================================================================================
+9. ERROS E TRATAMENTO DE EXCEÇÕES
+================================================================================
+
+9.1 ESTRUTURA DE ERRO
+
+a) PADRÃO DE RESPONSE DE ERRO:
+
+SIM, todos erros seguem estrutura unificada:
+
+{
+  "timestamp": "2026-02-22T15:30:00",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Saldo insuficiente no fundo de consumo",
+  "path": "/api/pedidos",
+  "detalhe": {
+    ...campos adicionais específicos do erro...
+  }
+}
+
+Campo "detalhe" é opcional, presente em erros que precisam de contexto extra.
+
+
+b) EXISTE CAMPO "CODE" PARA TIPO DE ERRO:
+
+NÃO no response atual.
+
+Recomendação:
+- Use combinação de status + message para identificar erro
+- Ou adicione lógica no frontend baseada em status HTTP
+
+
+c) ERROS DE VALIDAÇÃO INCLUEM LISTA DE CAMPOS:
+
+SIM, para erros de validação de payload:
+
+Status: 400 Bad Request
+{
+  "timestamp": "...",
+  "status": 400,
+  "error": "Validation Error",
+  "message": "Erros de validação encontrados",
+  "errors": [
+    {
+      "campo": "itens[0].quantidade",
+      "mensagem": "Quantidade deve ser maior que zero"
+    },
+    {
+      "campo": "tipoPagamento",
+      "mensagem": "Tipo de pagamento é obrigatório"
+    }
+  ]
+}
+
+
+9.2 ERROS COMUNS - STATUS E MENSAGENS EXATAS
+
+a) SALDO INSUFICIENTE NO FUNDO:
+
+Status: 400 Bad Request
+Mensagem: "Saldo insuficiente no fundo de consumo. Saldo atual: 2.500,00 Kz, Valor do pedido: 5.000,00 Kz"
+
+Objeto detalhe:
+{
+  "saldoAtual": 2500.00,
+  "valorPedido": 5000.00,
+  "faltam": 2500.00
+}
+
+
+b) PÓS-PAGO DESATIVADO:
+
+Status: 403 Forbidden
+Mensagem: "Pagamento pós-pago está temporariamente desativado. Use PRE_PAGO ou aguarde liberação"
+
+
+c) LIMITE PÓS-PAGO EXCEDIDO:
+
+Status: 400 Bad Request
+Mensagem: "Limite de pós-pago excedido para esta unidade. Limite: 50.000,00 Kz, Em aberto: 45.000,00 Kz, Tentando adicionar: 8.000,00 Kz"
+
+Objeto detalhe:
+{
+  "limiteTotal": 50000.00,
+  "valorEmAberto": 45000.00,
+  "valorTentado": 8000.00,
+  "saldoDisponivel": 5000.00
+}
+
+
+d) UNIDADE NÃO ENCONTRADA:
+
+Status: 404 Not Found
+Mensagem: "Unidade de consumo com ID 999 não encontrada"
+
+
+e) PRODUTO NÃO ENCONTRADO:
+
+Status: 404 Not Found
+Mensagem: "Produto com ID 888 não encontrado"
+
+
+f) PEDIDO JÁ FINALIZADO (TENTANDO EDITAR):
+
+Status: 400 Bad Request
+Mensagem: "Não é possível editar pedido com status FINALIZADO"
+
+
+g) USUÁRIO SEM PERMISSÃO:
+
+Status: 403 Forbidden
+Mensagem: "Acesso negado. Operação requer role: ADMIN ou GERENTE"
+
+Objeto detalhe:
+{
+  "requiredRoles": ["ADMIN", "GERENTE"],
+  "userRole": "ATENDENTE"
+}
+
+
+h) CONFLITO DE VERSÃO (CONCORRÊNCIA):
+
+Status: 409 Conflict
+Mensagem: "O recurso foi modificado por outro usuário. Versão atual: 5, versão enviada: 3"
+
+Objeto detalhe:
+{
+  "versaoAtual": 5,
+  "versaoEnviada": 3
+}
+
+
+================================================================================
+10. PERFORMANCE E OTIMIZAÇÃO
+================================================================================
+
+10.1 PAGINAÇÃO
+
+a) ENDPOINTS DE LISTAGEM TÊM PAGINAÇÃO:
+
+SIM, seguindo padrão Spring Data.
+
+Parâmetros:
+- page: número da página (inicia em 0)
+- size: tamanho da página (padrão: 20, máximo: 100)
+- sort: campo,direção (ex: createdAt,desc)
+
+Exemplo:
+GET /api/pedidos?page=0&size=20&sort=createdAt,desc
+
+
+b) ESTRUTURA DE RESPONSE PAGINADO:
+
+SIM, formato Spring padrão:
+
+{
+  "content": [
+    ...array de pedidos...
+  ],
+  "pageable": {
+    "pageNumber": 0,
+    "pageSize": 20,
+    "sort": {
+      "sorted": true,
+      "unsorted": false
+    }
+  },
+  "totalElements": 156,
+  "totalPages": 8,
+  "size": 20,
+  "number": 0,
+  "first": true,
+  "last": false
+}
+
+
+10.2 FILTROS E BUSCA
+
+a) ENDPOINT DE LISTAGEM ACEITA FILTROS:
+
+SIM, via query params:
+
+GET /api/pedidos?status=CRIADO&dataInicio=2026-02-01&dataFim=2026-02-28&unidadeId=5&clienteId=42
+
+Filtros disponíveis:
+- status (CRIADO, EM_ANDAMENTO, FINALIZADO, CANCELADO)
+- statusFinanceiro (PAGO, NAO_PAGO)
+- tipoPagamento (PRE_PAGO, POS_PAGO)
+- unidadeId (ID da unidade de consumo)
+- clienteId (ID do cliente)
+- dataInicio (formato: yyyy-MM-dd)
+- dataFim (formato: yyyy-MM-dd)
+
+
+b) SINTAXE DOS FILTROS:
+
+Query params (não request body).
+
+Filtros são combinados com AND (todos devem ser satisfeitos).
+
+
+10.3 CACHE E ETAG
+
+a) RESPOSTAS INCLUEM ETAG:
+
+NÃO atualmente.
+
+Planejado para fase 2 de otimização.
+
+
+b) BACKEND SUPORTA REQUISIÇÃO CONDICIONAL:
+
+NÃO atualmente.
+
+If-None-Match não é processado.
+
+
+c) EXISTE HEADER "Last-Modified":
+
+NÃO atualmente.
+
+Todos recursos retornam sempre, sem cache HTTP.
+
+
+================================================================================
+11. AMBIENTE E DEPLOYMENT
+================================================================================
+
+11.1 AMBIENTES
+
+a) AMBIENTES DISPONÍVEIS:
+
+Temos 3 ambientes:
+
+DEV (Desenvolvimento):
+- URL: http://localhost:8080
+- Database: H2 in-memory
+- Dados resetam a cada restart
+- Para testes rápidos
+
+STAGING (Homologação):
+- URL: https://api-staging.restaurante.com
+- Database: PostgreSQL (dados persistem)
+- Dados de teste, pode criar à vontade
+- Sincroniza com branch 'develop'
+
+PROD (Produção):
+- URL: https://api.restaurante.com
+- Database: PostgreSQL (dados reais)
+- NÃO TESTAR AQUI
+- Apenas para release final
+
+
+b) AMBIENTE ATUAL PARA INTEGRAÇÃO:
+
+Use STAGING para integração.
+
+Credenciais de teste:
+- Admin: +244999999999 / admin123
+- Gerente: +244923456789 / gerente123
+- Atendente: +244912345678 / atendente123
+
+Banco é resetado toda segunda-feira 02:00 AM.
+
+
+c) DADOS DE TESTE:
+
+SIM, podem criar pedidos de teste à vontade em STAGING.
+
+NÃO existe flag de teste, todos requests são tratados igual.
+
+Para diferenciar testes:
+- Use observações com prefixo [TESTE]
+- Ex: "observacoes": "[TESTE] Pedido de integração frontend"
+
+
+11.2 DOCUMENTAÇÃO
+
+a) SWAGGER/OPENAPI DISPONÍVEL:
+
+SIM, atualizado diariamente.
+
+URLs:
+- DEV: http://localhost:8080/swagger-ui.html
+- STAGING: https://api-staging.restaurante.com/swagger-ui.html
+
+Inclui:
+- Todos endpoints com exemplos
+- Schemas dos DTOs
+- Códigos de erro possíveis
+- Try it out funcional (com autenticação)
+
+
+b) POSTMAN COLLECTION:
+
+SIM, disponível no repositório.
+
+Arquivo: /docs/Postman_Collection.json
+
+Importar no Postman:
+- Collection com 120+ requisições
+- Environments para DEV/STAGING/PROD
+- Variáveis para tokens
+- Pré-requisitos configurados (login automático)
+
+
+c) DOCUMENTAÇÃO DE ERROS:
+
+SIM, arquivo separado.
+
+Arquivo: /docs/ERROS_API.md
+
+Contém:
+- Lista de todos códigos HTTP usados
+- Mensagens exatas
+- Exemplos de response
+- Como tratar no frontend
+
+
+11.3 MONITORAMENTO
+
+a) BACKEND LOGA TODAS REQUISIÇÕES:
+
+SIM, logs detalhados:
+- Endpoint chamado
+- Método HTTP
+- Parâmetros/payload (sem senhas)
+- Usuário autenticado
+- IP de origem
+- Tempo de resposta
+- Status HTTP retornado
+
+NÃO logamos payloads de autenticação (senhas).
+
+
+b) DASHBOARD DE MONITORAMENTO:
+
+SIM, Grafana disponível.
+
+URL: https://grafana.restaurante.com
+
+Acesso read-only:
+- User: frontend-team
+- Pass: (solicitar ao DevOps)
+
+Dashboards disponíveis:
+- API Performance (latência, throughput)
+- Errors (taxa de erro por endpoint)
+- Business Metrics (pedidos/hora, receita)
+
+
+================================================================================
+12. CASOS DE USO ESPECÍFICOS - CENÁRIOS REAIS
+================================================================================
+
+12.1 CENÁRIO: MESA COM MÚLTIPLOS CLIENTES
+
+SITUAÇÃO: Mesa com 4 pessoas, cada um quer pagar sua parte.
+
+SOLUÇÃO RECOMENDADA:
+
+Criar 4 pedidos separados desde o início.
+
+Procedimento:
+1. Ao tomar pedidos, já separar por pessoa
+2. Criar pedido 1 para Pessoa A
+3. Criar pedido 2 para Pessoa B
+4. E assim por diante
+
+Cada pedido:
+- Vinculado à mesma unidade (mesa)
+- Pode ter tipoPagamento diferente (A usa PRE_PAGO, B usa POS_PAGO)
+- Processado independentemente
+
+Frontend:
+- Pode agrupar visualmente pedidos da mesma mesa
+- Mostrar total geral (soma)
+- Mas backend trata separadamente
+
+NÃO existe funcionalidade de "split bill" automática.
+
+
+12.2 CENÁRIO: CLIENTE MUDA DE MESA
+
+SITUAÇÃO: Cliente estava na Mesa 5, quer mudar para Mesa 10.
+
+SOLUÇÃO:
+
+NÃO existe endpoint de transferência de pedido.
+
+Procedimento:
+1. Fechar/cancelar pedido da Mesa 5
+2. Se PRE_PAGO: valor é estornado automaticamente
+3. Vincular cliente à Mesa 10
+4. Criar novo pedido na Mesa 10
+
+Se pedido já estiver EM_ANDAMENTO:
+- Deixar pedido na Mesa 5 até finalizar
+- Novos pedidos criar na Mesa 10
+- Cliente paga ambas as contas ao sair
+
+Histórico:
+NÃO mantém rastro de migração.
+Cada pedido fica vinculado à unidade onde foi criado.
+
+
+12.3 CENÁRIO: ERRO NO PEDIDO
+
+SITUAÇÃO: Atendente registrou Pepsi mas cliente pediu Coca-Cola.
+
+SOLUÇÃO:
+
+Se pedido está CRIADO:
+1. DELETE /api/pedidos/{pedidoId}/itens/{itemId} (remove Pepsi)
+2. POST /api/pedidos/{pedidoId}/itens (adiciona Coca)
+3. Total é recalculado automaticamente
+4. Se PRE_PAGO: ajusta débito do fundo
+
+Se pedido está EM_ANDAMENTO:
+1. NÃO pode mais editar itens
+2. Opções:
+   a) Cancelar pedido inteiro e criar novo (ADMIN/GERENTE)
+   b) Criar pedido adicional com item correto
+   c) Marcar item errado como cancelado (cozinha ainda prepara, mas cliente não paga)
+
+Auditoria:
+SIM, EventLogs registram:
+- Quem removeu o item
+- Quando
+- Qual item foi removido
+- Quem adicionou novo item
+
+
+12.4 CENÁRIO: CLIENTE SEM SALDO SUFICIENTE
+
+SITUAÇÃO: Cliente com R$ 30 no fundo, pedido de R$ 50.
+
+OPÇÕES:
+
+Opção 1: Recarregar fundo
+- Cliente recarrega R$ 30 ou mais
+- Depois cria pedido PRE_PAGO normalmente
+
+Opção 2: Usar POS_PAGO
+- GERENTE cria pedido POS_PAGO
+- Cliente paga R$ 50 ao sair (dinheiro/cartão)
+- Fundo de R$ 30 fica intacto para próximos pedidos
+
+Opção 3: Criar dois pedidos
+- Pedido 1: R$ 30 PRE_PAGO (usa todo o fundo)
+- Pedido 2: R$ 20 POS_PAGO (cliente paga depois)
+
+NÃO existe "modo misto" em um único pedido.
+Cada pedido tem apenas 1 tipoPagamento.
+
+
+12.5 CENÁRIO: PRODUTO ESGOTADO APÓS PEDIDO CRIADO
+
+SITUAÇÃO: Produto acabou DEPOIS que pedido foi criado.
+
+SOLUÇÃO:
+
+Cozinha/Bar pode:
+- Acessar painel da cozinha
+- Marcar item como "NÃO DISPONÍVEL" no subpedido
+- Subpedido fica com status especial: CANCELADO_PARCIAL
+
+Backend:
+- Remove item do pedido
+- Recalcula total
+- Se PRE_PAGO: estorna diferença automaticamente
+- Notifica frontend via WebSocket
+
+Frontend:
+- Recebe evento ITEM_CANCELADO
+- Atualiza visualização do pedido
+- Pode notificar garçom para avisar cliente
+
+Cliente:
+- Pode escolher outro produto no lugar
+- OU aceitar desconto no valor total
+
+Sistema NÃO escolhe automaticamente produto substituto.
+
+
+================================================================================
+CONSIDERAÇÕES FINAIS
+================================================================================
+
+Prezados colegas do Frontend,
+
+Esperamos que estas respostas esclareçam as dúvidas e permitam uma integração
+tranquila e eficiente.
+
+PONTOS IMPORTANTES A DESTACAR:
+
+1. TIPOPAGAMENTO:
+   - Use APENAS "PRE_PAGO" ou "POS_PAGO"
+   - "FUNDO_CONSUMO" não existe mais e retorna erro 400
+
+2. DÉBITO IMEDIATO:
+   - PRE_PAGO debita fundo na CRIAÇÃO do pedido
+   - Não é no fechamento
+
+3. VERSIONAMENTO:
+   - Sempre envie campo "version" ao atualizar recursos
+   - Trate erro 409 fazendo GET e retry
+
+4. PERMISSÕES:
+   - Apenas GERENTE/ADMIN podem criar POS_PAGO
+   - ATENDENTE só pode criar PRE_PAGO
+
+5. WEBSOCKET:
+   - Use para atualizações em tempo real
+   - Não dependa exclusivamente (implemente fallback com polling)
+
+6. ERROS:
+   - Sempre exiba mensagem de erro do backend ao usuário
+   - Campo "message" contém texto em português, user-friendly
+
+7. STAGING:
+   - Use ambiente STAGING para integração
+   - Não teste em PROD
+
+PRÓXIMOS PASSOS SUGERIDOS:
+
+1. Atualizar frontend para usar "PRE_PAGO" (URGENTE)
+2. Implementar validação de saldo antes de criar pedido PRE_PAGO
+3. Testar cenários de concorrência (dois atendentes na mesma mesa)
+4. Integrar WebSocket para notificações em tempo real
+5. Implementar tratamento de todos os erros documentados
+6. Testes E2E em STAGING
+
+DISPONIBILIDADE:
+
+Estamos disponíveis para reunião de alinhamento técnico:
+- Segunda/Quarta/Sexta: 14h-16h
+- Slack: #backend-frontend
+- Email: backend-team@restaurante.com
+
+Se surgirem dúvidas adicionais durante implementação, não hesitem em contatar.
+
+Boa integração!
+
+Atenciosamente,
+Equipe Backend - API Spring Boot
+Sistema de Restauração
+
+================================================================================
+FIM DO DOCUMENTO
+================================================================================

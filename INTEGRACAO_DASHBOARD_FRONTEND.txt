@@ -1,0 +1,398 @@
+================================================================================
+INTEGRAÇÃO FRONTEND - ENDPOINTS DE DASHBOARD
+Sistema de Restauração
+Data: 22 de fevereiro de 2026
+================================================================================
+
+OBSERVAÇÃO IMPORTANTE:
+Todos os endpoints requerem autenticação JWT no header:
+Authorization: Bearer {seu_token_jwt}
+
+================================================================================
+1. ESTATÍSTICAS GERAIS DO DASHBOARD
+================================================================================
+
+ENDPOINT: GET /api/dashboard/stats
+PERMISSÕES: ADMIN, GERENTE
+AUTENTICAÇÃO: Obrigatória
+
+DESCRIÇÃO:
+Retorna métricas gerais do sistema incluindo pedidos do dia, receita, ocupação
+de mesas e contadores de recursos.
+
+RESPOSTA DE SUCESSO (200 OK):
+{
+  "success": true,
+  "message": "Estatísticas obtidas com sucesso",
+  "data": {
+    "totalPedidosHoje": 15,
+    "pedidosEmAndamento": 3,
+    "pedidosConcluidos": 10,
+    "pedidosCancelados": 2,
+    "receitaHoje": 45000.00,
+    "receitaMes": 350000.00,
+    "mesasOcupadas": 8,
+    "mesasDisponiveis": 12,
+    "clientesAtivos": 45,
+    "produtosDisponiveis": 21
+  }
+}
+
+ESTRUTURA DO OBJETO DATA:
+- totalPedidosHoje (number): Total de pedidos criados hoje
+- pedidosEmAndamento (number): Pedidos com status CRIADO ou EM_ANDAMENTO
+- pedidosConcluidos (number): Pedidos finalizados hoje
+- pedidosCancelados (number): Pedidos cancelados hoje
+- receitaHoje (number): Soma total dos pedidos finalizados hoje (em Kwanzas)
+- receitaMes (number): Soma total dos pedidos finalizados no mês atual
+- mesasOcupadas (number): Unidades de consumo com status OCUPADA
+- mesasDisponiveis (number): Unidades de consumo com status DISPONIVEL
+- clientesAtivos (number): Total de clientes cadastrados no sistema
+- produtosDisponiveis (number): Total de produtos ativos no cardápio
+
+VALORES MONETÁRIOS:
+Todos os valores são em Kwanzas (AOA).
+Exemplo: 45000.00 = 45.000,00 Kz
+
+ATUALIZAÇÃO:
+Recomenda-se atualizar estas estatísticas a cada 30-60 segundos no dashboard.
+
+
+================================================================================
+2. ATIVIDADES RECENTES
+================================================================================
+
+ENDPOINT: GET /api/dashboard/activity
+PERMISSÕES: ADMIN, GERENTE, ATENDENTE
+AUTENTICAÇÃO: Obrigatória
+
+DESCRIÇÃO:
+Retorna os últimos 10 pedidos realizados no sistema, ordenados por data de
+criação (mais recentes primeiro).
+
+RESPOSTA DE SUCESSO (200 OK):
+{
+  "success": true,
+  "message": "Atividades obtidas com sucesso",
+  "data": [
+    {
+      "pedidoId": 123,
+      "numeroPedido": "PED-123",
+      "status": "EM_ANDAMENTO",
+      "total": 5500.00,
+      "criadoEm": "2026-02-22T14:30:00",
+      "clienteNome": "João Silva",
+      "unidadeConsumoReferencia": "MESA-05",
+      "quantidadeItens": 3
+    },
+    {
+      "pedidoId": 122,
+      "numeroPedido": "PED-122",
+      "status": "FINALIZADO",
+      "total": 3200.00,
+      "criadoEm": "2026-02-22T13:15:00",
+      "clienteNome": "Maria Santos",
+      "unidadeConsumoReferencia": "MESA-12",
+      "quantidadeItens": 2
+    }
+  ]
+}
+
+ESTRUTURA DE CADA ITEM DO ARRAY DATA:
+- pedidoId (number): ID único do pedido
+- numeroPedido (string): Número formatado do pedido (ex: "PED-123")
+- status (string): Status atual do pedido
+- total (number): Valor total do pedido em Kwanzas
+- criadoEm (string): Data/hora de criação (formato ISO 8601)
+- clienteNome (string): Nome do cliente ("Cliente não identificado" se não houver)
+- unidadeConsumoReferencia (string): Referência da mesa/unidade (ex: "MESA-05")
+- quantidadeItens (number): Quantidade de itens no pedido
+
+VALORES POSSÍVEIS PARA STATUS:
+- CRIADO: Pedido foi registrado
+- EM_ANDAMENTO: Pedido está sendo preparado
+- FINALIZADO: Pedido foi concluído e entregue
+- CANCELADO: Pedido foi cancelado
+
+FORMATO DE DATA:
+As datas são retornadas em formato ISO 8601 (UTC):
+"2026-02-22T14:30:00"
+
+Para exibir no frontend, converta para formato local:
+22/02/2026 às 14:30
+
+ATUALIZAÇÃO:
+Recomenda-se atualizar a cada 15-30 segundos para mostrar atividade em tempo real.
+
+
+================================================================================
+3. PRODUTOS MAIS VENDIDOS
+================================================================================
+
+ENDPOINT: GET /api/dashboard/top-products
+PERMISSÕES: ADMIN, GERENTE
+AUTENTICAÇÃO: Obrigatória
+
+DESCRIÇÃO:
+Retorna os 10 produtos mais vendidos do mês atual, ordenados por quantidade
+vendida (maior para menor).
+
+RESPOSTA DE SUCESSO (200 OK):
+{
+  "success": true,
+  "message": "Top produtos obtidos com sucesso",
+  "data": [
+    {
+      "produtoId": 5,
+      "codigo": "PROD-005",
+      "nome": "Hambúrguer Clássico",
+      "categoria": "LANCHE",
+      "quantidadeVendida": 48,
+      "receitaTotal": 120000.00,
+      "precoUnitario": 2500.00
+    },
+    {
+      "produtoId": 12,
+      "codigo": "PROD-012",
+      "nome": "Refrigerante Cola 350ml",
+      "categoria": "BEBIDA_NAO_ALCOOLICA",
+      "quantidadeVendida": 35,
+      "receitaTotal": 15750.00,
+      "precoUnitario": 450.00
+    }
+  ]
+}
+
+ESTRUTURA DE CADA ITEM DO ARRAY DATA:
+- produtoId (number): ID único do produto
+- codigo (string): Código do produto no sistema
+- nome (string): Nome do produto
+- categoria (string): Categoria do produto
+- quantidadeVendida (number): Total de unidades vendidas no mês
+- receitaTotal (number): Receita gerada pelo produto no mês (em Kwanzas)
+- precoUnitario (number): Preço atual do produto (em Kwanzas)
+
+CATEGORIAS POSSÍVEIS:
+- ENTRADA
+- PRATO_PRINCIPAL
+- ACOMPANHAMENTO
+- SOBREMESA
+- LANCHE
+- BEBIDA_ALCOOLICA
+- BEBIDA_NAO_ALCOOLICA
+
+OBSERVAÇÃO:
+Apenas pedidos com status FINALIZADO são contabilizados nas estatísticas.
+O período de cálculo é o mês atual (de 01 até o dia corrente).
+
+ATUALIZAÇÃO:
+Pode ser atualizado a cada 5-10 minutos, pois muda com menos frequência.
+
+
+================================================================================
+4. TRATAMENTO DE ERROS
+================================================================================
+
+ERRO 401 - NÃO AUTENTICADO:
+{
+  "success": false,
+  "message": "Token inválido ou expirado"
+}
+
+Ação: Redirecionar usuário para tela de login.
+
+
+ERRO 403 - SEM PERMISSÃO:
+{
+  "success": false,
+  "message": "Acesso negado. Permissão necessária: ADMIN ou GERENTE"
+}
+
+Ação: Exibir mensagem de acesso negado. Usuário não tem role adequada.
+
+
+ERRO 500 - ERRO NO SERVIDOR:
+{
+  "success": false,
+  "message": "Erro interno do servidor",
+  "error": "Detalhes técnicos do erro"
+}
+
+Ação: Exibir mensagem genérica de erro. Tentar novamente em alguns segundos.
+
+
+================================================================================
+5. PADRÃO DE RESPOSTA (ApiResponse)
+================================================================================
+
+Todos os endpoints seguem o mesmo padrão de resposta:
+
+{
+  "success": boolean,    // true = sucesso, false = erro
+  "message": string,     // Mensagem descritiva da operação
+  "data": object/array   // Dados retornados (varia por endpoint)
+}
+
+Para acessar os dados:
+- JavaScript: response.data.data
+- Se usar Axios: response.data.data (Axios já extrai o body)
+
+
+================================================================================
+6. FORMATAÇÃO DE VALORES NO FRONTEND
+================================================================================
+
+VALORES MONETÁRIOS:
+Backend retorna valores em Kwanzas (formato decimal).
+Exemplos de conversão para exibição:
+
+2500.00 → "2.500,00 Kz"
+120000.00 → "120.000,00 Kz"
+450.00 → "450,00 Kz"
+
+Use separador de milhares (.) e vírgula para decimais.
+
+
+DATAS E HORAS:
+Backend retorna: "2026-02-22T14:30:00"
+Frontend deve exibir: "22/02/2026 às 14:30"
+
+Considere usar biblioteca de datas (date-fns, moment.js, dayjs) para
+conversão e formatação correta, respeitando timezone local.
+
+
+NÚMEROS GRANDES:
+Use separador de milhares para melhor legibilidade:
+48 → "48"
+1500 → "1.500"
+35000 → "35.000"
+
+
+================================================================================
+7. FLUXO DE INTEGRAÇÃO RECOMENDADO
+================================================================================
+
+PASSO 1: AUTENTICAÇÃO
+Obter token JWT através do endpoint de login:
+POST /api/auth/atendente/login (para ATENDENTE)
+POST /api/auth/admin/login (para ADMIN)
+
+Armazenar token em localStorage ou sessionStorage.
+
+
+PASSO 2: CONFIGURAR REQUISIÇÕES
+Adicionar token em todas as requisições:
+Header: Authorization: Bearer {token}
+
+
+PASSO 3: CARREGAR DASHBOARD
+Ao abrir página de dashboard, fazer 3 requisições em paralelo:
+1. GET /api/dashboard/stats
+2. GET /api/dashboard/activity
+3. GET /api/dashboard/top-products
+
+
+PASSO 4: ATUALIZAÇÃO AUTOMÁTICA
+Configurar timers para atualização periódica:
+- Stats: a cada 30-60 segundos
+- Activity: a cada 15-30 segundos
+- Top Products: a cada 5-10 minutos
+
+
+PASSO 5: TRATAMENTO DE ERROS
+- Token expirado (401): Redirecionar para login
+- Sem permissão (403): Mostrar mensagem de acesso negado
+- Erro servidor (500): Tentar novamente após delay
+
+
+================================================================================
+8. EXEMPLO DE REQUISIÇÃO HTTP
+================================================================================
+
+REQUISIÇÃO:
+GET /api/dashboard/stats HTTP/1.1
+Host: localhost:8080
+Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIrMjQ0OTk5OTk5OTk5...
+Content-Type: application/json
+
+
+RESPOSTA:
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "success": true,
+  "message": "Estatísticas obtidas com sucesso",
+  "data": {
+    "totalPedidosHoje": 15,
+    "pedidosEmAndamento": 3,
+    "pedidosConcluidos": 10,
+    "pedidosCancelados": 2,
+    "receitaHoje": 45000.00,
+    "receitaMes": 350000.00,
+    "mesasOcupadas": 8,
+    "mesasDisponiveis": 12,
+    "clientesAtivos": 45,
+    "produtosDisponiveis": 21
+  }
+}
+
+
+================================================================================
+9. CASOS DE USO NO FRONTEND
+================================================================================
+
+CASO 1: CARDS DE ESTATÍSTICAS
+Usar dados de /api/dashboard/stats para exibir cards:
+- Card 1: Pedidos Hoje (totalPedidosHoje)
+- Card 2: Receita Hoje (receitaHoje) formatada
+- Card 3: Mesas Ocupadas (mesasOcupadas / total de mesas)
+- Card 4: Produtos Disponíveis (produtosDisponiveis)
+
+
+CASO 2: GRÁFICO DE PEDIDOS
+Usar dados de /api/dashboard/stats:
+- Em Andamento: pedidosEmAndamento (cor amarela/laranja)
+- Concluídos: pedidosConcluidos (cor verde)
+- Cancelados: pedidosCancelados (cor vermelha)
+
+Tipo de gráfico recomendado: Pizza ou Barras horizontais
+
+
+CASO 3: LISTA DE ATIVIDADES RECENTES
+Usar dados de /api/dashboard/activity para exibir tabela/lista:
+Colunas: Pedido | Cliente | Mesa | Status | Valor | Horário
+
+Aplicar badge colorido no status:
+- CRIADO: azul
+- EM_ANDAMENTO: amarelo
+- FINALIZADO: verde
+- CANCELADO: vermelho
+
+
+CASO 4: RANKING DE PRODUTOS
+Usar dados de /api/dashboard/top-products para exibir lista ranqueada:
+Mostrar: Posição | Nome | Categoria | Qtd Vendida | Receita
+
+Destacar top 3 com cores/ícones especiais.
+
+
+================================================================================
+10. SEGURANÇA E BOAS PRÁTICAS
+================================================================================
+
+✓ SEMPRE validar token antes de fazer requisições
+✓ Tratar erro 401 redirecionando para login
+✓ Não armazenar token em cookies sem HttpOnly flag
+✓ Implementar timeout em requisições (15-30 segundos)
+✓ Mostrar loading state durante requisições
+✓ Implementar retry logic para erros 500/503
+✓ Não expor detalhes técnicos de erro ao usuário final
+✓ Validar permissões no frontend (além do backend)
+✓ Limpar cache/storage ao fazer logout
+✓ Usar HTTPS em produção
+
+
+================================================================================
+FIM DO DOCUMENTO
+================================================================================

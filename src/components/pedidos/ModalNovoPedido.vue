@@ -21,6 +21,19 @@
           </div>
         </div>
 
+        <!-- Alerta: Unidade sem cliente -->
+        <div v-if="!unidade?.cliente" class="alert alert-warning">
+          <div class="alert-content">
+            <svg class="alert-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+            <div>
+              <p class="alert-title">Cliente não vinculado</p>
+              <p class="alert-message">Para usar pagamento PRÉ-PAGO, é necessário vincular um cliente à unidade primeiro.</p>
+            </div>
+          </div>
+        </div>
+
         <!-- Alerta: Cliente sem fundo -->
         <div v-if="unidade?.cliente && !fundoConsumo && !carregandoFundo" class="alert alert-info">
           <div class="alert-content">
@@ -38,7 +51,7 @@
         </div>
 
         <!-- Alerta: Saldo insuficiente -->
-        <div v-if="fundoConsumo && totalCarrinho > fundoConsumo.saldoAtual && tipoPagamento === 'FUNDO_CONSUMO'" class="alert alert-warning">
+        <div v-if="fundoConsumo && totalCarrinho > fundoConsumo.saldoAtual && tipoPagamento === 'PRE_PAGO'" class="alert alert-warning">
           <div class="alert-content">
             <svg class="alert-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
@@ -63,35 +76,47 @@
             <label 
               class="payment-option" 
               :class="{ 
-                'selected': tipoPagamento === 'FUNDO_CONSUMO',
-                'disabled': !fundoConsumo
+                'selected': tipoPagamento === 'PRE_PAGO',
+                'disabled': !podeUsarPrePago
               }"
+              :title="!podeUsarPrePago ? tooltipPrePago : ''"
             >
               <input 
                 type="radio" 
                 v-model="tipoPagamento" 
-                value="FUNDO_CONSUMO"
-                :disabled="!fundoConsumo"
+                value="PRE_PAGO"
+                :disabled="!podeUsarPrePago"
               />
               <div class="option-content">
                 <div class="option-icon">💰</div>
                 <div class="option-details">
-                  <span class="option-title">Fundo de Consumo</span>
-                  <span class="option-desc">Pagamento pré-pago</span>
+                  <span class="option-title">Pré-Pago (Fundo)</span>
+                  <span class="option-desc">Débito automático do fundo</span>
+                  <span v-if="!podeUsarPrePago" class="option-warning">{{ tooltipPrePago }}</span>
                 </div>
               </div>
             </label>
             
             <label 
               class="payment-option" 
-              :class="{ 'selected': tipoPagamento === 'POS_PAGO' }"
+              :class="{ 
+                'selected': tipoPagamento === 'POS_PAGO',
+                'disabled': !podeUsarPosPago
+              }"
+              :title="!podeUsarPosPago ? tooltipPosPago : ''"
             >
-              <input type="radio" v-model="tipoPagamento" value="POS_PAGO" />
+              <input 
+                type="radio" 
+                v-model="tipoPagamento" 
+                value="POS_PAGO"
+                :disabled="!podeUsarPosPago"
+              />
               <div class="option-content">
                 <div class="option-icon">📋</div>
                 <div class="option-details">
                   <span class="option-title">Pós-Pago</span>
                   <span class="option-desc">Pagar ao finalizar</span>
+                  <span v-if="!podeUsarPosPago" class="option-warning">{{ tooltipPosPago }}</span>
                 </div>
               </div>
             </label>
@@ -149,7 +174,33 @@
                 <button @click="diminuirQuantidade(index)" class="btn btn-sm">−</button>
                 <span class="quantidade">{{ item.quantidade }}</span>
                 <button @click="aumentarQuantidade(index)" class="btn btn-sm">+</button>
+                <button 
+                  @click="toggleObservacoes(index)" 
+                  class="btn btn-sm"
+                  :class="{ 'active': item.mostrarObservacoes }"
+                  title="Adicionar observações"
+                >
+                  📝
+                </button>
                 <button @click="removerItem(index)" class="btn btn-sm btn-danger">🗑️</button>
+              </div>
+              
+              <!-- Campo de observações -->
+              <div v-if="item.mostrarObservacoes" class="item-observacoes">
+                <textarea 
+                  v-model="item.observacoes"
+                  placeholder="Ex: Sem cebola, ponto da carne mal passado..."
+                  maxlength="500"
+                  rows="2"
+                  class="observacoes-input"
+                  @input="validarObservacoes(index)"
+                ></textarea>
+                <div class="observacoes-info">
+                  <span class="caracteres-count" :class="{ 'limit-warning': (item.observacoes?.length || 0) > 450 }">
+                    {{ item.observacoes?.length || 0 }}/500
+                  </span>
+                  <span class="observacoes-hint">Emojis serão removidos automaticamente</span>
+                </div>
               </div>
             </div>
           </div>
@@ -181,6 +232,7 @@ import { useCurrency } from '@/utils/currency'
 import pedidosBalcaoService from '@/services/pedidosBalcaoService'
 import fundoConsumoService from '@/services/fundoConsumoService'
 import { useNotificationStore } from '@/store/notifications'
+import { useAuthStore } from '@/store/auth'
 
 const props = defineProps({
   unidade: Object,
@@ -191,11 +243,12 @@ const emit = defineEmits(['fechar', 'pedido-criado', 'criar-fundo', 'recarregar-
 
 const { formatCurrency } = useCurrency()
 const notificationStore = useNotificationStore()
+const authStore = useAuthStore()
 
 const buscaProduto = ref('')
 const carrinho = ref([])
 const loading = ref(false)
-const tipoPagamento = ref('FUNDO_CONSUMO')
+const tipoPagamento = ref('PRE_PAGO')
 const fundoConsumo = ref(null)
 const carregandoFundo = ref(false)
 
@@ -204,6 +257,13 @@ onMounted(async () => {
   if (props.unidade?.cliente?.id) {
     await buscarFundoCliente()
   }
+  
+  // Se usuário não pode usar POS_PAGO e for o default, forçar PRE_PAGO (se disponível)
+  if (!podeUsarPosPago.value && tipoPagamento.value === 'POS_PAGO') {
+    if (podeUsarPrePago.value) {
+      tipoPagamento.value = 'PRE_PAGO'
+    }
+  }
 })
 
 const buscarFundoCliente = async () => {
@@ -211,19 +271,62 @@ const buscarFundoCliente = async () => {
     carregandoFundo.value = true
     fundoConsumo.value = await fundoConsumoService.buscarFundoPorCliente(props.unidade.cliente.id)
     
-    // Se tem fundo, usa FUNDO_CONSUMO por padrão, senão usa POS_PAGO
-    if (fundoConsumo.value) {
-      tipoPagamento.value = 'FUNDO_CONSUMO'
+    console.log('[ModalNovoPedido] Fundo carregado:', JSON.stringify(fundoConsumo.value, null, 2))
+    
+    // Se tem fundo, usa PRE_PAGO por padrão, senão usa POS_PAGO
+    if (fundoConsumo.value && fundoConsumo.value.saldoAtual > 0) {
+      tipoPagamento.value = 'PRE_PAGO'
     } else {
       tipoPagamento.value = 'POS_PAGO'
+      if (fundoConsumo.value) {
+        console.warn('[ModalNovoPedido] Fundo existe mas saldo é zero:', fundoConsumo.value.saldoAtual)
+      }
     }
   } catch (error) {
-    console.log('Cliente não possui fundo de consumo')
+    console.log('Cliente não possui fundo de consumo:', error)
     tipoPagamento.value = 'POS_PAGO'
   } finally {
     carregandoFundo.value = false
   }
 }
+
+// Validar se pode usar PRE_PAGO (requer cliente vinculado + fundo ativo)
+const podeUsarPrePago = computed(() => {
+  // Primeiro: unidade deve ter cliente vinculado
+  if (!props.unidade?.cliente?.id) {
+    return false
+  }
+  // Segundo: cliente deve ter fundo ativo
+  if (!fundoConsumo.value) {
+    return false
+  }
+  return true
+})
+
+// Mensagem de tooltip quando PRE_PAGO está desabilitado
+const tooltipPrePago = computed(() => {
+  if (!props.unidade?.cliente?.id) {
+    return 'Vincule um cliente à unidade primeiro'
+  }
+  if (!fundoConsumo.value) {
+    return 'Cliente não possui fundo de consumo ativo'
+  }
+  return ''
+})
+
+// Validar se pode usar POS_PAGO (apenas ADMIN e GERENTE)
+const podeUsarPosPago = computed(() => {
+  const role = authStore.user?.role
+  return role === 'ADMIN' || role === 'GERENTE'
+})
+
+// Mensagem de tooltip quando POS_PAGO está desabilitado
+const tooltipPosPago = computed(() => {
+  if (!podeUsarPosPago.value) {
+    return 'Apenas Gerente ou Admin podem usar Pós-Pago'
+  }
+  return ''
+})
 
 const produtosFiltrados = computed(() => {
   if (!props.produtos) return []
@@ -244,8 +347,8 @@ const podeCriarPedido = computed(() => {
   if (carrinho.value.length === 0) return false
   if (loading.value) return false
   
-  // Se for FUNDO_CONSUMO, verificar saldo
-  if (tipoPagamento.value === 'FUNDO_CONSUMO') {
+  // Se for PRE_PAGO (fundo), verificar saldo
+  if (tipoPagamento.value === 'PRE_PAGO') {
     if (!fundoConsumo.value) return false
     if (totalCarrinho.value > fundoConsumo.value.saldoAtual) return false
   }
@@ -262,7 +365,9 @@ const adicionarProduto = (produto) => {
       produtoId: produto.id,
       nome: produto.nome,
       preco: produto.preco,
-      quantidade: 1
+      quantidade: 1,
+      observacoes: '',
+      mostrarObservacoes: false
     })
   }
 }
@@ -281,6 +386,23 @@ const diminuirQuantidade = (index) => {
 
 const removerItem = (index) => {
   carrinho.value.splice(index, 1)
+}
+
+const toggleObservacoes = (index) => {
+  carrinho.value[index].mostrarObservacoes = !carrinho.value[index].mostrarObservacoes
+}
+
+const validarObservacoes = (index) => {
+  // Backend remove emojis automaticamente, mas podemos avisar o usuário
+  const item = carrinho.value[index]
+  const temEmojis = /\p{Emoji}/u.test(item.observacoes)
+  
+  if (temEmojis && !item._emojiWarningShown) {
+    item._emojiWarningShown = true
+    setTimeout(() => {
+      item._emojiWarningShown = false
+    }, 3000)
+  }
 }
 
 const getTipoPreparoClasse = (tipo) => {
@@ -310,39 +432,97 @@ const criarPedido = async () => {
   }
 
   // Validações específicas por tipo de pagamento
-  if (tipoPagamento.value === 'FUNDO_CONSUMO') {
+  if (tipoPagamento.value === 'PRE_PAGO') {
+    if (!props.unidade?.cliente?.id) {
+      notificationStore.erro('Unidade deve ter cliente vinculado para pagamento PRÉ-PAGO')
+      return
+    }
+    
     if (!fundoConsumo.value) {
       notificationStore.aviso('Cliente não possui fundo de consumo. Crie um fundo primeiro.')
       return
     }
     
+    // Validar saldo maior que zero
+    if (fundoConsumo.value.saldoAtual <= 0) {
+      notificationStore.erro('Saldo do fundo é zero. Recarregue o fundo antes de criar pedido.')
+      return
+    }
+    
     if (totalCarrinho.value > fundoConsumo.value.saldoAtual) {
-      notificationStore.aviso(`Saldo insuficiente. Recarregue o fundo.`)
+      notificationStore.aviso(`Saldo insuficiente. Faltam ${formatCurrency(totalCarrinho.value - fundoConsumo.value.saldoAtual)}. Recarregue o fundo.`)
+      return
+    }
+  }
+  
+  // Validação de permissão para PÓS-PAGO
+  if (tipoPagamento.value === 'POS_PAGO') {
+    if (!podeUsarPosPago.value) {
+      notificationStore.erro('Apenas Gerente ou Admin podem criar pedidos Pós-Pago')
       return
     }
   }
 
   loading.value = true
   try {
+    // DEBUG: Verificar estado do carrinho
+    console.log('[ModalNovoPedido] Estado do carrinho:', JSON.stringify(carrinho.value, null, 2))
+    console.log('[ModalNovoPedido] Total calculado:', totalCarrinho.value)
+    console.log('[ModalNovoPedido] Unidade ID:', props.unidade.id)
+    console.log('[ModalNovoPedido] Tipo Pagamento:', tipoPagamento.value)
+    
     const dados = {
       unidadeConsumoId: props.unidade.id,
       tipoPagamento: tipoPagamento.value,
-      itens: carrinho.value.map(item => ({
-        produtoId: item.produtoId,
-        quantidade: item.quantidade
-      }))
+      itens: carrinho.value.map(item => {
+        const itemPedido = {
+          produtoId: item.produtoId,
+          quantidade: item.quantidade
+        }
+        
+        // Adicionar observações apenas se tiver conteúdo
+        if (item.observacoes && item.observacoes.trim()) {
+          itemPedido.observacoes = item.observacoes.trim()
+        }
+        
+        console.log('[ModalNovoPedido] Item mapeado:', itemPedido)
+        return itemPedido
+      })
     }
 
-    console.log('[ModalNovoPedido] Criando pedido:', dados)
+    console.log('[ModalNovoPedido] Payload final:', JSON.stringify(dados, null, 2))
 
     const response = await pedidosBalcaoService.criar(dados)
     
     notificationStore.sucesso(`Pedido criado com sucesso! Tipo: ${tipoPagamento.value}`)
+    
+    // Limpar carrinho
+    carrinho.value = []
+    
     emit('pedido-criado', response.data)
   } catch (error) {
     console.error('[ModalNovoPedido] Erro:', error)
-    const mensagem = error.response?.data?.message || 'Erro ao criar pedido'
-    notificationStore.erro(mensagem)
+    
+    // Mensagens amigáveis para erros específicos
+    const mensagemBackend = error.response?.data?.message || ''
+    
+    if (mensagemBackend.includes('Limite de pós-pago excedido')) {
+      // Extrair valores se possível
+      const limiteMatch = mensagemBackend.match(/Limite: ([0-9.,]+)/)
+      const abertoMatch = mensagemBackend.match(/Total aberto: ([0-9.,]+)/)
+      
+      if (limiteMatch && abertoMatch) {
+        notificationStore.erro(`Limite de crédito excedido! Já existe ${abertoMatch[1]} em aberto. Limite: ${limiteMatch[1]}`)
+      } else {
+        notificationStore.erro(mensagemBackend)
+      }
+    } else if (mensagemBackend.includes('Valor de débito deve ser maior que zero')) {
+      notificationStore.erro('Erro ao processar pagamento. Verifique se o fundo possui saldo e tente novamente.')
+    } else if (mensagemBackend.includes('Saldo insuficiente')) {
+      notificationStore.erro('Saldo insuficiente no fundo. Recarregue e tente novamente.')
+    } else {
+      notificationStore.erro(mensagemBackend || 'Erro ao criar pedido')
+    }
   } finally {
     loading.value = false
   }
@@ -530,6 +710,12 @@ const criarPedido = async () => {
   padding: 10px;
   border-radius: 6px;
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.carrinho-item > div:first-child {
+  display: flex;
   justify-content: space-between;
   align-items: center;
 }
@@ -560,6 +746,57 @@ const criarPedido = async () => {
   font-weight: 700;
   min-width: 24px;
   text-align: center;
+}
+
+.item-controles .btn.active {
+  background: #1976d2;
+  color: white;
+}
+
+.item-observacoes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding-top: 8px;
+  border-top: 1px dashed #e0e0e0;
+}
+
+.observacoes-input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  transition: border-color 0.2s;
+}
+
+.observacoes-input:focus {
+  outline: none;
+  border-color: #1976d2;
+}
+
+.observacoes-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+
+.caracteres-count {
+  color: #666;
+  font-weight: 600;
+}
+
+.caracteres-count.limit-warning {
+  color: #f57c00;
+}
+
+.observacoes-hint {
+  color: #999;
+  font-style: italic;
 }
 
 .carrinho-total {
@@ -747,6 +984,14 @@ const criarPedido = async () => {
   opacity: 0.5;
   cursor: not-allowed;
   background: #f5f5f5;
+}
+
+.option-warning {
+  display: block;
+  font-size: 11px;
+  color: #f57c00;
+  margin-top: 4px;
+  font-style: italic;
 }
 
 .payment-option input[type="radio"] {

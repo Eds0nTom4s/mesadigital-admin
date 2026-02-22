@@ -1,0 +1,290 @@
+================================================================================
+RELATÓRIO DE ERRO - CRIAÇÃO DE PEDIDO PRÉ-PAGO
+================================================================================
+
+Data: 22 de fevereiro de 2026
+Reportado por: Equipe Frontend
+
+================================================================================
+1. RESUMO DO PROBLEMA
+================================================================================
+
+Ao tentar criar pedido com tipoPagamento "PRE_PAGO", backend retorna erro:
+"Valor de débito deve ser maior que zero"
+
+Porém, frontend está enviando payload CORRETO conforme documentação fornecida
+pela equipe backend no arquivo RESPOSTA_BACKEND_INTEGRACAO.txt seção 1.1a.
+
+================================================================================
+2. DADOS DO TESTE
+================================================================================
+
+PAYLOAD ENVIADO PELO FRONTEND:
+```json
+{
+  "unidadeConsumoId": 1,
+  "tipoPagamento": "PRE_PAGO",
+  "itens": [
+    {
+      "produtoId": 2,
+      "quantidade": 1
+    }
+  ]
+}
+```
+
+CONTEXTO DO FRONTEND:
+- Fundo do cliente carregado com sucesso
+- Fundo ID: 1
+- Saldo atual: 10000 (100,00 AOA)
+- Fundo ativo: true
+- Unidade de Consumo ID: 1 (tem cliente vinculado)
+
+PRODUTO SELECIONADO (conforme GET /produtos):
+- ID: 2
+- Nome: "Salada Tropical"
+- Preço no frontend: 2800 (28,00 AOA)
+- Quantidade: 1
+- Total calculado: 2800 (28,00 AOA)
+
+VALIDAÇÃO:
+✅ Saldo do fundo (10000) > Total do pedido (2800)
+✅ Cliente vinculado à unidade
+✅ Fundo ativo
+✅ Produto ativo (retornado em GET /produtos)
+✅ Quantidade > 0
+
+================================================================================
+3. ERRO RETORNADO
+================================================================================
+
+HTTP Status: 400 Bad Request
+
+Response:
+```json
+{
+  "timestamp": "2026-02-22T02:45:19.240223666",
+  "status": 400,
+  "error": "Erro de negócio",
+  "message": "Valor de débito deve ser maior que zero",
+  "path": "/api/pedidos"
+}
+```
+
+================================================================================
+4. ANÁLISE
+================================================================================
+
+Frontend está enviando EXATAMENTE o payload documentado na seção 1.1a da
+resposta do backend:
+
+Payload obrigatório (segundo documentação):
+- unidadeConsumoId (Long): ID da mesa/quarto ✅
+- tipoPagamento (String): "PRE_PAGO" ou "POS_PAGO" ✅
+- itens (Array): Lista de itens do pedido ✅
+
+Cada item do array contém (segundo documentação):
+- produtoId (Long): ID do produto ✅
+- quantidade (Integer): Quantidade desejada ✅
+- observacoes (String, opcional): Customizações (não enviado pois vazio) ✅
+
+O backend documentou claramente:
+"IMPORTANTE: O backend busca automaticamente:
+- Preço atual do produto no banco de dados
+- Calcula subtotal (preco x quantidade)
+- Calcula total do pedido (soma de todos subtotais)"
+
+Frontend NÃO deve enviar (segundo documentação):
+- precoUnitario (será ignorado se enviado)
+- valorTotal (será ignorado)
+
+================================================================================
+5. HIPÓTESES SOBRE A CAUSA
+================================================================================
+
+Hipótese 1: PRODUTO COM PREÇO ZERO NO BANCO
+- Produto ID 2 pode ter preço = 0 ou NULL no banco de dados
+- Backend calcula total como 2800 * 0 = 0
+- Retorna erro "Valor de débito deve ser maior que zero"
+
+Hipótese 2: PRODUTO INATIVO NO BANCO
+- Produto ID 2 pode estar com ativo = false no banco
+- Backend ignora produto inativo ao calcular total
+- Total = 0, retorna erro
+
+Hipótese 3: BUG NO CÁLCULO DO BACKEND
+- Backend não está buscando preço do produto corretamente
+- Ou não está multiplicando preço * quantidade
+- Resultado: total calculado = 0
+
+Hipótese 4: PRODUTO NÃO ENCONTRADO
+- Produto ID 2 não existe no banco (mas foi retornado em GET /produtos)
+- Backend não encontra produto, ignora item
+- Total = 0
+
+================================================================================
+6. TESTES ADICIONAIS REALIZADOS
+================================================================================
+
+Teste 1: POS_PAGO (mesmo produto)
+Resultado: Erro diferente - "Limite de pós-pago excedido"
+Conclusão: Backend ENCONTRA o produto e CALCULA o valor (3500 em aberto + 2800)
+
+Teste 2: PRE_PAGO com produto ID 1 ("Pastéis de Bacalhau", preço 3500)
+Resultado: Mesmo erro - "Valor de débito deve ser maior que zero"
+Conclusão: NÃO é problema específico do produto ID 2
+
+Teste 3: PRE_PAGO com fundo saldo zero
+Resultado: Mesmo erro (esperado)
+Conclusão: Erro acontece independente do saldo quando PRE_PAGO
+
+PADRÃO IDENTIFICADO:
+- POS_PAGO: Backend CALCULA valor corretamente (valida limite)
+- PRE_PAGO: Backend retorna erro "valor deve ser maior que zero"
+
+Isso sugere que o problema está no FLUXO ESPECÍFICO de PRE_PAGO, não no
+cálculo do total do pedido.
+
+================================================================================
+7. DIVERGÊNCIA ENTRE POS_PAGO E PRE_PAGO
+================================================================================
+
+POS_PAGO (funciona):
+- Backend calcula total: 3500 + 2800 = 6300 (acumulado)
+- Valida contra limite: 6300 > 500
+- Retorna erro de limite excedido ✅ (validação funcionou)
+
+PRE_PAGO (não funciona):
+- Backend deveria calcular total: 2800
+- Deveria validar contra saldo do fundo: 10000 > 2800 ✅
+- Deveria debitar 2800 do fundo
+- MAS retorna: "Valor de débito deve ser maior que zero"
+
+CONCLUSÃO:
+O código que CALCULA o total está funcionando (POS_PAGO prova isso).
+O código que VALIDA/DEBITA o fundo (PRE_PAGO) tem um bug.
+
+================================================================================
+8. PERGUNTAS PARA EQUIPE BACKEND
+================================================================================
+
+1. No fluxo PRE_PAGO, qual código calcula o "valor de débito"?
+   - É o mesmo que calcula total para POS_PAGO?
+   - Ou existe cálculo separado?
+
+2. Por que POS_PAGO calcula total corretamente mas PRE_PAGO retorna zero?
+
+3. Existe alguma validação adicional para PRE_PAGO que não existe para POS_PAGO?
+   - Validação de cliente?
+   - Validação de fundo?
+   - Validação de produtos específicos?
+
+4. O backend loga o valor calculado antes de validar?
+   Podemos ver nos logs do backend:
+   - Qual total foi calculado?
+   - Qual valor de débito foi determinado?
+   - Por que está retornando zero?
+
+5. Existe diferença entre "valor total do pedido" e "valor de débito do fundo"?
+   - São calculados de forma diferente?
+   - Existe alguma transformação entre total → débito?
+
+6. O endpoint POST /pedidos está usando a mesma lógica para ambos tipos de
+   pagamento ou existem branches diferentes?
+
+================================================================================
+9. SOLICITAÇÕES
+================================================================================
+
+URGENTE:
+1. Verificar logs do backend para requisição timestamp: 2026-02-22T02:45:19
+   - Ver valor calculado de total
+   - Ver valor de débito tentado
+   - Ver stack trace completo do erro
+
+2. Verificar código de validação PRE_PAGO:
+   - Onde está a validação "Valor de débito deve ser maior que zero"?
+   - O que está sendo comparado com zero?
+   - Por que esse valor está zero quando total deveria ser 2800?
+
+3. Testar no backend (direto, sem frontend):
+   POST http://localhost:8080/api/pedidos
+   Body:
+   ```json
+   {
+     "unidadeConsumoId": 1,
+     "tipoPagamento": "PRE_PAGO",
+     "itens": [
+       {
+         "produtoId": 2,
+         "quantidade": 1
+       }
+     ]
+   }
+   ```
+   
+   Com cliente ID 1 vinculado à unidade, que tem fundo ID 1 ativo com saldo 10000.
+
+IMPORTANTE:
+4. Confirmar se documentação em RESPOSTA_BACKEND_INTEGRACAO.txt seção 1.1a
+   está correta e atualizada.
+
+5. Se houver campo adicional necessário no payload para PRE_PAGO, documentar
+   claramente.
+
+================================================================================
+10. WORKAROUND TEMPORÁRIO
+================================================================================
+
+Enquanto aguardamos correção do backend, frontend pode:
+
+Opção 1: DESABILITAR PRE_PAGO temporariamente
+- Forçar todos pedidos para POS_PAGO
+- Avisar usuário que "Pagamento via Fundo está temporariamente indisponível"
+
+Opção 2: ENVIAR CAMPO ADICIONAL (se backend precisar)
+- Se backend precisar de algum campo que não documentou
+- Frontend pode tentar adicionar (mas precisamos saber qual)
+
+Opção 3: AGUARDAR CORREÇÃO
+- Manter código atual
+- Aguardar backend corrigir bug no fluxo PRE_PAGO
+
+================================================================================
+11. PRÓXIMOS PASSOS
+================================================================================
+
+1. Equipe backend investigar código do fluxo PRE_PAGO
+2. Equipe backend compartilhar logs da requisição falhada
+3. Equipe backend confirmar/corrigir documentação
+4. Após correção, frontend testar novamente
+5. Validar integração completa
+
+================================================================================
+ANEXOS
+================================================================================
+
+LOGS COMPLETOS DO FRONTEND:
+Ver console do navegador com filtro "[ModalNovoPedido]"
+
+PAYLOAD EXATO ENVIADO:
+Ver Network tab, request POST /api/pedidos
+
+TOKEN JWT USADO:
+sub: "+244999999999"
+roles: "ROLE_ADMIN"
+exp: "23/02/2026, 02:42:41"
+
+AMBIENTE:
+- Frontend: http://localhost:5173
+- Backend: http://localhost:8080
+- Data/Hora: 2026-02-22 02:45:19
+
+================================================================================
+FIM DO RELATÓRIO
+================================================================================
+
+Aguardamos retorno da equipe backend com análise e correção.
+
+Atenciosamente,
+Equipe Frontend - Painel Administrativo

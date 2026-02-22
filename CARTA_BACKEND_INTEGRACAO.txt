@@ -1,0 +1,857 @@
+================================================================================
+CARTA PARA EQUIPE BACKEND - ALINHAMENTO DE INTEGRAÇÃO
+================================================================================
+
+Data: 22 de fevereiro de 2026
+De: Equipe Frontend (Painel Administrativo)
+Para: Equipe Backend (API Spring Boot)
+Assunto: Questões Estratégicas para Conclusão da Integração
+
+Prezados colegas do Backend,
+
+Após análise do projeto e dos erros encontrados durante a integração, 
+identificamos pontos críticos que precisam de alinhamento antes de prosseguirmos.
+
+Esta carta contém perguntas estratégicas organizadas por módulo. Pedimos que 
+respondam com o máximo de detalhes possível para garantirmos uma integração 
+sólida e sem surpresas em produção.
+
+================================================================================
+1. MÓDULO DE PEDIDOS - CRIAÇÃO E VALIDAÇÃO
+================================================================================
+
+1.1 ESTRUTURA DE PAYLOAD
+
+CONTEXTO:
+Ao criar pedido com tipoPagamento "PRE_PAGO", recebemos erro:
+"Valor de débito deve ser maior que zero" (HTTP 400)
+
+PERGUNTAS:
+
+a) Qual a estrutura EXATA esperada no payload de criação de pedido?
+   Especialmente:
+   - Os itens devem incluir preço (valorUnitario)?
+   - Ou o backend busca o preço atual do produto no banco?
+   - Deve enviar valorTotal calculado pelo frontend?
+   - Ou o backend calcula automaticamente?
+
+b) Para pedidos PRE_PAGO, existe algum campo adicional obrigatório além de:
+   - unidadeConsumoId
+   - tipoPagamento
+   - itens (array com produtoId e quantidade)
+
+c) O campo "valorDebito" deve ser enviado pelo frontend ou é calculado 
+   pelo backend?
+
+d) Existe validação de preço mínimo por pedido? Qual o valor?
+
+
+1.2 VERSIONAMENTO E CONCORRÊNCIA
+
+CONTEXTO:
+Implementamos sistema de concorrência otimista no frontend com versionamento.
+
+PERGUNTAS:
+
+a) A entidade Pedido possui campo "version" para controle de concorrência 
+   otimista (@Version do JPA)?
+
+b) Ao atualizar pedido (adicionar/remover item), devemos enviar:
+   - Header "If-Match" com ETag?
+   - Campo "version" no body?
+   - Ambos?
+
+c) Em caso de conflito (versão desatualizada), qual o status HTTP retornado?
+   - 409 Conflict?
+   - 412 Precondition Failed?
+
+d) O response de conflito inclui:
+   - Versão atual do servidor?
+   - Estado completo do pedido atualizado?
+
+
+1.3 CICLO DE VIDA DO PEDIDO
+
+PERGUNTAS:
+
+a) Quais são TODOS os status possíveis de um pedido, na ordem correta?
+   (Ex: CRIADO → EM_ANDAMENTO → PRONTO → FINALIZADO)
+
+b) Quais transições de status são permitidas?
+   (Ex: pode voltar de PRONTO para EM_ANDAMENTO?)
+
+c) Quais status permitem adicionar/remover itens?
+
+d) Após criar pedido, ele já vai para EM_ANDAMENTO automaticamente ou fica 
+   em CRIADO aguardando ação?
+
+e) O que significa exatamente cada status?
+   - CRIADO: pedido salvo mas não enviado para cozinha?
+   - EM_ANDAMENTO: enviado para cozinha?
+   - PRONTO: todos os subpedidos prontos?
+   - FINALIZADO: cliente já pagou e saiu?
+
+
+1.4 SUBPEDIDOS E COZINHAS
+
+CONTEXTO:
+Entendemos que o backend cria subpedidos automaticamente por TipoPreparo.
+
+PERGUNTAS:
+
+a) O frontend precisa se preocupar com subpedidos ao criar pedido?
+   Ou é totalmente transparente?
+
+b) Os subpedidos têm status independentes?
+   (Ex: subpedido da cozinha pode estar PRONTO enquanto bar está EM_ANDAMENTO)
+
+c) O pedido principal só fica PRONTO quando TODOS os subpedidos estiverem prontos?
+
+d) É possível cancelar um item específico após pedido criado?
+   Isso cancela apenas um itemPedido ou todo o subpedido?
+
+e) Quantos tipos de preparo existem? Quais são?
+   (Ex: COZINHA_QUENTE, COZINHA_FRIA, BAR, CAFETERIA, etc.)
+
+
+================================================================================
+2. MÓDULO DE FUNDO DE CONSUMO - PRÉ-PAGO
+================================================================================
+
+2.1 MIGRAÇÃO FUNDO_CONSUMO → PRE_PAGO
+
+CONTEXTO:
+Vocês reportaram que FUNDO_CONSUMO não existe mais, foi substituído por 
+PRE_PAGO e POS_PAGO.
+
+PERGUNTAS:
+
+a) A migração está 100% concluída no backend?
+   - Rotas antigas ainda aceitam FUNDO_CONSUMO?
+   - Ou retornam erro se receberem?
+
+b) Registros antigos no banco foram migrados?
+   - Pedidos históricos com tipoPagamento=FUNDO_CONSUMO ainda existem?
+   - Ou foram convertidos para PRE_PAGO?
+
+c) Logs e auditoria foram atualizados para refletir a nova nomenclatura?
+
+
+2.2 FLUXO PRÉ-PAGO
+
+PERGUNTAS:
+
+a) Ao criar pedido com tipoPagamento "PRE_PAGO":
+   - O débito do fundo acontece IMEDIATAMENTE?
+   - Ou só quando pedido for para status FINALIZADO?
+   - Ou em outro momento?
+
+b) Se débito é imediato, e o cliente cancelar o pedido:
+   - O valor é estornado automaticamente?
+   - Ou precisa de ação manual?
+   - Quanto tempo leva o estorno?
+
+c) Se saldo do fundo ficar insuficiente DEPOIS que pedido foi criado 
+   (por exemplo, outro operador criou pedido simultâneo):
+   - O que acontece?
+   - Pedido é cancelado automaticamente?
+   - Cliente fica devendo?
+
+d) É possível criar pedido PRE_PAGO se cliente não tiver fundo associado?
+   - Ou devemos validar no frontend antes de enviar?
+   - Qual mensagem de erro o backend retorna neste caso?
+
+
+2.3 RELACIONAMENTO PEDIDO ↔ FUNDO
+
+PERGUNTAS:
+
+a) O pedido armazena referência ao fundoConsumoId?
+   - Se sim, esse campo é obrigatório para PRE_PAGO?
+   - É preenchido automaticamente pelo backend via cliente da unidade?
+   - Ou frontend deve enviar?
+
+b) Se cliente tiver múltiplos fundos (ativo + encerrados):
+   - Como backend escolhe qual fundo debitar?
+   - Sempre o mais recente?
+   - O único ativo?
+
+c) O response do pedido criado inclui:
+   - Saldo ANTERIOR do fundo?
+   - Saldo ATUAL após débito?
+   - ID da transação de débito criada?
+
+
+2.4 TRANSAÇÕES E AUDITORIA
+
+PERGUNTAS:
+
+a) Cada débito de pedido cria uma TransacaoFundo?
+   - Com tipo DEBITO?
+   - Com referência ao pedidoId?
+
+b) Se pedido for cancelado:
+   - É criada TransacaoFundo tipo ESTORNO?
+   - O campo "observacao" da transação indica motivo do cancelamento?
+
+c) É possível consultar todas as transações de um fundo via API?
+   - Qual o endpoint?
+   - Tem paginação?
+
+d) Histórico de transações inclui:
+   - Nome do operador que criou o pedido?
+   - Data/hora exata?
+   - IP de origem?
+
+
+================================================================================
+3. MÓDULO DE PÓS-PAGO - CRÉDITO
+================================================================================
+
+3.1 CONTROLE GLOBAL
+
+CONTEXTO:
+Lemos na documentação sobre "interruptor global" de pós-pago.
+
+PERGUNTAS:
+
+a) O endpoint GET /api/configuracao-financeira está funcional?
+   - Retorna se pós-pago está ativo/desativo?
+
+b) Quando pós-pago está DESATIVADO globalmente:
+   - Todos os endpoints de criação de pedido POS_PAGO retornam 403?
+   - Ou apenas validação interna?
+
+c) O frontend deve:
+   - Consultar status antes de mostrar opção PÓS-PAGO na UI?
+   - Ou tentar criar e tratar erro 403?
+   - Com que frequência re-consultar? (polling? websocket?)
+
+
+3.2 LIMITES E VALIDAÇÕES
+
+PERGUNTAS:
+
+a) Existe limite de valor total em pedidos POS_PAGO não pagos por unidade?
+   - Qual o valor padrão?
+   - É configurável por estabelecimento?
+   - Ou por unidade de consumo?
+
+b) Ao atingir o limite:
+   - Qual mensagem de erro retorna?
+   - Inclui quanto falta para liberar (saldo disponível)?
+
+c) O limite é calculado:
+   - Por UNIDADE DE CONSUMO (mesa/quarto)?
+   - Por CLIENTE (se tiver cadastro)?
+   - Por ESTABELECIMENTO?
+
+d) Pedidos POS_PAGO pagos ainda contam no limite?
+   - Ou só os pendentes?
+
+
+3.3 PERMISSÕES
+
+PERGUNTAS:
+
+a) Apenas GERENTE e ADMIN podem criar pedidos POS_PAGO?
+   - ATENDENTE nunca pode?
+   - Mesmo que pós-pago esteja ativo?
+
+b) Se ATENDENTE tentar criar pedido POS_PAGO:
+   - Qual status HTTP? (403 Forbidden?)
+   - Qual mensagem exata retorna?
+
+c) Para DESATIVAR pós-pago globalmente:
+   - Apenas ADMIN pode?
+   - Ou GERENTE também?
+
+
+================================================================================
+4. MÓDULO DE PAGAMENTOS - FECHAMENTO DE CONTA
+================================================================================
+
+4.1 FLUXO DE FECHAMENTO
+
+PERGUNTAS:
+
+a) Para fechar pedido (finalizar conta), qual endpoint usar?
+   - PUT /api/pedidos/{id}/fechar ?
+   - POST /api/pagamentos ?
+   - Outro?
+
+b) O fechamento de pedido PRE_PAGO:
+   - Precisa enviar formaPagamento novamente?
+   - Ou já foi definido na criação?
+
+c) Para pedidos POS_PAGO:
+   - O fechamento DEVE incluir formaPagamento (DINHEIRO, CARTAO, PIX)?
+   - É neste momento que ocorre o débito/registro do pagamento?
+
+d) Após fechamento:
+   - Status do pedido vai para FINALIZADO?
+   - Ou PAGO?
+   - Ou outro?
+
+
+4.2 MÚLTIPLAS FORMAS DE PAGAMENTO
+
+PERGUNTAS:
+
+a) É possível pagar um pedido com múltiplas formas de pagamento?
+   Exemplo: R$ 50 em DINHEIRO + R$ 50 em CARTAO?
+
+b) Se sim:
+   - Como enviar no payload? Array de pagamentos?
+   - Existe validação de soma = valorTotal?
+
+c) Se não:
+   - Cliente escolhe UMA forma apenas?
+   - Pedido dividido entre clientes precisa criar pedidos separados?
+
+
+4.3 COMPROVANTE
+
+PERGUNTAS:
+
+a) Ao fechar pedido, o response inclui:
+   - Dados para gerar comprovante?
+   - Número de comprovante/recibo?
+   - PDF em base64?
+   - URL para download?
+
+b) Comprovante inclui:
+   - Discriminação de todos os itens?
+   - Valores unitários e subtotais?
+   - Formas de pagamento utilizadas?
+   - Saldo restante do fundo (se PRE_PAGO)?
+
+
+================================================================================
+5. MÓDULO DE UNIDADES DE CONSUMO - GESTÃO DE MESAS/QUARTOS
+================================================================================
+
+5.1 RELACIONAMENTO COM PEDIDOS
+
+PERGUNTAS:
+
+a) Uma unidade pode ter múltiplos pedidos ATIVOS simultaneamente?
+   - Ou apenas UM pedido ativo por vez?
+
+b) Se permitir múltiplos:
+   - Como frontend sabe qual pedido "principal" exibir?
+   - Existe conceito de "pedido principal" vs "pedidos adicionais"?
+
+c) Status da unidade muda automaticamente baseado em pedidos?
+   Exemplo:
+   - Criar pedido → unidade fica OCUPADA
+   - Fechar pedido → unidade fica DISPONIVEL
+
+
+5.2 CLIENTE VINCULADO
+
+PERGUNTAS:
+
+a) Ao criar pedido para uma unidade:
+   - Se unidade já tem cliente vinculado, usar automaticamente?
+   - Ou frontend deve especificar clienteId no payload?
+
+b) Para criar pedido PRE_PAGO:
+   - É obrigatório ter cliente vinculado à unidade?
+   - Ou pode criar pedido "avulso" e depois vincular?
+
+c) Se unidade NÃO tem cliente:
+   - Pode criar pedido POS_PAGO? (quem vai pagar depois?)
+   - Ou deve obrigatoriamente vincular cliente primeiro?
+
+
+================================================================================
+6. WEBSOCKET E TEMPO REAL
+================================================================================
+
+6.1 CONEXÃO E TÓPICOS
+
+PERGUNTAS:
+
+a) WebSocket está funcional em produção?
+   - URL de conexão?
+   - Porta diferente da API REST?
+
+b) Para receber atualizações de pedidos:
+   - Qual tópico assinar? /topic/pedidos/{id} ?
+   - Ou /topic/unidade/{unidadeId} ?
+   - Ou ambos?
+
+c) Frontend deve autenticar no WebSocket?
+   - Enviar token JWT no header?
+   - Ou na URL de conexão?
+
+
+6.2 EVENTOS TRANSMITIDOS
+
+PERGUNTAS:
+
+a) Quais eventos são enviados via WebSocket?
+   - PEDIDO_CRIADO?
+   - PEDIDO_ATUALIZADO?
+   - ITEM_ADICIONADO?
+   - STATUS_ALTERADO?
+   - PEDIDO_PRONTO?
+   - PEDIDO_FINALIZADO?
+
+b) Estrutura do payload do evento:
+   - Inclui pedido completo atualizado?
+   - Ou apenas campos que mudaram (delta)?
+   - Inclui versão (para merge)?
+
+c) Se múltiplos frontends conectados:
+   - Todos recebem TODAS as atualizações?
+   - Ou filtrado por unidade de atendimento do usuário?
+
+
+6.3 RECONEXÃO E SINCRONIZAÇÃO
+
+PERGUNTAS:
+
+a) Se frontend perder conexão WebSocket:
+   - Existe endpoint para buscar "delta" de mudanças desde timestamp?
+   - Ou deve recarregar tudo?
+
+b) Ao reconectar:
+   - WebSocket reenvia eventos perdidos?
+   - Ou frontend responsável por sincronizar via REST?
+
+
+================================================================================
+7. AUTENTICAÇÃO E AUTORIZAÇÃO
+================================================================================
+
+7.1 TOKEN JWT
+
+PERGUNTAS:
+
+a) Token JWT inclui no payload:
+   - unidadeAtendimentoId do usuário?
+   - Se sim, com qual nome de campo?
+
+b) Backend valida que operador só acessa pedidos da sua unidade?
+   - Ou qualquer GERENTE pode ver todas as unidades?
+   - ADMIN pode ver tudo?
+
+c) Token expira em quanto tempo?
+   - 1 hora?
+   - 8 horas?
+   - 24 horas?
+
+d) Existe refresh token?
+   - Ou frontend deve fazer novo login?
+
+
+7.2 PERMISSÕES POR OPERAÇÃO
+
+PERGUNTAS:
+
+Para cada operação abaixo, quais roles podem executar?
+
+a) Criar pedido PRE_PAGO:
+   ADMIN? GERENTE? ATENDENTE? COZINHA?
+
+b) Criar pedido POS_PAGO:
+   ADMIN? GERENTE? ATENDENTE? COZINHA?
+
+c) Adicionar item a pedido existente:
+   ADMIN? GERENTE? ATENDENTE? COZINHA?
+
+d) Remover item de pedido:
+   ADMIN? GERENTE? ATENDENTE? COZINHA?
+
+e) Cancelar pedido:
+   ADMIN? GERENTE? ATENDENTE? COZINHA?
+
+f) Fechar pedido (finalizar conta):
+   ADMIN? GERENTE? ATENDENTE? COZINHA?
+
+g) Alterar status do pedido manualmente:
+   ADMIN? GERENTE? ATENDENTE? COZINHA?
+
+h) Ver pedidos de outras unidades:
+   ADMIN? GERENTE? ATENDENTE? COZINHA?
+
+
+================================================================================
+8. VALIDAÇÕES E REGRAS DE NEGÓCIO
+================================================================================
+
+8.1 VALIDAÇÕES DE CRIAÇÃO
+
+PERGUNTAS:
+
+a) Existe valor MÍNIMO para criar pedido?
+   - Se sim, qual?
+   - Validado no backend ou frontend deve validar antes?
+
+b) Existe limite MÁXIMO de itens por pedido?
+   - Quantos?
+
+c) Existe limite de QUANTIDADE por item?
+   - Ex: máximo 100 unidades de um produto?
+
+d) Produtos INATIVOS podem ser adicionados?
+   - Backend valida?
+   - Qual erro retorna?
+
+
+8.2 OBSERVAÇÕES E CUSTOMIZAÇÕES
+
+PERGUNTAS:
+
+a) Campo "observacoes" do item pedido:
+   - Tem limite de caracteres?
+   - Aceita caracteres especiais? Emojis?
+
+b) Campo "observacoes" do pedido (geral):
+   - Também tem limite?
+
+c) Essas observações são:
+   - Exibidas para cozinha?
+   - Impressas em comandas?
+
+
+8.3 PRODUTOS E ESTOQUE
+
+PERGUNTAS:
+
+a) Ao criar pedido, backend valida estoque?
+   - Se produto sem estoque, bloqueia criação?
+   - Ou apenas avisa mas permite?
+
+b) Se produto tiver variações (tamanho, sabor):
+   - Como enviar no payload?
+   - Campo "variacaoId"?
+   - Ou concatena no nome?
+
+
+================================================================================
+9. ERROS E TRATAMENTO DE EXCEÇÕES
+================================================================================
+
+9.1 ESTRUTURA DE ERRO
+
+PERGUNTAS:
+
+a) Todos os erros seguem mesmo padrão de response?
+   Exemplo:
+   {
+     "timestamp": "...",
+     "status": 400,
+     "error": "...",
+     "message": "...",
+     "path": "..."
+   }
+
+b) Existe campo "code" para identificar tipo de erro?
+   Exemplo: "SALDO_INSUFICIENTE", "LIMITE_EXCEDIDO", etc?
+
+c) Erros de validação incluem:
+   - Lista de campos com erro?
+   - Mensagens específicas por campo?
+
+
+9.2 ERROS COMUNS
+
+PERGUNTAS:
+
+Para cada erro abaixo, qual status HTTP e mensagem exata?
+
+a) Saldo insuficiente no fundo:
+   Status? Mensagem?
+
+b) Pós-pago desativado:
+   Status? Mensagem?
+
+c) Limite pós-pago excedido:
+   Status? Mensagem?
+
+d) Unidade não encontrada:
+   Status? Mensagem?
+
+e) Produto não encontrado:
+   Status? Mensagem?
+
+f) Pedido já finalizado (tentando editar):
+   Status? Mensagem?
+
+g) Usuário sem permissão:
+   Status? Mensagem?
+
+h) Conflito de versão (concorrência):
+   Status? Mensagem?
+
+
+================================================================================
+10. PERFORMANCE E OTIMIZAÇÃO
+================================================================================
+
+10.1 PAGINAÇÃO
+
+PERGUNTAS:
+
+a) Endpoints de listagem têm paginação?
+   - Padrão Spring (page, size, sort)?
+   - Qual o tamanho padrão de página?
+
+b) Response de lista paginada segue estrutura Spring?
+   {
+     "content": [...],
+     "pageable": {...},
+     "totalElements": 100,
+     "totalPages": 10
+   }
+
+
+10.2 FILTROS E BUSCA
+
+PERGUNTAS:
+
+a) Endpoint de listagem de pedidos aceita filtros?
+   - Por status?
+   - Por data?
+   - Por unidade?
+   - Por cliente?
+
+b) Sintaxe dos filtros:
+   - Query params? Ex: ?status=CRIADO&dataInicio=2026-02-01
+   - Request body com objeto de filtro?
+
+
+10.3 CACHE E ETAG
+
+PERGUNTAS:
+
+a) Respostas incluem header ETag?
+   - Para qual tipo de recurso? (pedidos? produtos?)
+
+b) Backend suporta requisição condicional?
+   - Header "If-None-Match" retorna 304 se não modificado?
+
+c) Existe header "Last-Modified"?
+   - Se sim, aceita "If-Modified-Since"?
+
+
+================================================================================
+11. AMBIENTE E DEPLOYMENT
+================================================================================
+
+11.1 AMBIENTES
+
+PERGUNTAS:
+
+a) Quantos ambientes existem?
+   - DEV, STAGING, PROD?
+   - URLs de cada?
+
+b) Qual ambiente estamos usando para integração atual?
+
+c) Dados de teste:
+   - Podemos criar pedidos de teste sem afetar produção?
+   - Existe flag/header para marcar request como teste?
+
+
+11.2 DOCUMENTAÇÃO
+
+PERGUNTAS:
+
+a) Existe Swagger/OpenAPI atualizado?
+   - URL?
+   - Inclui todos os endpoints recentes?
+
+b) Existe Postman Collection?
+   - Podemos ter acesso?
+
+c) Existe documentação de erros?
+   - Com todos os códigos e mensagens possíveis?
+
+
+11.3 MONITORAMENTO
+
+PERGUNTAS:
+
+a) Backend loga todas as requisições?
+   - Incluindo payload?
+   - Podemos consultar logs em caso de erro?
+
+b) Existe dashboard de monitoramento?
+   - Grafana? Kibana?
+   - Podemos ter acesso read-only?
+
+
+================================================================================
+12. CASOS DE USO ESPECÍFICOS - CENÁRIOS REAIS
+================================================================================
+
+12.1 CENÁRIO: MESA COM MÚLTIPLOS CLIENTES
+
+SITUAÇÃO:
+Mesa com 4 pessoas, cada um quer pagar sua parte separadamente.
+
+PERGUNTAS:
+
+a) Como proceder?
+   - Criar 4 pedidos separados (um por cliente)?
+   - Criar 1 pedido e depois dividir?
+   - Backend tem funcionalidade de "split bill"?
+
+b) Se criar pedidos separados:
+   - Todos vinculados à mesma unidade (mesa)?
+   - Como identificar que são da mesma "conta"?
+
+
+12.2 CENÁRIO: CLIENTE MUDA DE MESA
+
+SITUAÇÃO:
+Cliente estava na Mesa 5, pedido ativo, quer mudar para Mesa 10.
+
+PERGUNTAS:
+
+a) Como transferir pedido?
+   - Existe endpoint específico?
+   - Ou cria novo pedido e cancela antigo?
+
+b) Se pedido for PRE_PAGO:
+   - Débito já foi feito, como fica?
+
+c) Histórico mantém que pedido "migrou" de mesa?
+
+
+12.3 CENÁRIO: ERRO NO PEDIDO
+
+SITUAÇÃO:
+Cliente pediu Coca-Cola mas atendente registrou Pepsi por engano.
+
+PERGUNTAS:
+
+a) Como corrigir?
+   - Remover item errado e adicionar correto?
+   - Existe endpoint de "substituir item"?
+
+b) Se pedido já foi para cozinha (EM_ANDAMENTO):
+   - Ainda pode editar?
+   - Ou precisa cancelar pedido inteiro?
+
+c) Auditoria registra alterações?
+   - Quem alterou, quando, o que mudou?
+
+
+12.4 CENÁRIO: CLIENTE SEM SALDO SUFICIENTE
+
+SITUAÇÃO:
+Cliente com R$ 30 no fundo quer criar pedido de R$ 50.
+
+PERGUNTAS:
+
+a) O que fazer?
+   - Frontend bloqueia criação (validação prévia)?
+   - Backend retorna erro amigável?
+   - Sugestão de recarregar fundo?
+
+b) Cliente pode:
+   - Criar pedido POS_PAGO em vez de PRE_PAGO?
+   - Usar PRE_PAGO para R$ 30 + outra forma para R$ 20?
+
+c) Existe "modo misto" (parte fundo, parte pós-pago)?
+
+
+12.5 CENÁRIO: PRODUTO ESGOTADO
+
+SITUAÇÃO:
+Cliente pede produto que acabou o estoque APÓS pedido ter sido criado.
+
+PERGUNTAS:
+
+a) Cozinha/Bar pode marcar item como "não disponível"?
+   - Via API?
+   - Qual status HTTP?
+
+b) O que acontece com o pedido?
+   - Item é removido automaticamente?
+   - Fica com status "CANCELADO_ITEM"?
+   - Valor é ajustado?
+
+c) Se foi PRE_PAGO:
+   - Valor é estornado automaticamente?
+   - Cliente escolhe outro produto do mesmo valor?
+
+
+================================================================================
+CONSIDERAÇÕES FINAIS
+================================================================================
+
+Estimados colegas,
+
+Estas perguntas são fruto de análise cuidadosa do código frontend atual e dos 
+erros encontrados durante testes de integração. Não são questionamentos sobre 
+competência técnica, mas necessidades reais para entregarmos um produto 
+funcional e robusto.
+
+Entendemos que o backend é complexo e tem muitas regras de negócio. Por isso, 
+precisamos deste alinhamento detalhado para evitar:
+
+- ❌ Retrabalho por falta de documentação
+- ❌ Bugs em produção por assumpções incorretas  
+- ❌ Experiência ruim do usuário por erros não tratados
+- ❌ Inconsistências entre frontend e backend
+
+URGÊNCIA DAS RESPOSTAS:
+
+CRÍTICO (precisamos IMEDIATAMENTE):
+- Seção 1: Módulo de Pedidos - Criação e Validação
+- Seção 2: Módulo de Fundo de Consumo - Pré-Pago
+- Seção 9: Erros e Tratamento de Exceções (estrutura e mensagens)
+
+IMPORTANTE (precisamos esta semana):
+- Seção 3: Módulo de Pós-Pago
+- Seção 4: Módulo de Pagamentos  
+- Seção 7: Autenticação e Autorização (permissões)
+
+DESEJÁVEL (pode ser depois):
+- Demais seções para otimização e casos avançados
+
+FORMATO DE RESPOSTA:
+
+Pedimos que respondam preferencialmente em formato estruturado, copiando 
+cada pergunta seguida da resposta. Isso facilitará nosso trabalho de 
+documentação e implementação.
+
+Se alguma funcionalidade ainda não está implementada, por favor indiquem 
+claramente para não perdermos tempo tentando integrar algo inexistente.
+
+Se alguma pergunta não fizer sentido ou houver mal-entendido sobre 
+arquitetura, por favor nos avisem para realinharmos conceitos.
+
+DISPONIBILIDADE PARA REUNIÃO:
+
+Estamos disponíveis para reunião de alinhamento se preferirem responder 
+verbalmente e documentarmos juntos. Podemos gravar para referência futura.
+
+Sugestão de agenda:
+- Parte 1: Pedidos e Fundos (1h)
+- Parte 2: Pagamentos e Autenticação (1h)  
+- Parte 3: Casos de Uso e Dúvidas (30min)
+
+CONTATO:
+
+Para dúvidas sobre esta carta ou discussões preliminares, podem nos 
+encontrar em:
+- Slack: #frontend-backend-integration
+- Email: frontend-team@arenaticket.ao
+- Daily: Segunda, Quarta e Sexta às 10h
+
+Obrigado pela colaboração e paciência!
+
+Atenciosamente,
+Equipe Frontend - Painel Administrativo
+ArenaTicket Ecosystem
+
+================================================================================
+FIM DA CARTA
+================================================================================

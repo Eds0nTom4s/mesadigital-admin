@@ -1,8 +1,10 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useNotificationStore } from '@/store/notifications'
 import SaldoBadge from '@/components/shared/SaldoBadge.vue'
 import TransacaoTable from '@/components/shared/TransacaoTable.vue'
+import ModalRecarregarFundo from '@/components/fundos/ModalRecarregarFundo.vue'
 import { useCurrency } from '@/utils/currency'
 import fundoConsumoService from '@/services/fundoConsumoService'
 
@@ -19,6 +21,7 @@ import fundoConsumoService from '@/services/fundoConsumoService'
 
 const route = useRoute()
 const router = useRouter()
+const notificationStore = useNotificationStore()
 const { formatCurrency } = useCurrency()
 
 const fundo = ref(null)
@@ -26,6 +29,7 @@ const transacoes = ref([])
 const valorMinimo = ref(5000)
 const loading = ref(true)
 const error = ref(null)
+const modalRecarregarAberto = ref(false)
 
 // Carrega dados via API
 onMounted(async () => {
@@ -104,6 +108,34 @@ const voltar = () => {
   window.history.back()
 }
 
+// Abrir modal de recarga
+const abrirModalRecarregar = () => {
+  modalRecarregarAberto.value = true
+}
+
+// Fechar modal de recarga
+const fecharModalRecarregar = () => {
+  modalRecarregarAberto.value = false
+}
+
+// Recarga realizada com sucesso
+const recargaRealizada = async () => {
+  fecharModalRecarregar()
+  notificationStore.sucesso('Fundo recarregado com sucesso!')
+  
+  // Recarregar dados
+  try {
+    const fundoId = parseInt(route.params.id)
+    const fundoResp = await fundoConsumoService.buscarFundoPorCliente(fundoId)
+    fundo.value = fundoResp.data
+    
+    const transacoesResp = await fundoConsumoService.listarTransacoes(fundoId)
+    transacoes.value = transacoesResp.data
+  } catch (err) {
+    console.error('Erro ao recarregar dados:', err)
+  }
+}
+
 // Ações mockadas
 const encerrarFundo = () => {
   alert('Funcionalidade de encerramento será implementada com integração backend')
@@ -138,6 +170,16 @@ const exportarExtrato = () => {
           </div>
         </div>
         <div class="flex items-center space-x-3">
+          <button 
+            v-if="fundo.status === 'ATIVO'"
+            @click="abrirModalRecarregar" 
+            class="btn-success font-semibold shadow-lg"
+          >
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            Recarregar Fundo
+          </button>
           <button @click="exportarExtrato" class="btn-secondary">
             <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -254,5 +296,13 @@ const exportarExtrato = () => {
       <p class="text-text-secondary mb-4">O fundo solicitado não existe ou foi removido.</p>
       <button @click="voltar" class="btn-primary">Voltar</button>
     </div>
+
+    <!-- Modal: Recarregar Fundo -->
+    <ModalRecarregarFundo
+      :is-open="modalRecarregarAberto"
+      :fundo="fundo"
+      @close="fecharModalRecarregar"
+      @recarga-realizada="recargaRealizada"
+    />
   </div>
 </template>

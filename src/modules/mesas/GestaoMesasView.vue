@@ -234,11 +234,20 @@
       @recarregar="recarregarFundo"
       @atualizar-qr-code="atualizarQrCode"
     />
+
+    <!-- Modal: Novo Pedido -->
+    <ModalNovoPedido
+      :is-open="modalNovoPedidoAberto"
+      :unidade-consumo="unidadeParaPedido"
+      @close="fecharModalNovoPedido"
+      @pedido-criado="pedidoCriado"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
 import unidadesConsumoService from '@/services/unidadesConsumoService'
@@ -246,7 +255,9 @@ import fundoConsumoService from '@/services/fundoConsumoService'
 import qrcodeService from '@/services/qrcodeService'
 import CardMesa from '@/components/shared/CardMesa.vue'
 import ModalDetalhesMesa from '@/components/mesas/ModalDetalhesMesa.vue'
+import ModalNovoPedido from '@/components/pedidos/ModalNovoPedido.vue'
 
+const router = useRouter()
 const authStore = useAuthStore()
 const notificationStore = useNotificationStore()
 
@@ -274,6 +285,10 @@ const modalDetalhesAberto = ref(false)
 const mesaSelecionada = ref(null)
 const fundoSelecionado = ref(null)
 const qrCodeSelecionado = ref(null)
+
+// Modal Novo Pedido
+const modalNovoPedidoAberto = ref(false)
+const unidadeParaPedido = ref(null)
 
 // Estatísticas
 const estatisticas = computed(() => {
@@ -465,8 +480,28 @@ const fecharMesa = async (mesa) => {
 
 // Novo pedido
 const novoPedido = (mesa) => {
-  notificationStore.info('Funcionalidade de novo pedido em desenvolvimento')
-  // TODO: Redirecionar para página de pedidos com mesa pre-selecionada
+  unidadeParaPedido.value = {
+    id: mesa.id,
+    referencia: mesa.referencia,
+    tipo: mesa.tipo,
+    cliente: mesa.cliente,
+    fundoConsumo: fundoSelecionado.value
+  }
+  modalNovoPedidoAberto.value = true
+}
+
+// Fechar modal de novo pedido
+const fecharModalNovoPedido = () => {
+  modalNovoPedidoAberto.value = false
+  unidadeParaPedido.value = null
+}
+
+// Pedido criado com sucesso
+const pedidoCriado = async () => {
+  fecharModalNovoPedido()
+  fecharDetalhesMesa()
+  await carregarMesas()
+  notificationStore.sucesso('Pedido criado com sucesso!')
 }
 
 // Imprimir conta
@@ -477,8 +512,13 @@ const imprimirConta = (mesa) => {
 
 // Recarregar fundo
 const recarregarFundo = (fundo) => {
-  notificationStore.info('Funcionalidade de recarga em desenvolvimento')
-  // TODO: Abrir modal de recarga
+  if (!fundo || !fundo.id) {
+    notificationStore.erro('Fundo não encontrado')
+    return
+  }
+  
+  // Redirecionar para página de detalhes do fundo
+  router.push({ name: 'fundo-detalhe', params: { id: fundo.id } })
 }
 
 // Atualizar QR Code

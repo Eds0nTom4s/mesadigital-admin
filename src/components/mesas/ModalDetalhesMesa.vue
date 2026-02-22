@@ -11,23 +11,49 @@
           @click.stop
         >
           <!-- Header -->
-          <div class="sticky top-0 bg-white border-b border-border p-6 flex items-center justify-between z-10">
-            <div>
-              <h2 class="text-2xl font-bold text-text-primary">
-                {{ mesa.referencia }}
-              </h2>
-              <p class="text-sm text-text-secondary mt-1">
-                {{ tipoLabel }} • {{ statusLabel }}
-              </p>
+          <div class="sticky top-0 bg-white border-b border-border p-6 z-10">
+            <div class="flex items-start justify-between mb-4">
+              <div>
+                <h2 class="text-2xl font-bold text-text-primary">
+                  {{ mesa.referencia }}
+                </h2>
+                <p class="text-sm text-text-secondary mt-1">
+                  {{ tipoLabel }} • {{ statusLabel }}
+                </p>
+              </div>
+              <button
+                @click="$emit('close')"
+                class="text-text-secondary hover:text-text-primary transition-colors"
+              >
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
             </div>
-            <button
-              @click="$emit('close')"
-              class="text-text-secondary hover:text-text-primary transition-colors"
-            >
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-              </svg>
-            </button>
+            
+            <!-- Botões de ação principais -->
+            <div class="flex gap-2">
+              <button 
+                @click="$emit('novoPedido', mesa)" 
+                class="btn-primary flex-1 font-semibold shadow-lg hover:shadow-xl"
+              >
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                Novo Pedido
+              </button>
+              
+              <button 
+                v-if="fundo"
+                @click="$emit('recarregar', fundo)" 
+                class="btn-success flex-1 font-semibold shadow-lg hover:shadow-xl"
+              >
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/>
+                </svg>
+                Recarregar Fundo
+              </button>
+            </div>
           </div>
 
           <!-- Body -->
@@ -57,34 +83,26 @@
             </div>
 
             <!-- Fundo de Consumo -->
-            <div v-if="fundo" class="card">
-              <div class="flex items-center justify-between mb-4">
-                <h3 class="text-lg font-semibold text-text-primary flex items-center">
-                  <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/>
-                  </svg>
-                  Fundo de Consumo
-                </h3>
-                <button @click="$emit('recarregar', fundo)" class="btn-primary text-sm">
-                  💰 Recarregar
-                </button>
+            <div v-if="fundo" class="card bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200">
+              <h3 class="text-lg font-semibold text-text-primary flex items-center mb-4">
+                <svg class="w-5 h-5 mr-2 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/>
+                </svg>
+                💰 Fundo PRÉ-PAGO
+              </h3>
+              <div class="bg-white rounded-lg p-4 mb-4 shadow-sm">
+                <p class="text-sm text-text-secondary mb-1">Saldo Disponível</p>
+                <p class="text-3xl font-bold text-success">{{ formatCurrency(fundo.saldo || fundo.saldoAtual || 0) }}</p>
+                <p class="text-xs text-success mt-1">✓ Débito automático ativado</p>
               </div>
               <div class="grid grid-cols-2 gap-4">
                 <div>
-                  <p class="text-sm text-text-secondary">Saldo Disponível:</p>
-                  <p class="text-2xl font-bold text-success">{{ formatCurrency(fundo.saldo || fundo.saldoAtual || 0) }}</p>
+                  <p class="text-sm text-text-secondary">Total Recarregado</p>
+                  <p class="text-lg font-semibold text-text-primary">{{ formatCurrency(fundo.totalRecarregado || 0) }}</p>
                 </div>
                 <div>
-                  <p class="text-sm text-text-secondary">Modo:</p>
-                  <p class="font-medium text-success">💰 PRÉ-PAGO (Débito Automático)</p>
-                </div>
-                <div>
-                  <p class="text-sm text-text-secondary">Total Recarregado:</p>
-                  <p class="font-medium text-text-primary">{{ formatCurrency(fundo.totalRecarregado || 0) }}</p>
-                </div>
-                <div>
-                  <p class="text-sm text-text-secondary">Total Consumido:</p>
-                  <p class="font-medium text-text-primary">{{ formatCurrency(fundo.totalConsumido || 0) }}</p>
+                  <p class="text-sm text-text-secondary">Total Consumido</p>
+                  <p class="text-lg font-semibold text-text-primary">{{ formatCurrency(fundo.totalConsumido || 0) }}</p>
                 </div>
               </div>
             </div>
@@ -192,28 +210,23 @@
 
           <!-- Footer -->
           <div class="sticky bottom-0 bg-white border-t border-border p-6 flex items-center justify-between">
-            <div class="flex space-x-3">
-              <button @click="$emit('novoPedido', mesa)" class="btn-primary">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                </svg>
-                Novo Pedido
-              </button>
-              <button @click="$emit('imprimirConta', mesa)" class="btn-secondary">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
-                </svg>
-                Imprimir Conta
-              </button>
-            </div>
-            <div class="flex space-x-3">
+            <button 
+              @click="$emit('imprimirConta', mesa)" 
+              class="btn-secondary"
+            >
+              <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+              </svg>
+              Imprimir Conta
+            </button>
+            <div class="flex gap-3">
               <button @click="$emit('close')" class="btn-secondary">
                 Fechar
               </button>
               <button
                 v-if="podeFecharMesa"
                 @click="confirmarFecharMesa"
-                class="px-4 py-2 bg-error text-white rounded-lg hover:opacity-90 transition-opacity"
+                class="px-6 py-2 bg-error text-white rounded-lg hover:opacity-90 transition-opacity font-semibold shadow-lg"
               >
                 Fechar Mesa
               </button>
