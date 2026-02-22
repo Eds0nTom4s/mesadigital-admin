@@ -234,6 +234,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useCurrency } from '@/utils/currency'
 import api from '@/services/api'
 import pedidosBalcaoService from '@/services/pedidosBalcaoService'
@@ -255,6 +256,7 @@ const emit = defineEmits(['fechar', 'pedido-criado', 'criar-fundo', 'recarregar-
 const { formatCurrency } = useCurrency()
 const notificationStore = useNotificationStore()
 const authStore = useAuthStore()
+const router = useRouter()
 
 const buscaProduto = ref('')
 const carrinho = ref([])
@@ -475,7 +477,14 @@ const abrirModalCriarFundo = () => {
 }
 
 const abrirModalRecarregar = () => {
-  emit('recarregar-fundo', fundoConsumo.value)
+  // Redirecionar para a página de detalhes do fundo ao invés de abrir modal
+  if (fundoConsumo.value?.id) {
+    console.log('[ModalNovoPedido] Redirecionando para detalhes do fundo:', fundoConsumo.value.id)
+    emit('fechar')
+    router.push({ name: 'FundoDetalhe', params: { id: fundoConsumo.value.id } })
+  } else {
+    notificationStore.erro('Fundo não encontrado')
+  }
 }
 
 const criarPedido = async () => {
