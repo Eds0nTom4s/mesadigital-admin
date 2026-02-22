@@ -117,6 +117,7 @@
     <Teleport to="body">
       <ModalNovoPedido
         v-if="mostrarModalNovoPedido"
+        :isOpen="mostrarModalNovoPedido"
         :unidade="unidadeSelecionada"
         :produtos="produtosDisponiveis"
         @fechar="fecharModalNovoPedido"
@@ -313,15 +314,18 @@ const carregarProdutos = async () => {
 
 const carregarPedidoAtivo = async (unidadeId) => {
   try {
-    console.log('[PedidosBalcao] Carregando pedido ativo da unidade:', unidadeId)
-    const response = await pedidosBalcaoService.getPedidoAtivoUnidade(unidadeId)
-    pedidoAtivo.value = response.data
-    console.log('[PedidosBalcao] Pedido ativo carregado:', pedidoAtivo.value)
+    console.log('[PedidosBalcao] Endpoint /pedidos/unidade-consumo/{id}/ativo não implementado no backend - aguardando')
+    // TODO: Descomentar quando backend implementar GET /pedidos/unidade-consumo/{id}/ativo
+    // const response = await pedidosBalcaoService.getPedidoAtivoUnidade(unidadeId)
+    // pedidoAtivo.value = response.data
+    // console.log('[PedidosBalcao] Pedido ativo carregado:', pedidoAtivo.value)
     
-    // Inscrever no WebSocket do pedido
-    if (pedidoAtivo.value?.id) {
-      cleanupPedidoWS = inscreverPedido(pedidoAtivo.value.id)
-    }
+    // // Inscrever no WebSocket do pedido
+    // if (pedidoAtivo.value?.id) {
+    //   cleanupPedidoWS = inscreverPedido(pedidoAtivo.value.id)
+    // }
+    
+    pedidoAtivo.value = null
   } catch (error) {
     if (error.response?.status === 404) {
       console.log('[PedidosBalcao] Nenhum pedido ativo encontrado')
