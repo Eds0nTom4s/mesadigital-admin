@@ -433,9 +433,14 @@ const abrirDetalhesMesa = async (mesa) => {
     
     // Depois busca dados completos em background
     try {
-      mesaCompleta = await unidadesConsumoService.getById(mesa.id)
+      const response = await unidadesConsumoService.getById(mesa.id)
+      console.log('[GestaoMesasView] Response getById:', response)
+      
+      // Backend retorna { success: true, message: "Sucesso", data: {...} }
+      // Extrair apenas o data
+      mesaCompleta = response.data || response
       mesaSelecionada.value = mesaCompleta
-      console.log('[GestaoMesasView] Mesa completa:', mesaCompleta)
+      console.log('[GestaoMesasView] Mesa completa (extraída):', mesaCompleta)
     } catch (err) {
       console.warn('[GestaoMesasView] Erro ao buscar detalhes completos, usando dados básicos:', err)
     }
@@ -513,7 +518,9 @@ const novoPedido = async (mesa) => {
       )
       const dadosPromise = unidadesConsumoService.getById(mesa.id)
       
-      mesaParaPedido = await Promise.race([dadosPromise, timeoutPromise])
+      const response = await Promise.race([dadosPromise, timeoutPromise])
+      // Backend retorna envelope { success, message, data }
+      mesaParaPedido = response.data || response
       console.log('[GestaoMesasView] Mesa completa para pedido:', mesaParaPedido)
     } catch (err) {
       console.warn('[GestaoMesasView] Usando dados básicos da mesa (não foi possível buscar completos):', err.message)
