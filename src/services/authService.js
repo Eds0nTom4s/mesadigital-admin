@@ -12,23 +12,26 @@ const USER_KEY = 'auth_user'
 
 /**
  * Faz login com telefone e senha (Admin/Atendente)
- * Endpoint: POST /api/auth/admin/login
- * Conforme INSTRUCOES_AUTENTICACAO_FRONTEND.txt
+ * Endpoint: POST /api/auth/jwt/login (username/password)
+ * Conforme ALINHAMENTO_FRONTEND_BACKEND_RESUMO.md
  * 
- * @param {string} telefone - Telefone do atendente (ex: 999999999)
+ * @param {string} telefone - Telefone do atendente (ex: +244999999999)
  * @param {string} senha - Senha do atendente
  * @returns {Promise<{token: string, expiresIn: number, atendente: object}>}
  */
 export const login = async (telefone, senha) => {
   try {
-    const response = await api.post('/auth/admin/login', {
-      telefone,
-      senha
+    // Backend usa /api/auth/jwt/login com username/password
+    const response = await api.post('/auth/jwt/login', {
+      username: telefone.startsWith('+244') ? telefone : `+244${telefone}`,
+      password: senha
     })
 
-    // Estrutura de resposta conforme documentação:
-    // { success, message, data: { token, tipo, expiresIn, atendente }, timestamp }
-    const { token, expiresIn, atendente } = response.data.data
+    // Estrutura de resposta: ApiResponse<AuthResponse>
+    // { message, data: { token, tipo, expiresIn, usuario }, error }
+    const data = response.data.data || response.data
+    const { token, expiresIn, usuario, atendente } = data
+    const user = usuario || atendente
 
     // Armazena token no sessionStorage (NÃO localStorage por segurança)
     sessionStorage.setItem(TOKEN_KEY, token)
@@ -37,12 +40,12 @@ export const login = async (telefone, senha) => {
     const expirationTime = Date.now() + expiresIn
     sessionStorage.setItem(`${TOKEN_KEY}_expires`, expirationTime)
     
-    // Armazena dados do atendente como JSON string
-    if (atendente) {
-      sessionStorage.setItem(USER_KEY, JSON.stringify(atendente))
+    // Armazena dados do usuário como JSON string
+    if (user) {
+      sessionStorage.setItem(USER_KEY, JSON.stringify(user))
     }
 
-    return { token, expiresIn, atendente }
+    return { token, expiresIn, atendente: user }
   } catch (error) {
     // Trata erro 401 (credenciais inválidas)
     if (error.response?.status === 401) {

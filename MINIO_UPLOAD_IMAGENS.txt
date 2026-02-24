@@ -1,0 +1,532 @@
+===============================================================================
+CONFIGURAÇÃO MINIO PARA UPLOAD DE IMAGENS DOS PRODUTOS
+Sistema de Restauração - Storage S3-Compatible
+===============================================================================
+
+DATA: 23 de Fevereiro de 2026
+OBJETIVO: Armazenar imagens de produtos usando MinIO (simulando AWS S3)
+
+===============================================================================
+1. O QUE É MINIO?
+===============================================================================
+
+MinIO é um servidor de armazenamento de objetos de alto desempenho, 
+100% compatível com a API do Amazon S3.
+
+VANTAGENS:
+✅ Compatível com S3 (fácil migrar para AWS depois)
+✅ Auto-hospedado (controle total dos dados)
+✅ Leve e rápido
+✅ Console web integrado
+✅ Gratuito e open-source
+
+USO NESTE PROJETO:
+- Desenvolvimento: MinIO local (Docker)
+- Produção: Amazon S3 ou MinIO em servidor dedicado
+
+===============================================================================
+2. INSTALAÇÃO E EXECUÇÃO (DOCKER)
+===============================================================================
+
+────────────────────────────────────────────────────────────────────────────
+OPÇÃO 1: EXECUTAR MINIO COM DOCKER (RECOMENDADO)
+────────────────────────────────────────────────────────────────────────────
+
+1. Certifique-se que o Docker está instalado:
+   docker --version
+
+2. Execute o MinIO:
+   docker run -d \
+     -p 9000:9000 \
+     -p 9001:9001 \
+     --name minio \
+     -e MINIO_ROOT_USER=minioadmin \
+     -e MINIO_ROOT_PASSWORD=minioadmin \
+     -v ~/minio-data:/data \
+     minio/minio server /data --console-address ":9001"
+
+3. Verifique se está rodando:
+   docker ps | grep minio
+
+PORTAS:
+- 9000: API (usado pelo backend Java)
+- 9001: Console Web (interface gráfica)
+
+CREDENCIAIS PADRÃO:
+Username: minioadmin
+Password: minioadmin
+
+────────────────────────────────────────────────────────────────────────────
+OPÇÃO 2: DOCKER COMPOSE (MAIS FÁCIL)
+────────────────────────────────────────────────────────────────────────────
+
+Crie arquivo docker-compose.yml na raiz do projeto:
+
+```yaml
+version: '3.8'
+
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: minio-restaurante
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+volumes:
+  minio-data:
+    driver: local
+```
+
+Execute:
+docker-compose up -d
+
+Pare:
+docker-compose down
+
+────────────────────────────────────────────────────────────────────────────
+COMANDOS ÚTEIS
+────────────────────────────────────────────────────────────────────────────
+
+# Ver logs do MinIO
+docker logs minio -f
+
+# Parar MinIO
+docker stop minio
+
+# Iniciar MinIO
+docker start minio
+
+# Remover container (dados permanecem se usou volume)
+docker rm minio
+
+# Remover tudo (incluindo dados)
+docker rm -f minio
+docker volume rm minio-data
+
+===============================================================================
+3. ACESSAR CONSOLE WEB
+===============================================================================
+
+URL: http://localhost:9001
+
+LOGIN:
+Username: minioadmin
+Password: minioadmin
+
+APÓS LOGIN:
+1. No menu lateral: "Buckets"
+2. O bucket "restaurante-produtos" será criado automaticamente pela aplicação
+3. Você verá as imagens organizadas por categoria:
+   - produtos/bebidas/
+   - produtos/pratos-principais/
+   - produtos/sobremesas/
+   - produtos/entradas/
+
+===============================================================================
+4. CONFIGURAÇÃO NO BACKEND
+===============================================================================
+
+Arquivo: src/main/resources/application.properties
+
+```properties
+# MinIO Configuration
+minio.endpoint=http://localhost:9000
+minio.access-key=minioadmin
+minio.secret-key=minioadmin
+minio.bucket-name=restaurante-produtos
+minio.url-expiration-hours=24
+
+# Upload Configuration
+spring.servlet.multipart.max-file-size=5MB
+spring.servlet.multipart.max-request-size=5MB
+```
+
+PARA PRODUÇÃO (application-prod.properties):
+```properties
+minio.endpoint=${MINIO_ENDPOINT:https://s3.amazonaws.com}
+minio.access-key=${MINIO_ACCESS_KEY}
+minio.secret-key=${MINIO_SECRET_KEY}
+minio.bucket-name=${MINIO_BUCKET:restaurante-produtos}
+```
+
+===============================================================================
+5. ENDPOINTS DA API
+===============================================================================
+
+────────────────────────────────────────────────────────────────────────────
+UPLOAD DE IMAGEM
+────────────────────────────────────────────────────────────────────────────
+
+POST /api/produtos/{id}/imagem
+Content-Type: multipart/form-data
+Authorization: Bearer {token}
+
+PARÂMETROS:
+- imagem: arquivo (campo do formulário)
+
+EXEMPLO CURL:
+curl -X POST http://localhost:8080/api/produtos/1/imagem \
+  -H "Authorization: Bearer eyJhbGciOi..." \
+  -F "imagem=@/caminho/para/imagem.jpg"
+
+RESPOSTA SUCESSO (200):
+{
+  "success": true,
+  "message": "Imagem enviada com sucesso",
+  "data": "http://localhost:9000/restaurante-produtos/produtos/bebidas/uuid.jpg?X-Amz...",
+  "timestamp": "2026-02-23T10:30:00"
+}
+
+RESPOSTA ERRO (400):
+{
+  "success": false,
+  "message": "Erro ao fazer upload da imagem: Extensão não permitida. Use: jpg, jpeg, png ou webp",
+  "data": null,
+  "timestamp": "2026-02-23T10:30:00"
+}
+
+────────────────────────────────────────────────────────────────────────────
+REMOVER IMAGEM
+────────────────────────────────────────────────────────────────────────────
+
+DELETE /api/produtos/{id}/imagem
+Authorization: Bearer {token}
+
+EXEMPLO CURL:
+curl -X DELETE http://localhost:8080/api/produtos/1/imagem \
+  -H "Authorization: Bearer eyJhbGciOi..."
+
+RESPOSTA SUCESSO (200):
+{
+  "success": true,
+  "message": "Imagem removida com sucesso",
+  "data": null,
+  "timestamp": "2026-02-23T10:30:00"
+}
+
+===============================================================================
+6. VALIDAÇÕES E LIMITAÇÕES
+===============================================================================
+
+EXTENSÕES PERMITIDAS:
+✅ .jpg
+✅ .jpeg
+✅ .png
+✅ .webp
+
+TAMANHO MÁXIMO:
+✅ 5 MB por arquivo
+
+CONTENT-TYPE:
+✅ Deve começar com "image/"
+
+VALIDAÇÕES AUTOMÁTICAS:
+- Extensão do arquivo
+- Tamanho do arquivo
+- Content-Type
+- Arquivo não pode ser vazio
+
+ORGANIZAÇÃO NO BUCKET:
+produtos/{categoria}/{uuid}.{extensao}
+
+Exemplo:
+produtos/bebidas/a1b2c3d4-e5f6-7890-abcd-ef1234567890.jpg
+produtos/pratos-principais/b2c3d4e5-f6a7-8901-bcde-f12345678901.png
+
+===============================================================================
+7. TESTES COMPLETOS
+===============================================================================
+
+────────────────────────────────────────────────────────────────────────────
+PASSO 1: INICIAR MINIO
+────────────────────────────────────────────────────────────────────────────
+
+docker run -d \
+  -p 9000:9000 \
+  -p 9001:9001 \
+  --name minio \
+  -e MINIO_ROOT_USER=minioadmin \
+  -e MINIO_ROOT_PASSWORD=minioadmin \
+  minio/minio server /data --console-address ":9001"
+
+Aguarde 5 segundos e verifique:
+curl http://localhost:9000/minio/health/live
+
+Deve retornar: 200 OK
+
+────────────────────────────────────────────────────────────────────────────
+PASSO 2: INICIAR APLICAÇÃO BACKEND
+────────────────────────────────────────────────────────────────────────────
+
+mvn spring-boot:run -Dspring-boot.run.profiles=dev
+
+Verifique nos logs:
+✅ "Configurando MinIO Client: endpoint=http://localhost:9000, bucket=restaurante-produtos"
+✅ "Bucket 'restaurante-produtos' criado com sucesso!"
+
+────────────────────────────────────────────────────────────────────────────
+PASSO 3: FAZER LOGIN E OBTER TOKEN
+────────────────────────────────────────────────────────────────────────────
+
+curl -s -X POST http://localhost:8080/api/auth/admin/login \
+  -H "Content-Type: application/json" \
+  -d '{"telefone":"999999999","senha":"admin123"}' \
+  | jq -r '.data.token'
+
+Copie o token retornado.
+
+────────────────────────────────────────────────────────────────────────────
+PASSO 4: FAZER UPLOAD DE IMAGEM
+────────────────────────────────────────────────────────────────────────────
+
+# Crie uma imagem de teste ou baixe uma
+curl -o teste.jpg https://picsum.photos/400/300
+
+# Faça o upload (substitua {token} pelo token obtido)
+TOKEN="eyJhbGciOi..."
+
+curl -X POST http://localhost:8080/api/produtos/1/imagem \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "imagem=@teste.jpg"
+
+RESULTADO ESPERADO:
+{
+  "success": true,
+  "message": "Imagem enviada com sucesso",
+  "data": "http://localhost:9000/restaurante-produtos/produtos/..."
+}
+
+────────────────────────────────────────────────────────────────────────────
+PASSO 5: VERIFICAR NO CONSOLE MINIO
+────────────────────────────────────────────────────────────────────────────
+
+1. Acesse: http://localhost:9001
+2. Login: minioadmin / minioadmin
+3. Menu lateral: "Buckets"
+4. Clique em "restaurante-produtos"
+5. Navegue: produtos/{categoria}/
+6. Você verá a imagem com nome UUID
+
+────────────────────────────────────────────────────────────────────────────
+PASSO 6: TESTAR REMOÇÃO DE IMAGEM
+────────────────────────────────────────────────────────────────────────────
+
+curl -X DELETE http://localhost:8080/api/produtos/1/imagem \
+  -H "Authorization: Bearer $TOKEN"
+
+RESULTADO:
+{
+  "success": true,
+  "message": "Imagem removida com sucesso"
+}
+
+Verifique no console MinIO: a imagem deve ter sido deletada.
+
+===============================================================================
+8. CASOS DE USO DO FRONTEND
+===============================================================================
+
+────────────────────────────────────────────────────────────────────────────
+EXEMPLO: FORMULÁRIO DE CADASTRO DE PRODUTO
+────────────────────────────────────────────────────────────────────────────
+
+HTML:
+```html
+<form id="formProduto" enctype="multipart/form-data">
+  <input type="text" name="nome" placeholder="Nome do produto" required>
+  <input type="number" name="preco" placeholder="Preço" required>
+  <select name="categoria" required>
+    <option value="BEBIDAS">Bebidas</option>
+    <option value="PRATOS_PRINCIPAIS">Pratos Principais</option>
+    <option value="SOBREMESAS">Sobremesas</option>
+  </select>
+  <input type="file" name="imagem" accept="image/*">
+  <button type="submit">Cadastrar</button>
+</form>
+```
+
+JavaScript:
+```javascript
+document.getElementById('formProduto').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  
+  const formData = new FormData(e.target);
+  const produtoData = {
+    nome: formData.get('nome'),
+    preco: parseFloat(formData.get('preco')),
+    categoria: formData.get('categoria'),
+    // ... outros campos
+  };
+  
+  // 1. Criar produto
+  const response = await fetch('/api/produtos', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify(produtoData)
+  });
+  
+  const produto = await response.json();
+  const produtoId = produto.data.id;
+  
+  // 2. Fazer upload da imagem (se fornecida)
+  const imagem = formData.get('imagem');
+  if (imagem && imagem.size > 0) {
+    const uploadForm = new FormData();
+    uploadForm.append('imagem', imagem);
+    
+    await fetch(`/api/produtos/${produtoId}/imagem`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
+      body: uploadForm
+    });
+  }
+  
+  alert('Produto cadastrado com sucesso!');
+});
+```
+
+────────────────────────────────────────────────────────────────────────────
+EXEMPLO: ATUALIZAR IMAGEM DE PRODUTO EXISTENTE
+────────────────────────────────────────────────────────────────────────────
+
+```javascript
+async function atualizarImagem(produtoId, arquivoImagem) {
+  const formData = new FormData();
+  formData.append('imagem', arquivoImagem);
+  
+  const response = await fetch(`/api/produtos/${produtoId}/imagem`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${localStorage.getItem('token')}`
+    },
+    body: formData
+  });
+  
+  if (response.ok) {
+    const resultado = await response.json();
+    console.log('Nova URL:', resultado.data);
+    // Atualizar preview da imagem na tela
+    document.getElementById('imgProduto').src = resultado.data;
+  } else {
+    const erro = await response.json();
+    alert(erro.message);
+  }
+}
+```
+
+===============================================================================
+9. TROUBLESHOOTING
+===============================================================================
+
+PROBLEMA: "Falha ao conectar com MinIO"
+SOLUÇÃO:
+1. Verifique se MinIO está rodando: docker ps | grep minio
+2. Teste endpoint: curl http://localhost:9000/minio/health/live
+3. Verifique credenciais no application.properties
+
+PROBLEMA: "Arquivo muito grande"
+SOLUÇÃO:
+- Máximo é 5MB
+- Comprima a imagem antes do upload
+- Use ferramentas: TinyPNG, ImageOptim, etc.
+
+PROBLEMA: "Extensão não permitida"
+SOLUÇÃO:
+- Use apenas: .jpg, .jpeg, .png, .webp
+- Converta arquivos se necessário
+
+PROBLEMA: "Bucket não criado automaticamente"
+SOLUÇÃO:
+1. Acesse console MinIO: http://localhost:9001
+2. Crie manualmente: "Buckets" → "Create Bucket" → nome: "restaurante-produtos"
+
+PROBLEMA: "URL da imagem expira muito rápido"
+SOLUÇÃO:
+- Altere minio.url-expiration-hours no application.properties
+- Padrão: 24 horas
+- Máximo recomendado: 168 horas (7 dias)
+
+===============================================================================
+10. MIGRAÇÃO PARA PRODUÇÃO (AWS S3)
+===============================================================================
+
+Quando migrar para produção, apenas altere as configurações:
+
+application-prod.properties:
+```properties
+# AWS S3 (compatível com MinIO)
+minio.endpoint=https://s3.amazonaws.com
+minio.access-key=${AWS_ACCESS_KEY_ID}
+minio.secret-key=${AWS_SECRET_ACCESS_KEY}
+minio.bucket-name=restaurante-produtos-prod
+minio.url-expiration-hours=24
+```
+
+Variáveis de ambiente:
+```bash
+export AWS_ACCESS_KEY_ID="sua-chave-de-acesso"
+export AWS_SECRET_ACCESS_KEY="sua-chave-secreta"
+```
+
+O código Java permanece IDÊNTICO! ✅
+
+===============================================================================
+11. CHECKLIST DE IMPLEMENTAÇÃO
+===============================================================================
+
+BACKEND:
+☐ MinIO rodando (Docker)
+☐ Dependência adicionada no pom.xml
+☐ MinioConfig.java criado
+☐ ImagemService.java criado
+☐ ProdutoController atualizado (endpoints de upload)
+☐ ProdutoService atualizado (métodos de upload)
+☐ application.properties configurado
+
+TESTES:
+☐ MinIO acessível em localhost:9000
+☐ Console MinIO acessível em localhost:9001
+☐ Bucket criado automaticamente
+☐ Upload funcionando via curl
+☐ Remoção funcionando via curl
+☐ Imagens visíveis no console MinIO
+
+FRONTEND (A FAZER):
+☐ Formulário com campo de arquivo (input type="file")
+☐ Preview da imagem antes do upload
+☐ Validação de tamanho/extensão no frontend
+☐ Progress bar durante upload
+☐ Exibição da imagem do produto
+☐ Botão para remover imagem
+
+===============================================================================
+FIM DA DOCUMENTAÇÃO
+===============================================================================
+
+CONTATO:
+- Backend: Verificar logs em ./logs/app.log
+- MinIO: Console em http://localhost:9001
+
+PRÓXIMOS PASSOS:
+1. Rodar MinIO com Docker
+2. Compilar backend: mvn clean compile
+3. Iniciar aplicação: mvn spring-boot:run
+4. Testar upload com curl
+5. Implementar interface no frontend

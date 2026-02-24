@@ -130,11 +130,21 @@ const verDetalhes = (fundo) => {
 // Modal de criação de fundo
 const modalAberto = ref(false)
 const criandoFundo = ref(false)
-const valorMinimo = ref(5000)
+const valorMinimo = ref(5000) // centavos
 const formulario = ref({
   clienteId: '',
-  saldoInicial: 5000,
+  saldoInicialDecimal: 50.00, // valor em decimal (Kz)
   observacoes: ''
+})
+
+// Computed para converter decimal → centavos
+const saldoInicialCentavos = computed(() => {
+  return Math.round((formulario.value.saldoInicialDecimal || 0) * 100)
+})
+
+// Computed para valor mínimo em decimal
+const valorMinimoDecimal = computed(() => {
+  return (valorMinimo.value / 100).toFixed(2)
 })
 
 // Confirmação de criação de fundo
@@ -145,7 +155,7 @@ const confirmarCriacaoFundo = () => {
     notificationStore.aviso('Informe o ID do cliente')
     return
   }
-  if (formulario.value.saldoInicial < valorMinimo.value) {
+  if (saldoInicialCentavos.value < valorMinimo.value) {
     notificationStore.aviso(`Saldo inicial mínimo: ${formatCurrency(valorMinimo.value)}`)
     return
   }
@@ -158,8 +168,8 @@ const confirmarCriacaoFundo = () => {
 const abrirModal = async () => {
   try {
     const resp = await fundoConsumoService.consultarValorMinimo()
-    valorMinimo.value = resp.valorMinimo
-    formulario.value.saldoInicial = valorMinimo.value
+    valorMinimo.value = resp.valorMinimo // já vem em centavos
+    formulario.value.saldoInicialDecimal = (resp.valorMinimo / 100) // converte para decimal
     modalAberto.value = true
   } catch (err) {
     notificationStore.erro('Erro ao carregar configurações: ' + (err.response?.data?.message || err.message))
@@ -174,13 +184,13 @@ const criarFundo = async () => {
     // Cria fundo via API - conforme INTEGRACAO_FRONTEND_FUNDO_CONSUMO.txt
     const resp = await fundoConsumoService.criarFundo({
       clienteId: formulario.value.clienteId,
-      saldoInicial: formulario.value.saldoInicial,
+      saldoInicial: saldoInicialCentavos.value, // envia em centavos
       observacoes: formulario.value.observacoes || 'Carga inicial'
     })
     
     // Sucesso
     notificationStore.sucesso(
-      `Fundo criado com sucesso! Saldo inicial: ${formatCurrency(formulario.value.saldoInicial)}`
+      `Fundo criado com sucesso! Saldo inicial: ${formatCurrency(saldoInicialCentavos.value)}`
     )
     modalAberto.value = false
     mostrarConfirmacaoCriar.value = false
@@ -200,7 +210,7 @@ const fecharModal = () => {
   modalAberto.value = false
   formulario.value = {
     clienteId: '',
-    saldoInicial: valorMinimo.value,
+    saldoInicialDecimal: (valorMinimo.value / 100),
     observacoes: ''
   }
 }
@@ -209,13 +219,18 @@ const modalRecargaAberto = ref(false)
 const fundoSelecionado = ref(null)
 const recargando = ref(false)
 const formularioRecarga = ref({
-  valor: 5000,
+  valorDecimal: 50.00, // valor em decimal (Kz)
   metodoPagamento: 'GPO'
+})
+
+// Computed para converter decimal → centavos (recarga)
+const valorRecargaCentavos = computed(() => {
+  return Math.round((formularioRecarga.value.valorDecimal || 0) * 100)
 })
 
 const abrirModalRecarga = (fundo) => {
   fundoSelecionado.value = fundo
-  formularioRecarga.value.valor = valorMinimo.value
+  formularioRecarga.value.valorDecimal = (valorMinimo.value / 100) // converte para decimal
   modalRecargaAberto.value = true
 }
 
@@ -223,7 +238,7 @@ const recarregarFundo = async () => {
   try {
     recargando.value = true
     
-    if (formularioRecarga.value.valor < valorMinimo.value) {
+    if (valorRecargaCentavos.value < valorMinimo.value) {
       notificationStore.aviso(`Valor mínimo de recarga: ${formatCurrency(valorMinimo.value)}`)
       recargando.value = false
       return
@@ -232,7 +247,7 @@ const recarregarFundo = async () => {
     const pagamento = await fundoConsumoService.recarregarFundo(
       fundoSelecionado.value.id,
       {
-        valor: formularioRecarga.value.valor,
+        valor: valorRecargaCentavos.value, // envia em centavos
         metodoPagamento: formularioRecarga.value.metodoPagamento
       }
     )
@@ -263,7 +278,7 @@ const fecharModalRecarga = () => {
   modalRecargaAberto.value = false
   fundoSelecionado.value = null
   formularioRecarga.value = {
-    valor: valorMinimo.value,
+    valorDecimal: (valorMinimo.value / 100),
     metodoPagamento: 'GPO'
   }
 }</script>
@@ -446,10 +461,10 @@ const fecharModalRecarga = () => {
               Saldo Inicial <span class="text-error">*</span>
             </label>
             <input 
-              v-model.number="formulario.saldoInicial" 
+              v-model.number="formulario.saldoInicialDecimal" 
               type="number" 
-              :min="valorMinimo"
-              step="100"
+              :min="valorMinimoDecimal"
+              step="0.01"
               class="input-field w-full"
               required
             />
@@ -518,10 +533,10 @@ const fecharModalRecarga = () => {
               Valor da Recarga <span class="text-error">*</span>
             </label>
             <input 
-              v-model.number="formularioRecarga.valor" 
+              v-model.number="formularioRecarga.valorDecimal" 
               type="number" 
-              :min="valorMinimo"
-              step="100"
+              :min="valorMinimoDecimal"
+              step="0.01"
               class="input-field w-full"
               required
             />

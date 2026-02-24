@@ -1,0 +1,33 @@
+{
+  "admin": {
+    "nome": "Administrador Teste",
+    "telefone": "+244999999999",
+    "email": "admin@teste.com",
+    "senha": "senha123",
+    "role": "ADMIN"
+  },
+  "gerente": {
+    "nome": "Gerente Teste",
+    "telefone": "+244923000002",
+    "email": "gerente@teste.com",
+    "senha": "senha123",
+    "role": "GERENTE",
+    "unidadeId": 1
+  },
+  "atendente": {
+    "nome": "Atendente Teste",
+    "telefone": "+244923000003",
+    "email": "atendente@teste.com",
+    "senha": "senha123",
+    "role": "ATENDENTE",
+    "unidadeId": 1
+  },
+  "novoUsuario": {
+    "nome": "Novo Usuário",
+    "telefone": "+244923999999",
+    "email": "novo@teste.com",
+    "senha": "senha123",
+    "role": "ATENDENTE",
+    "unidadeId": 1
+  }
+}

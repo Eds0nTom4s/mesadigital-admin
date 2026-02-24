@@ -1,0 +1,633 @@
+================================================================================
+         QUESTIONÁRIO DE ALINHAMENTO - FRONTEND & BACKEND
+              Painel Administrativo - Mesa Digital
+================================================================================
+
+Data: 24 de Fevereiro de 2026
+De: Equipe Frontend
+Para: Equipe Backend
+Assunto: Alinhamento de Endpoints, Contratos e Fluxos da API
+
+================================================================================
+                           CONTEXTO GERAL
+================================================================================
+
+Prezada equipe do Backend,
+
+Estamos concluindo a implementação do Painel Administrativo no frontend e
+identificamos algumas diferenças entre os endpoints implementados no frontend
+e os disponíveis no backend. Para garantir a integração correta, precisamos
+alinhar os seguintes pontos:
+
+OBSERVAÇÕES IMPORTANTES:
+- O endpoint de autenticação está FUNCIONANDO (POST /api/auth/admin/login) ✓
+- O endpoint de configurações financeiras está FUNCIONANDO (GET /api/configuracao-financeira) ✓
+- Vários endpoints de Usuários e Auditoria retornam 404
+
+
+================================================================================
+                    SEÇÃO 1: MÓDULO DE USUÁRIOS
+================================================================================
+
+STATUS ATUAL: Endpoints retornam 404
+
+ENDPOINTS NECESSÁRIOS:
+
+1.1) LISTAR USUÁRIOS
+   URL: GET /api/usuarios
+   Query Params:
+     - pagina: number (opcional, padrão: 1)
+     - tamanhoPagina: number (opcional, padrão: 20)
+     - role: string (opcional: ADMIN, GERENTE, ATENDENTE, COZINHA)
+     - ativo: boolean (opcional)
+     - busca: string (opcional - buscar por nome, telefone ou email)
+   
+   FORMATO DE RESPOSTA ESPERADO:
+   {
+     "data": {
+       "usuarios": [
+         {
+           "id": number,
+           "nome": string,
+           "telefone": string,
+           "email": string | null,
+           "role": "ADMIN" | "GERENTE" | "ATENDENTE" | "COZINHA",
+           "ativo": boolean,
+           "unidadeId": number | null,
+           "unidadeNome": string | null,
+           "dataCriacao": string (ISO 8601),
+           "dataUltimoAcesso": string | null
+         }
+       ],
+       "totalElementos": number,
+       "totalPaginas": number,
+       "paginaAtual": number
+     }
+   }
+
+   QUESTÕES:
+   ☐ Este endpoint está implementado?
+   ☐ A paginação segue esse padrão?
+   ☐ Os filtros estão disponíveis?
+   ☐ O formato da resposta está correto?
+
+---
+
+1.2) BUSCAR USUÁRIO POR ID
+   URL: GET /api/usuarios/{id}
+   
+   FORMATO DE RESPOSTA:
+   {
+     "data": {
+       "id": number,
+       "nome": string,
+       "telefone": string,
+       "email": string | null,
+       "role": string,
+       "ativo": boolean,
+       "unidadeId": number | null,
+       "unidadeNome": string | null,
+       "permissoes": string[],
+       "dataCriacao": string,
+       "dataUltimoAcesso": string | null
+     }
+   }
+
+   QUESTÕES:
+   ☐ Endpoint implementado?
+   ☐ Retorna permissões associadas ao role?
+
+---
+
+1.3) CRIAR USUÁRIO
+   URL: POST /api/usuarios
+   
+   PAYLOAD:
+   {
+     "nome": string (obrigatório),
+     "telefone": string (obrigatório, único),
+     "email": string (opcional),
+     "senha": string (obrigatório, mínimo 6 caracteres),
+     "role": string (obrigatório),
+     "unidadeId": number (obrigatório se role != ADMIN)
+   }
+
+   FORMATO DE RESPOSTA:
+   {
+     "data": {
+       "id": number,
+       "nome": string,
+       "telefone": string,
+       "email": string | null,
+       "role": string,
+       "ativo": boolean,
+       "unidadeId": number | null
+     },
+     "message": "Usuário criado com sucesso"
+   }
+
+   QUESTÕES:
+   ☐ Valida telefone único?
+   ☐ Valida senha mínima?
+   ☐ Valida que não-ADMIN precisa ter unidadeId?
+   ☐ Qual código HTTP de sucesso? (esperamos 201)
+   ☐ Em caso de telefone duplicado, qual erro? (esperamos 409)
+
+---
+
+1.4) ATUALIZAR USUÁRIO
+   URL: PUT /api/usuarios/{id}
+   
+   PAYLOAD:
+   {
+     "nome": string,
+     "email": string | null,
+     "role": string,
+     "unidadeId": number | null
+   }
+
+   OBSERVAÇÃO: Telefone NÃO deve ser editável (é usado como username)
+
+   QUESTÕES:
+   ☐ Endpoint implementado?
+   ☐ Telefone é bloqueado para edição?
+   ☐ Retorna 200 ou 204?
+
+---
+
+1.5) EXCLUIR USUÁRIO (Soft Delete)
+   URL: DELETE /api/usuarios/{id}
+   
+   QUESTÕES:
+   ☐ É soft delete ou hard delete?
+   ☐ Retorna 204 No Content?
+   ☐ Pode excluir usuário logado?
+   ☐ Pode excluir último ADMIN?
+
+---
+
+1.6) ATIVAR/DESATIVAR USUÁRIO
+   URL: PATCH /api/usuarios/{id}/ativar
+   URL: PATCH /api/usuarios/{id}/desativar
+   
+   QUESTÕES:
+   ☐ Endpoints existem?
+   ☐ Qual a diferença entre desativar e excluir?
+   ☐ Usuário desativado pode fazer login?
+
+---
+
+1.7) ALTERAR SENHA (Por Administrador)
+   URL: PATCH /api/usuarios/{id}/senha
+   
+   PAYLOAD:
+   {
+     "novaSenha": string
+   }
+
+   QUESTÕES:
+   ☐ Apenas ADMIN pode alterar senha de outros?
+   ☐ Precisa validar senha anterior?
+   ☐ Notifica o usuário da mudança?
+
+---
+
+1.8) RESET DE SENHA
+   URL: POST /api/usuarios/solicitar-reset-senha
+   PAYLOAD: { "telefone": string }
+   
+   URL: POST /api/usuarios/confirmar-reset-senha
+   PAYLOAD: { "token": string, "novaSenha": string }
+
+   QUESTÕES:
+   ☐ Fluxo de reset está implementado?
+   ☐ Como é enviado o token? (SMS, Email, Whatsapp?)
+   ☐ Qual validade do token?
+
+---
+
+1.9) LISTAR PERMISSÕES
+   URL: GET /api/usuarios/permissoes
+   
+   FORMATO ESPERADO:
+   {
+     "data": {
+       "ADMIN": ["*"],
+       "GERENTE": ["pedidos.visualizar", "pedidos.criar", ...],
+       "ATENDENTE": ["pedidos.visualizar", "pedidos.criar", ...],
+       "COZINHA": ["pedidos.visualizar", "pedidos.atualizar_status"]
+     }
+   }
+
+   QUESTÕES:
+   ☐ Endpoint existe?
+   ☐ Qual a lista completa de permissões?
+
+---
+
+1.10) LOGS DE ACESSO POR USUÁRIO
+   URL: GET /api/usuarios/{id}/logs-acesso
+   
+   QUESTÕES:
+   ☐ Endpoint existe?
+   ☐ Retorna histórico de login?
+   ☐ Inclui IP e User-Agent?
+
+
+================================================================================
+                    SEÇÃO 2: MÓDULO DE AUDITORIA
+================================================================================
+
+STATUS ATUAL: Todos os endpoints retornam 404
+
+ENDPOINTS NECESSÁRIOS:
+
+2.1) LISTAR LOGS DE AUDITORIA
+   URL: GET /api/auditoria/logs
+   
+   Query Params:
+     - pagina: number (opcional)
+     - tamanhoPagina: number (opcional)
+     - modulo: string (opcional: USUARIOS, PEDIDOS, PRODUTOS, etc)
+     - acao: string (opcional: CRIAR, EDITAR, EXCLUIR, LOGIN, etc)
+     - dataInicio: string (opcional, formato ISO 8601)
+     - dataFim: string (opcional)
+     - busca: string (opcional)
+
+   FORMATO DE RESPOSTA:
+   {
+     "data": {
+       "logs": [
+         {
+           "id": number,
+           "modulo": string,
+           "acao": string,
+           "usuarioId": number,
+           "usuarioNome": string,
+           "usuarioRole": string,
+           "entidadeTipo": string | null,
+           "entidadeId": number | null,
+           "descricao": string,
+           "dadosAdicionais": object | null,
+           "ip": string,
+           "userAgent": string,
+           "dataHora": string
+         }
+       ],
+       "totalElementos": number,
+       "totalPaginas": number,
+       "paginaAtual": number
+     }
+   }
+
+   QUESTÕES:
+   ☐ Endpoint implementado?
+   ☐ Sistema de auditoria está ativo?
+   ☐ Quais módulos são auditados?
+   ☐ Quais ações são registradas?
+
+---
+
+2.2) BUSCAR LOG POR ID
+   URL: GET /api/auditoria/logs/{id}
+   
+   QUESTÕES:
+   ☐ Endpoint existe?
+   ☐ Retorna dados completos incluindo dadosAdicionais em JSON?
+
+---
+
+2.3) LOGS POR USUÁRIO
+   URL: GET /api/auditoria/logs/usuario/{usuarioId}
+   
+   QUESTÕES:
+   ☐ Endpoint existe?
+   ☐ Suporta mesmos filtros do endpoint principal?
+
+---
+
+2.4) LOGS POR ENTIDADE
+   URL: GET /api/auditoria/logs/entidade/{tipo}/{id}
+   Exemplo: GET /api/auditoria/logs/entidade/PEDIDO/123
+   
+   QUESTÕES:
+   ☐ Endpoint existe?
+   ☐ Útil para rastrear histórico de um pedido específico?
+
+---
+
+2.5) EXPORTAR LOGS (CSV)
+   URL: GET /api/auditoria/logs/exportar/csv
+   Query Params: mesmos filtros de listagem
+   
+   QUESTÕES:
+   ☐ Endpoint implementado?
+   ☐ Retorna arquivo para download?
+   ☐ Content-Type: text/csv?
+   ☐ Qual delimitador? (vírgula ou ponto-e-vírgula?)
+
+---
+
+2.6) EXPORTAR LOGS (PDF)
+   URL: GET /api/auditoria/logs/exportar/pdf
+   
+   QUESTÕES:
+   ☐ Endpoint implementado?
+   ☐ Qual biblioteca usam para PDF?
+   ☐ Inclui logo e cabeçalho?
+
+---
+
+2.7) ESTATÍSTICAS DE AUDITORIA
+   URL: GET /api/auditoria/estatisticas
+   
+   FORMATO ESPERADO:
+   {
+     "data": {
+       "totalLogs": number,
+       "logsHoje": number,
+       "usuariosAtivos": number,
+       "ultimaAcao": {
+         "usuarioNome": string,
+         "acao": string,
+         "modulo": string,
+         "dataHora": string
+       }
+     }
+   }
+
+   QUESTÕES:
+   ☐ Endpoint implementado?
+   ☐ Cálculo é em tempo real ou cache?
+
+---
+
+2.8) LISTAR MÓDULOS DISPONÍVEIS
+   URL: GET /api/auditoria/modulos
+   
+   FORMATO ESPERADO:
+   {
+     "data": ["USUARIOS", "PEDIDOS", "PRODUTOS", "FUNDOS", "MESAS", "CONFIGURACOES"]
+   }
+
+   QUESTÕES:
+   ☐ Endpoint existe?
+   ☐ Lista é fixa ou dinâmica baseada em enums?
+
+---
+
+2.9) LISTAR AÇÕES DISPONÍVEIS
+   URL: GET /api/auditoria/acoes
+   
+   FORMATO ESPERADO:
+   {
+     "data": ["CRIAR", "EDITAR", "EXCLUIR", "VISUALIZAR", "LOGIN", "LOGOUT", "EXPORTAR"]
+   }
+
+   QUESTÕES:
+   ☐ Endpoint existe?
+   ☐ Lista completa de ações?
+
+
+================================================================================
+              SEÇÃO 3: ESTRUTURA GERAL DE RESPOSTAS DA API
+================================================================================
+
+3.1) FORMATO PADRÃO DE SUCESSO
+
+   Atualmente esperamos:
+   {
+     "data": { ... },
+     "message": "Mensagem de sucesso" (opcional)
+   }
+
+   QUESTÕES:
+   ☐ Esse padrão está correto?
+   ☐ Sempre envolve em "data"?
+   ☐ Ou às vezes retorna direto?
+
+---
+
+3.2) FORMATO PADRÃO DE ERRO
+
+   Atualmente esperamos:
+   {
+     "error": string,
+     "message": string,
+     "status": number,
+     "timestamp": string,
+     "path": string
+   }
+
+   QUESTÕES:
+   ☐ Formato de erro está correto?
+   ☐ Em validações, retorna array de erros?
+   ☐ Exemplo de erro 422 com múltiplos campos?
+
+---
+
+3.3) CÓDIGOS HTTP UTILIZADOS
+
+   Nossa expectativa:
+   - 200: Sucesso (GET, PUT)
+   - 201: Criado (POST)
+   - 204: Sem conteúdo (DELETE)
+   - 400: Dados inválidos
+   - 401: Não autenticado
+   - 403: Sem permissão
+   - 404: Não encontrado
+   - 409: Conflito (ex: telefone duplicado)
+   - 422: Validação falhou
+   - 500: Erro interno
+   - 502/503/504: Serviço indisponível
+
+   QUESTÕES:
+   ☐ Códigos estão corretos?
+   ☐ Há algum código diferente sendo usado?
+
+---
+
+3.4) PAGINAÇÃO
+
+   Nossa expectativa:
+   - Query Params: pagina=1&tamanhoPagina=20
+   - Response: { totalElementos, totalPaginas, paginaAtual, data: [...] }
+
+   QUESTÕES:
+   ☐ Padrão de paginação está correto?
+   ☐ Página começa em 0 ou 1?
+   ☐ Tamanho máximo de página?
+
+---
+
+3.5) AUTENTICAÇÃO
+
+   Funcionamento atual (OK):
+   - POST /api/auth/admin/login → retorna token JWT
+   - Token enviado em header: Authorization: Bearer {token}
+   - Token contém: sub, roles, unidadeAtendimentoId, exp
+
+   QUESTÕES:
+   ☐ Tempo de expiração do token?
+   ☐ Refresh token está implementado?
+   ☐ Como renovar token?
+
+
+================================================================================
+              SEÇÃO 4: VALIDAÇÕES E REGRAS DE NEGÓCIO
+================================================================================
+
+4.1) USUÁRIOS
+
+   ☐ Telefone deve ter formato específico? (com +244?)
+   ☐ Validação de email?
+   ☐ Senha: mínimo, máximo, caracteres especiais obrigatórios?
+   ☐ Nome: mínimo/máximo de caracteres?
+   ☐ Pode ter dois ADMIN na mesma unidade?
+   ☐ Pode desativar último ADMIN do sistema?
+
+---
+
+4.2) AUDITORIA
+
+   ☐ Logs são gravados automaticamente (via AOP/Interceptor)?
+   ☐ Ou precisa chamar manualmente no código?
+   ☐ Logs de leitura (GET) são registrados?
+   ☐ Logs incluem dados "antes" e "depois" da modificação?
+   ☐ Retenção de logs: quanto tempo ficam armazenados?
+   ☐ Há limpeza automática de logs antigos?
+
+---
+
+4.3) PERMISSÕES
+
+   ☐ Sistema de permissões é baseado em Roles ou Permissões granulares?
+   ☐ ADMIN tem acesso a tudo automaticamente?
+   ☐ Como é verificada permissão no backend? (Annotations?)
+   ☐ Há endpoints públicos (sem auth)?
+
+
+================================================================================
+              SEÇÃO 5: AMBIENTE E CONFIGURAÇÃO
+================================================================================
+
+5.1) AMBIENTE DE DESENVOLVIMENTO
+
+   ☐ URL base da API: http://localhost:8080/api (correto?)
+   ☐ Porta pode mudar?
+   ☐ CORS está configurado para localhost:3003?
+
+---
+
+5.2) DOCUMENTAÇÃO
+
+   ☐ Há Swagger/OpenAPI disponível?
+   ☐ URL do Swagger: http://localhost:8080/swagger-ui.html ?
+   ☐ Postman Collection disponível?
+
+---
+
+5.3) BANCO DE DADOS DE TESTES
+
+   ☐ Há dados de seed para desenvolvimento?
+   ☐ Usuário admin padrão?
+     - Telefone: ?
+     - Senha: ?
+   ☐ Como resetar banco para estado inicial?
+
+
+================================================================================
+              SEÇÃO 6: ENDPOINTS ADICIONAIS NECESSÁRIOS
+================================================================================
+
+Além dos mencionados acima, também precisamos de:
+
+6.1) CONFIGURAÇÕES FINANCEIRAS (JÁ FUNCIONA ✓)
+   - GET /api/configuracao-financeira
+   - PUT /api/configuracao-financeira
+
+   ☐ Endpoint de taxas: /api/configuracao-financeira/taxas ?
+   ☐ Endpoint de métodos pagamento: /api/configuracao-financeira/metodos-pagamento ?
+   ☐ Endpoint de limites: /api/configuracao-financeira/limites ?
+
+---
+
+6.2) UNIDADES DE CONSUMO
+   
+   ☐ GET /api/unidades-consumo (para popular select de unidades)
+   ☐ Retorna lista simples: [{ id, nome, ativo }] ?
+
+
+================================================================================
+                         SEÇÃO 7: MELHORIAS FUTURAS
+================================================================================
+
+Funcionalidades que planejamos implementar no futuro:
+
+7.1) NOTIFICAÇÕES
+   ☐ Sistema de notificações push está planejado?
+   ☐ Endpoints de notificações existem?
+
+7.2) RELATÓRIOS
+   ☐ Há endpoints de relatórios gerenciais?
+   ☐ Exportação de relatórios personalizados?
+
+7.3) INTEGAÇÕES
+   ☐ Webhooks para eventos (pedido criado, etc)?
+   ☐ API para integrações externas?
+
+
+================================================================================
+                         PRÓXIMOS PASSOS
+================================================================================
+
+Por favor, respondam este questionário preenchendo os checkboxes (☐ → ☑) e
+adicionando comentários/observações onde necessário.
+
+PRAZO: [DEFINIR]
+CONTATO: [DEFINIR]
+
+Após o alinhamento, atualizaremos o frontend conforme os contratos reais
+da API.
+
+Sugerimos também:
+1. Agendar reunião de alinhamento técnico
+2. Criar/atualizar documentação Swagger
+3. Compartilhar Postman Collection atualizada
+4. Definir padrões de versionamento da API
+
+
+================================================================================
+                         ANEXOS E OBSERVAÇÕES
+================================================================================
+
+LOGS DE ERRO ATUAIS:
+
+1. GET /api/usuarios → 404
+2. GET /api/auditoria/logs → 404
+3. GET /api/auditoria/estatisticas → 404
+4. GET /api/auditoria/modulos → 404
+5. GET /api/auditoria/acoes → 404
+
+ENDPOINTS FUNCIONANDO:
+
+1. POST /api/auth/admin/login → 200 ✓
+2. GET /api/configuracao-financeira → 200 ✓
+
+TOKEN JWT ATUAL (Exemplo):
+{
+  "sub": "+244999999999",
+  "roles": "ROLE_ADMIN",
+  "unidadeAtendimentoId": undefined,
+  "exp": "24/02/2026, 16:24:59"
+}
+
+
+================================================================================
+                    AGRADECEMOS A COLABORAÇÃO!
+================================================================================
+
+Equipe Frontend - Painel Administrativo
+Mesa Digital
+
+================================================================================

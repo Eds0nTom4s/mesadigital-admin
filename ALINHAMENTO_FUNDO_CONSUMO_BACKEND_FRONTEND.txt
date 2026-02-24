@@ -1,0 +1,1677 @@
+================================================================================
+ALINHAMENTO BACKEND-FRONTEND - FUNDO DE CONSUMO
+================================================================================
+
+Data: 22 de fevereiro de 2026
+Objetivo: Normalização e padronização do sistema de Fundo de Consumo
+Equipes: Backend (Spring Boot) + Frontend (Vue.js)
+
+================================================================================
+1. VISÃO GERAL E CONTEXTO
+================================================================================
+
+SITUAÇÃO ATUAL:
+O frontend implementou completamente o módulo de Fundo de Consumo conforme
+documentado em CONTEXTO_FUNDO_CONSUMO_FRONTEND.txt.
+
+OBJETIVO DESTE DOCUMENTO:
+Validar alinhamento conceitual entre backend e frontend, identificar gaps,
+e estabelecer padrões para funcionamento normalizado do sistema.
+
+ESCOPO:
+- Validação de endpoints e contratos
+- Alinhamento de terminologia e conceitos
+- Padronização de fluxos de integração
+- Definição de regras de negócio compartilhadas
+- Casos de uso e edge cases
+- Tratamento de erros
+
+================================================================================
+2. CONCEITOS FUNDAMENTAIS
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2.1. O QUE É FUNDO DE CONSUMO?                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+DEFINIÇÃO:
+Conta pré-paga vinculada a um cliente que permite pagamento antecipado de
+consumo no restaurante. Funciona como carteira digital interna.
+
+CARACTERÍSTICAS:
+- 1 cliente = 1 fundo ativo (máximo)
+- Saldo armazenado em centavos (10000 = 100,00 AOA)
+- Status: ATIVO ou ENCERRADO
+- Histórico completo de transações
+- Controle de concorrência otimista (field: version)
+
+TIPOS DE OPERAÇÕES:
+1. CREDITO: Adiciona saldo (recarga, estorno)
+2. DEBITO: Remove saldo (pagamento de pedido)
+3. ESTORNO: Devolve saldo (cancelamento de pedido)
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2.2. TERMINOLOGIA PADRONIZADA                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────┬──────────────────────────────────────────────────────┐
+│ TERMO                │ SIGNIFICADO                                          │
+├──────────────────────┼──────────────────────────────────────────────────────┤
+│ Fundo de Consumo     │ Conta pré-paga do cliente                           │
+│ Fundo Ativo          │ Fundo com status ativo = true                       │
+│ Fundo Encerrado      │ Fundo com status ativo = false                      │
+│ Saldo Atual          │ Valor disponível para uso (em centavos)            │
+│ Saldo Inicial        │ Primeiro valor creditado ao criar fundo            │
+│ Valor Mínimo         │ Valor mínimo para criar/recarregar (configurável)  │
+│ Transação            │ Registro de movimentação de saldo                   │
+│ Recarga              │ Adição de saldo ao fundo via pagamento              │
+│ Débito               │ Remoção de saldo para pagar pedido                  │
+│ Estorno              │ Devolução de saldo de pedido cancelado              │
+│ Pagamento Pendente   │ Recarga iniciada mas não confirmada                 │
+│ Pagamento Confirmado │ Recarga processada e saldo atualizado               │
+│ Gateway              │ Sistema externo de pagamento (AppyPay)              │
+│ Método GPO           │ Pagamento instantâneo via AppyPay                   │
+│ Método REF           │ Pagamento via referência bancária                   │
+└──────────────────────┴──────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2.3. RELACIONAMENTOS                                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Cliente (1) ─── (0..1) Fundo Ativo
+                   │
+                   │
+                   ├─── (N) Transações
+                   │
+                   └─── (N) Pagamentos (Recargas)
+
+Fundo (1) ─── (N) Pedidos PRÉ-PAGO
+
+Transação ─── (0..1) Pedido (se tipo = DEBITO ou ESTORNO)
+
+Pagamento ─── (1) Fundo
+          └─── (0..1) Transação (após confirmação)
+
+================================================================================
+3. ARQUITETURA DE INTEGRAÇÃO
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3.1. FLUXO GERAL DE COMUNICAÇÃO                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Frontend (Vue.js)
+    │
+    │ HTTP Request (JSON)
+    │ Authorization: Bearer {JWT}
+    ▼
+Backend (Spring Boot)
+    │
+    ├─ SecurityFilter (valida JWT)
+    ├─ Controller (recebe request)
+    ├─ Service (lógica de negócio)
+    ├─ Repository (acesso ao banco)
+    │
+    │ HTTP Response (JSON)
+    │ { success, message, data, errors }
+    ▼
+Frontend (Vue.js)
+    │
+    ├─ Service (unwrap response.data.data)
+    └─ Component (exibe dados ou erros)
+
+AUTENTICAÇÃO:
+- Todo endpoint de fundos requer JWT
+- Frontend envia: Authorization: Bearer {token}
+- Backend valida e extrai usuário autenticado
+- Logs registram quem executou cada operação
+
+FORMATO DE RESPONSE PADRONIZADO:
+Sucesso (2xx):
+{
+  "success": true,
+  "message": "Mensagem descritiva",
+  "data": { ...dados... }
+}
+
+Erro (4xx, 5xx):
+{
+  "success": false,
+  "message": "Mensagem de erro principal",
+  "errors": [
+    {
+      "field": "nomeCampo",
+      "message": "Descrição do erro específico"
+    }
+  ]
+}
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3.2. MAPEAMENTO DE ENDPOINTS                                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+BASE URL: http://localhost:8080/api/fundos
+
+┌──────────┬─────────────────────────────────┬────────────────────────────────┐
+│ MÉTODO   │ ENDPOINT                        │ DESCRIÇÃO                      │
+├──────────┼─────────────────────────────────┼────────────────────────────────┤
+│ GET      │ /config/valor-minimo            │ Consulta configuração mínima   │
+│ POST     │ /                               │ Cria novo fundo                │
+│ GET      │ /cliente/{clienteId}            │ Busca fundo ativo do cliente   │
+│ GET      │ /{fundoId}/saldo                │ Consulta saldo atual           │
+│ POST     │ /{fundoId}/recarregar           │ Inicia recarga do fundo        │
+│ GET      │ /{fundoId}/transacoes           │ Lista histórico de transações  │
+└──────────┴─────────────────────────────────┴────────────────────────────────┘
+
+NOTAS:
+- Todos os endpoints retornam formato envelope { success, message, data }
+- Autenticação JWT obrigatória em todos
+- Content-Type: application/json
+
+================================================================================
+4. ESPECIFICAÇÃO DETALHADA DE ENDPOINTS
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4.1. GET /api/fundos/config/valor-minimo                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+DESCRIÇÃO:
+Retorna o valor mínimo configurado no sistema para criação e recarga de fundos.
+
+REQUEST:
+- Método: GET
+- Headers: Authorization: Bearer {token}
+- Body: (vazio)
+
+RESPONSE (200 OK):
+{
+  "success": true,
+  "message": "Configuração carregada",
+  "data": {
+    "valorMinimo": 5000
+  }
+}
+
+OBSERVAÇÕES:
+- Valor em centavos (5000 = 50,00 AOA)
+- Configurável via tabela configuracao_financeira
+- Frontend deve consultar ao abrir modals de criação/recarga
+- Cache no frontend por 1 hora (evitar requests desnecessários)
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4.2. POST /api/fundos                                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+DESCRIÇÃO:
+Cria um novo fundo de consumo para um cliente.
+
+REQUEST:
+- Método: POST
+- Headers: Authorization: Bearer {token}
+           Content-Type: application/json
+- Body:
+{
+  "clienteId": 123,
+  "saldoInicial": 10000,
+  "observacoes": "Carga inicial" // opcional
+}
+
+VALIDAÇÕES BACKEND:
+- clienteId obrigatório e deve existir na tabela clientes
+- saldoInicial >= valorMinimo (consultar configuracao_financeira)
+- Cliente não pode ter outro fundo ativo (constraint única)
+- observacoes máximo 500 caracteres
+
+PROCESSAMENTO BACKEND:
+1. Valida cliente existe
+2. Valida cliente não tem fundo ativo
+3. Valida saldoInicial >= valorMinimo
+4. Cria registro em fundos_consumo com:
+   - saldoAtual = saldoInicial
+   - ativo = true
+   - version = 0
+5. Cria transação inicial:
+   - tipo = CREDITO
+   - valor = saldoInicial
+   - descricao = "Saldo inicial"
+   - saldoAnterior = 0
+   - saldoNovo = saldoInicial
+6. Registra evento de auditoria
+
+RESPONSE (201 Created):
+{
+  "success": true,
+  "message": "Fundo criado com sucesso",
+  "data": {
+    "id": 1,
+    "clienteId": 123,
+    "saldoAtual": 10000,
+    "ativo": true,
+    "version": 0,
+    "createdAt": "2026-02-22T11:20:07.216379",
+    "updatedAt": "2026-02-22T11:20:07.216379",
+    "createdBy": "system",
+    "modifiedBy": "system"
+  }
+}
+
+ERROS POSSÍVEIS:
+- 400: clienteId ausente ou inválido
+- 400: saldoInicial < valorMinimo
+- 400: Cliente já possui fundo ativo
+- 404: Cliente não encontrado
+- 500: Erro ao criar transação inicial
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4.3. GET /api/fundos/cliente/{clienteId}                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+DESCRIÇÃO:
+Busca o fundo ativo de um cliente específico.
+
+REQUEST:
+- Método: GET
+- Headers: Authorization: Bearer {token}
+- Path Param: clienteId (Long)
+- Body: (vazio)
+
+VALIDAÇÕES BACKEND:
+- clienteId deve ser numérico
+- Cliente pode ou não ter fundo ativo (404 se não tiver)
+
+PROCESSAMENTO BACKEND:
+1. Busca cliente por ID
+2. Busca fundo where clienteId = {id} AND ativo = true
+3. Se encontrado: retorna com dados do cliente
+4. Se não encontrado: retorna 404
+
+RESPONSE (200 OK):
+{
+  "success": true,
+  "message": "Fundo encontrado",
+  "data": {
+    "id": 1,
+    "clienteId": 123,
+    "saldoAtual": 8500,
+    "ativo": true,
+    "version": 3,
+    "createdAt": "2026-02-22T11:20:07.216379",
+    "updatedAt": "2026-02-22T11:36:32.026398",
+    "createdBy": "system",
+    "modifiedBy": "Admin Sistema",
+    "cliente": {
+      "id": 123,
+      "nome": "João Silva",
+      "telefone": "+244923456789"
+    }
+  }
+}
+
+ERROS POSSÍVEIS:
+- 400: clienteId inválido (não numérico)
+- 404: Cliente não possui fundo ativo
+
+OBSERVAÇÕES:
+- Retorna apenas fundo ATIVO
+- Se cliente teve fundo encerrado, este endpoint retorna 404
+- Para histórico completo, usar endpoint específico (não implementado)
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4.4. GET /api/fundos/{fundoId}/saldo                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+DESCRIÇÃO:
+Consulta apenas o saldo atual de um fundo (endpoint otimizado).
+
+REQUEST:
+- Método: GET
+- Headers: Authorization: Bearer {token}
+- Path Param: fundoId (Long)
+- Body: (vazio)
+
+VALIDAÇÕES BACKEND:
+- fundoId deve existir
+- Não valida se fundo está ativo (retorna saldo mesmo se encerrado)
+
+RESPONSE (200 OK):
+{
+  "success": true,
+  "message": "Saldo consultado",
+  "data": {
+    "saldoAtual": 8500
+  }
+}
+
+ERROS POSSÍVEIS:
+- 404: Fundo não encontrado
+
+OBSERVAÇÕES:
+- Endpoint leve, ideal para consultas frequentes
+- Não retorna dados completos do fundo
+- Pode ser usado em polling para atualizar saldo
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4.5. POST /api/fundos/{fundoId}/recarregar                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+DESCRIÇÃO:
+Cria uma recarga (adição de saldo) via gateway de pagamento AppyPay.
+
+REQUEST:
+- Método: POST
+- Headers: Authorization: Bearer {token}
+           Content-Type: application/json
+- Path Param: fundoId (Long)
+- Body:
+{
+  "valor": 5000,
+  "metodoPagamento": "GPO", // "GPO" ou "REF"
+  "descricao": "Recarga via GPO" // opcional
+}
+
+VALIDAÇÕES BACKEND:
+- fundoId deve existir
+- Fundo deve estar ativo (ativo = true)
+- valor > 0
+- valor >= valorMinimo (opcional, pode permitir recargas menores)
+- metodoPagamento em ["GPO", "REF"]
+- descricao máximo 500 caracteres
+
+PROCESSAMENTO BACKEND:
+
+MÉTODO GPO (Pagamento Instantâneo):
+1. Valida fundo ativo
+2. Cria registro em pagamentos_fundo:
+   - fundoId = {fundoId}
+   - valor = {valor}
+   - metodoPagamento = "GPO"
+   - status = "PENDENTE"
+3. Chama API AppyPay para criar pagamento:
+   - Envia valor, callback URL, metadata
+4. Recebe urlPagamento do AppyPay
+5. Salva urlPagamento no registro
+6. Retorna response com URL
+
+MÉTODO REF (Referência Bancária):
+1. Valida fundo ativo
+2. Cria registro em pagamentos_fundo:
+   - fundoId = {fundoId}
+   - valor = {valor}
+   - metodoPagamento = "REF"
+   - status = "PENDENTE"
+3. Gera entidade e referência bancária:
+   - Entidade: código do restaurante (ex: "12345")
+   - Referencia: UUID formatado (ex: "999 888 777")
+4. Salva entidade + referencia no registro
+5. Retorna response com dados
+
+APÓS CONFIRMAÇÃO (Webhook AppyPay ou Banco):
+1. Backend recebe notificação de pagamento confirmado
+2. Atualiza status do pagamento: PENDENTE → PAGO
+3. Cria transação no fundo:
+   - tipo = CREDITO
+   - valor = {valor}
+   - descricao = "Recarga via {metodo} - Pagamento #{id}"
+   - saldoAnterior = fundo.saldoAtual
+   - saldoNovo = fundo.saldoAtual + valor
+4. Atualiza fundo.saldoAtual += valor
+5. Incrementa fundo.version (concorrência otimista)
+6. Registra evento de auditoria
+7. (Opcional) Envia notificação WebSocket para frontend
+
+RESPONSE GPO (201 Created):
+{
+  "success": true,
+  "message": "Recarga iniciada. Complete o pagamento no AppyPay",
+  "data": {
+    "id": 456,
+    "fundoId": 1,
+    "valor": 5000,
+    "metodoPagamento": "GPO",
+    "status": "PENDENTE",
+    "urlPagamento": "https://appypay.com/pay/abc123def456",
+    "createdAt": "2026-02-22T12:00:00.123456"
+  }
+}
+
+RESPONSE REF (201 Created):
+{
+  "success": true,
+  "message": "Recarga iniciada. Pague usando os dados abaixo",
+  "data": {
+    "id": 457,
+    "fundoId": 1,
+    "valor": 5000,
+    "metodoPagamento": "REF",
+    "status": "PENDENTE",
+    "entidade": "12345",
+    "referencia": "999 888 777",
+    "createdAt": "2026-02-22T12:00:00.123456"
+  }
+}
+
+ERROS POSSÍVEIS:
+- 400: valor <= 0
+- 400: metodoPagamento inválido
+- 400: Fundo encerrado
+- 404: Fundo não encontrado
+- 500: Gateway AppyPay indisponível
+- 500: Erro ao gerar referência bancária
+
+OBSERVAÇÕES:
+- Recarga NÃO atualiza saldo imediatamente
+- Saldo só é atualizado após confirmação do pagamento
+- Frontend deve exibir status PENDENTE e instruções de pagamento
+- Pagamento pode levar minutos/horas para confirmar
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4.6. GET /api/fundos/{fundoId}/transacoes                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+DESCRIÇÃO:
+Lista todas as transações de um fundo (histórico completo).
+
+REQUEST:
+- Método: GET
+- Headers: Authorization: Bearer {token}
+- Path Param: fundoId (Long)
+- Query Params: (todos opcionais)
+  - tipo: filtrar por tipo (CREDITO, DEBITO, ESTORNO)
+  - dataInicio: filtrar por data (formato: YYYY-MM-DD)
+  - dataFim: filtrar por data (formato: YYYY-MM-DD)
+  - page: número da página (padrão 0)
+  - size: tamanho da página (padrão 50)
+- Body: (vazio)
+
+VALIDAÇÕES BACKEND:
+- fundoId deve existir
+- Datas devem ser válidas (formato ISO)
+
+PROCESSAMENTO BACKEND:
+1. Busca fundo por ID
+2. Query transações where fundoId = {id}
+3. Aplica filtros opcionais (tipo, datas)
+4. Ordena por createdAt DESC (mais recente primeiro)
+5. Aplica paginação
+
+RESPONSE (200 OK):
+{
+  "success": true,
+  "message": "Transações encontradas",
+  "data": [
+    {
+      "id": 101,
+      "fundoId": 1,
+      "tipo": "CREDITO",
+      "valor": 5000,
+      "descricao": "Recarga via GPO - Pagamento #456",
+      "saldoAnterior": 3500,
+      "saldoNovo": 8500,
+      "pedidoId": null,
+      "createdAt": "2026-02-22T11:36:32.026398",
+      "createdBy": "Admin Sistema"
+    },
+    {
+      "id": 100,
+      "fundoId": 1,
+      "tipo": "DEBITO",
+      "valor": 1500,
+      "descricao": "Débito ref. Pedido PED-20260222-002",
+      "saldoAnterior": 5000,
+      "saldoNovo": 3500,
+      "pedidoId": 45,
+      "createdAt": "2026-02-22T11:30:15.123456",
+      "createdBy": "system"
+    },
+    {
+      "id": 99,
+      "fundoId": 1,
+      "tipo": "CREDITO",
+      "valor": 5000,
+      "descricao": "Saldo inicial",
+      "saldoAnterior": 0,
+      "saldoNovo": 5000,
+      "pedidoId": null,
+      "createdAt": "2026-02-22T11:20:07.216379",
+      "createdBy": "system"
+    }
+  ]
+}
+
+ERROS POSSÍVEIS:
+- 404: Fundo não encontrado
+- 400: Formato de data inválido
+
+OBSERVAÇÕES:
+- Sempre ordenado por data DESC (mais recente primeiro)
+- Transações não podem ser alteradas (imutáveis)
+- pedidoId presente apenas em DEBITO e ESTORNO
+- Frontend deve formatar valores: 5000 → "50,00 AOA"
+
+================================================================================
+5. FLUXOS DE INTEGRAÇÃO DETALHADOS
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 5.1. FLUXO: CRIAR PRIMEIRO FUNDO DE UM CLIENTE                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+CONTEXTO:
+Cliente está cadastrado mas não possui fundo de consumo.
+Usuário quer criar pedido PRE_PAGO.
+
+PASSO A PASSO:
+
+1. FRONTEND: ModalNovoPedido monta com prop unidade
+   - Extrai clienteId de unidade.cliente.id
+   - Chama GET /fundos/cliente/{clienteId}
+
+2. BACKEND: Busca fundo ativo do cliente
+   - Query: SELECT * FROM fundos_consumo WHERE cliente_id = {id} AND ativo = true
+   - Resultado: vazio (cliente não tem fundo)
+   - Response: 404 Not Found
+
+3. FRONTEND: Recebe 404
+   - Define fundoConsumo.value = null
+   - Exibe alerta: "Cliente não possui fundo de consumo"
+   - Exibe botão: "Criar Fundo"
+   - Desabilita opção "PRÉ-PAGO" no tipoPagamento
+
+4. USUÁRIO: Clica em "Criar Fundo"
+   - Frontend emite evento 'criar-fundo' para componente pai
+   - Pai abre ModalCriarFundo com prop cliente
+
+5. FRONTEND: ModalCriarFundo monta
+   - Preenche clienteId automaticamente (readonly)
+   - Chama GET /config/valor-minimo
+   - Exibe formulário: saldoInicial, observacoes
+
+6. BACKEND: Retorna valor mínimo
+   - Response: { data: { valorMinimo: 5000 } }
+
+7. FRONTEND: Define validação
+   - saldoInicial >= 5000
+   - Valida em tempo real
+
+8. USUÁRIO: Preenche saldoInicial = 10000, observacoes = "Inicial"
+   - Frontend valida: 10000 >= 5000 ✅
+   - Habilita botão "Criar"
+
+9. USUÁRIO: Clica em "Criar"
+   - Frontend chama POST /fundos
+   - Payload: { clienteId: 123, saldoInicial: 10000, observacoes: "Inicial" }
+
+10. BACKEND: Processa criação
+    - Valida cliente existe
+    - Valida cliente não tem fundo ativo
+    - Valida 10000 >= 5000 ✅
+    - INSERT INTO fundos_consumo (...) VALUES (...)
+    - INSERT INTO transacoes_fundo (tipo='CREDITO', valor=10000, ...)
+    - COMMIT
+
+11. BACKEND: Response 201 Created
+    - { success: true, data: { id: 1, saldoAtual: 10000, ... } }
+
+12. FRONTEND: Recebe sucesso
+    - Emite evento 'fundo-criado' com dados do fundo
+    - Fecha ModalCriarFundo
+    - Exibe notificação: "Fundo criado com sucesso!"
+
+13. FRONTEND: Parent recebe evento 'fundo-criado'
+    - ModalNovoPedido atualiza fundoConsumo.value = fundo
+    - Remove alerta de "não possui fundo"
+    - Habilita opção "PRÉ-PAGO"
+    - Exibe saldo: "Saldo: 100,00 AOA"
+
+14. USUÁRIO: Pode agora criar pedido PRÉ-PAGO normalmente
+
+PONTOS DE ATENÇÃO:
+- Cliente não pode ter 2 fundos ativos (backend valida)
+- saldoInicial deve ser >= valorMinimo
+- Transação inicial criada automaticamente
+- Frontend deve recarregar dados após criação
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 5.2. FLUXO: RECARREGAR FUNDO VIA GPO                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+CONTEXTO:
+Cliente possui fundo ativo mas saldo está baixo.
+Usuário quer adicionar mais crédito via AppyPay (GPO).
+
+PASSO A PASSO:
+
+1. USUÁRIO: Navega para /admin/fundos/1
+   - FundoDetalheView carrega dados do fundo
+   - Exibe saldo atual: 25,00 AOA
+
+2. USUÁRIO: Clica em "Recarregar Fundo"
+   - Frontend abre ModalRecarregarFundo
+   - Passa prop: fundo (objeto completo)
+
+3. FRONTEND: ModalRecarregarFundo monta
+   - Exibe saldo atual: 2500 → "25,00 AOA"
+   - Chama GET /config/valor-minimo
+   - Renderiza formulário: valor, metodoPagamento
+
+4. BACKEND: Retorna valor mínimo
+   - Response: { data: { valorMinimo: 5000 } }
+
+5. USUÁRIO: Preenche valor = 10000, seleciona GPO
+   - Frontend valida: 10000 >= 5000 ✅
+   - Preview exibe: 2500 + 10000 = 12500 → "125,00 AOA"
+   - Habilita botão "Recarregar"
+
+6. USUÁRIO: Clica em "Recarregar"
+   - Frontend chama POST /fundos/1/recarregar
+   - Payload: { valor: 10000, metodoPagamento: "GPO", descricao: "Recarga" }
+
+7. BACKEND: Processa recarga
+   - Valida fundo existe e está ativo
+   - Valida valor > 0 ✅
+   - INSERT INTO pagamentos_fundo (status='PENDENTE', ...)
+   - Chama API AppyPay:
+     POST https://api.appypay.com/payments
+     {
+       "amount": 10000,
+       "currency": "AOA",
+       "callback_url": "https://api.restaurante.com/webhooks/appypay",
+       "metadata": { "fundoId": 1, "pagamentoId": 456 }
+     }
+
+8. APPYPAY: Retorna URL de pagamento
+   - Response: { payment_url: "https://appypay.com/pay/abc123" }
+
+9. BACKEND: Atualiza registro
+   - UPDATE pagamentos_fundo SET url_pagamento = '...' WHERE id = 456
+   - COMMIT
+
+10. BACKEND: Response 201 Created
+    - { success: true, data: { 
+        id: 456, 
+        urlPagamento: "https://appypay.com/pay/abc123",
+        status: "PENDENTE"
+      }}
+
+11. FRONTEND: Recebe sucesso
+    - Armazena pagamento em pagamentoCriado.value
+    - Muda estado do modal para "Aguardando Pagamento"
+    - Exibe:
+      - Status: PENDENTE
+      - Botão "Pagar no AppyPay" com link para urlPagamento
+      - Instrução: "Clique no botão para completar o pagamento"
+    - Troca botão "Recarregar" para "Fechar"
+
+12. USUÁRIO: Clica em "Pagar no AppyPay"
+    - Frontend abre nova aba: window.open(urlPagamento, '_blank')
+    - Usuário é redirecionado para AppyPay
+
+13. APPYPAY: Usuário completa pagamento
+    - Paga via GPO
+    - AppyPay confirma transação
+
+14. APPYPAY: Envia webhook para backend
+    POST https://api.restaurante.com/webhooks/appypay
+    {
+      "event": "payment.confirmed",
+      "payment_id": "abc123",
+      "amount": 10000,
+      "metadata": { "fundoId": 1, "pagamentoId": 456 }
+    }
+
+15. BACKEND: Processa webhook
+    - Valida assinatura do webhook
+    - Extrai fundoId e pagamentoId de metadata
+    - BEGIN TRANSACTION
+    - UPDATE pagamentos_fundo SET status = 'PAGO' WHERE id = 456
+    - SELECT * FROM fundos_consumo WHERE id = 1 FOR UPDATE (lock pessimista)
+    - INSERT INTO transacoes_fundo (
+        tipo='CREDITO', 
+        valor=10000, 
+        descricao='Recarga via GPO - Pagamento #456',
+        saldo_anterior=2500,
+        saldo_novo=12500
+      )
+    - UPDATE fundos_consumo SET saldo_atual = 12500, version = version + 1
+    - COMMIT
+
+16. BACKEND: Envia notificação WebSocket (opcional)
+    - /topic/fundo/1
+    - { event: 'SALDO_ATUALIZADO', novoSaldo: 12500 }
+
+17. FRONTEND: Recebe WebSocket (se implementado)
+    - Atualiza saldo em tempo real
+    - OU usuário recarrega página manualmente
+
+18. USUÁRIO: Volta para aba do restaurante
+    - Clica em "Fechar" no modal
+    - Frontend emite evento 'recarga-realizada'
+    - FundoDetalheView recarrega dados:
+      - GET /fundos/cliente/{clienteId}
+      - GET /fundos/1/transacoes
+
+19. FRONTEND: Exibe dados atualizados
+    - Saldo: 12500 → "125,00 AOA" ✅
+    - Nova transação no extrato:
+      "Recarga via GPO - Pagamento #456 | +100,00 AOA"
+
+PONTOS DE ATENÇÃO:
+- Recarga NÃO é imediata (depende de confirmação AppyPay)
+- Status PENDENTE pode durar segundos a minutos
+- Frontend deve instruir usuário a completar pagamento
+- WebSocket ideal para atualização automática (sem polling)
+- Webhook deve validar assinatura (segurança)
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 5.3. FLUXO: CRIAR PEDIDO PRÉ-PAGO COM DÉBITO AUTOMÁTICO                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+CONTEXTO:
+Cliente possui fundo ativo com saldo 100,00 AOA.
+Usuário quer criar pedido de 28,00 AOA usando fundo.
+
+PASSO A PASSO:
+
+1. FRONTEND: ModalNovoPedido monta
+   - Busca fundo: GET /fundos/cliente/{clienteId}
+   - Recebe: { data: { id: 1, saldoAtual: 10000 } }
+   - Define fundoConsumo.value = fundo
+   - Define tipoPagamento padrão = "PRE_PAGO"
+   - Exibe saldo: "Saldo: 100,00 AOA"
+
+2. USUÁRIO: Adiciona produto ao carrinho
+   - Produto: Salada Tropical, preço: 2800, qtd: 1
+   - Frontend calcula: totalCarrinho = 2800
+
+3. FRONTEND: Valida saldo em tempo real
+   - computed: saldoSuficiente = fundoConsumo.saldoAtual >= totalCarrinho
+   - Cálculo: 10000 >= 2800 ✅
+   - Mantém botão "Criar Pedido" habilitado
+   - Exibe: "Novo saldo: 100,00 - 28,00 = 72,00 AOA"
+
+4. USUÁRIO: Clica em "Criar Pedido"
+   - Frontend valida novamente
+   - Monta payload:
+     {
+       "unidadeConsumoId": 5,
+       "tipoPagamento": "PRE_PAGO",
+       "itens": [
+         { "produtoId": 2, "quantidade": 1 }
+       ]
+     }
+   - Chama POST /pedidos
+
+5. BACKEND PedidoService: Inicia criação
+   - Busca unidade de consumo: SELECT * FROM unidades_consumo WHERE id = 5
+   - Extrai clienteId: unidade.cliente.id = 123
+   - Define tipoPagamento = "PRE_PAGO"
+
+6. BACKEND: Calcula total preliminar
+   - Busca produto: SELECT * FROM produtos WHERE id = 2
+   - Calcula: preco * quantidade = 2800 * 1 = 2800
+
+7. BACKEND PedidoFinanceiroService: Valida criação
+   - validarCriacaoPedido(clienteId=123, valorTotal=2800, tipo=PRE_PAGO)
+   - Como é PRE_PAGO, chama validarSaldoSuficiente()
+
+8. BACKEND FundoConsumoService: Valida saldo
+   - buscarPorCliente(123)
+   - SELECT * FROM fundos_consumo WHERE cliente_id = 123 AND ativo = true
+   - Resultado: fundo com saldoAtual = 10000
+   - Valida: 10000 >= 2800 ✅
+
+9. BACKEND PedidoService: Cria pedido vazio
+   - INSERT INTO pedidos (numero, status='CRIADO', total=0, ...)
+   - ID gerado: 45
+
+10. BACKEND: Agrupa itens por cozinha
+    - Produto categoria = SALADA → tipo preparo = FRIO
+    - Determina cozinha: COZINHA_FRIA (id=2)
+
+11. BACKEND: Cria SubPedido
+    - INSERT INTO sub_pedidos (
+        numero='PED-20260222-002-1',
+        pedido_id=45,
+        cozinha_id=2,
+        status='PENDENTE'
+      )
+
+12. BACKEND: Cria ItemPedido
+    - INSERT INTO itens_pedido (
+        pedido_id=45,
+        sub_pedido_id=...,
+        produto_id=2,
+        quantidade=1,
+        preco_unitario=2800,
+        subtotal=2800
+      )
+
+13. BACKEND: Recalcula total do pedido
+    - pedido.calcularTotal() → total = 2800
+    - UPDATE pedidos SET total = 2800 WHERE id = 45
+
+14. BACKEND PedidoFinanceiroService: Processa pagamento
+    - processarPagamentoPedido(pedidoId=45, clienteId=123, valorTotal=2800, tipo=PRE_PAGO)
+    - Como é PRE_PAGO, chama FundoConsumoService.debitar()
+
+15. BACKEND FundoConsumoService: Debita fundo
+    - BEGIN TRANSACTION
+    - SELECT * FROM fundos_consumo WHERE cliente_id = 123 FOR UPDATE (lock)
+    - Valida novamente: saldoAtual >= 2800 ✅
+    - INSERT INTO transacoes_fundo (
+        fundo_id=1,
+        tipo='DEBITO',
+        valor=2800,
+        descricao='Débito ref. Pedido PED-20260222-002',
+        saldo_anterior=10000,
+        saldo_novo=7200,
+        pedido_id=45
+      )
+    - UPDATE fundos_consumo SET 
+        saldo_atual = 7200,
+        version = version + 1
+      WHERE id = 1
+    - UPDATE pedidos SET status_financeiro = 'PAGO' WHERE id = 45
+    - COMMIT
+
+16. BACKEND: Response 201 Created
+    - { success: true, data: { 
+        id: 45, 
+        numero: "PED-20260222-002",
+        total: 2800,
+        status: "CRIADO",
+        statusFinanceiro: "PAGO"
+      }}
+
+17. FRONTEND: Recebe sucesso
+    - Exibe notificação: "Pedido criado! Saldo debitado."
+    - Fecha ModalNovoPedido
+    - Emite evento 'pedido-criado'
+
+18. FRONTEND: Parent recarrega dados
+    - Lista de pedidos: GET /pedidos
+    - Saldo do fundo: GET /fundos/cliente/123 ou GET /fundos/1/saldo
+    - Atualiza interface com novo saldo: 72,00 AOA
+
+PONTOS DE ATENÇÃO:
+- Débito é IMEDIATO ao criar pedido PRE_PAGO
+- Backend usa lock pessimista (FOR UPDATE) para evitar race conditions
+- Transação é atômica: pedido + débito na mesma transação DB
+- Se débito falhar, pedido não é criado (rollback)
+- Frontend deve revalidar saldo antes de enviar request
+- version do fundo é incrementado (controle de concorrência)
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 5.4. FLUXO: SALDO INSUFICIENTE - OFERECER RECARGA                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+CONTEXTO:
+Cliente possui fundo com saldo 20,00 AOA.
+Usuário tenta criar pedido de 50,00 AOA.
+
+PASSO A PASSO:
+
+1. FRONTEND: ModalNovoPedido monta
+   - Busca fundo: saldoAtual = 2000 (20,00 AOA)
+   - Exibe saldo com indicador visual (laranja/vermelho)
+
+2. USUÁRIO: Adiciona produtos ao carrinho
+   - Total do carrinho: 5000 (50,00 AOA)
+
+3. FRONTEND: Valida saldo em tempo real
+   - computed: saldoSuficiente = 2000 >= 5000 ❌
+   - Exibe alerta vermelho:
+     "⚠️ Saldo Insuficiente"
+     "Saldo atual: 20,00 AOA"
+     "Total do pedido: 50,00 AOA"
+     "Faltam: 30,00 AOA"
+   - Desabilita botão "Criar Pedido"
+   - Exibe botão "Recarregar Fundo"
+
+4. USUÁRIO: Clica em "Recarregar Fundo"
+   - Frontend redireciona: router.push('/admin/fundos/1')
+   - ModalNovoPedido permanece em memória (não fecha)
+
+5. USUÁRIO: Página FundoDetalheView carrega
+   - Exibe saldo atual: 20,00 AOA
+   - Usuário clica em "Recarregar Fundo"
+
+6. USUÁRIO: Completa recarga (fluxo 5.2)
+   - Recarrega 30,00 AOA via GPO
+   - Novo saldo: 50,00 AOA
+
+7. USUÁRIO: Volta para página de pedidos
+   - router.push('/admin/pedidos')
+   - ModalNovoPedido reabre (ou abre novo)
+
+8. FRONTEND: ModalNovoPedido recarrega fundo
+   - GET /fundos/cliente/123
+   - Recebe: saldoAtual = 5000 (50,00 AOA)
+   - Valida: 5000 >= 5000 ✅
+   - Remove alerta
+   - Habilita botão "Criar Pedido"
+
+9. USUÁRIO: Clica em "Criar Pedido"
+   - Pedido criado com sucesso
+   - Saldo debitado: 50,00 - 50,00 = 0,00 AOA
+
+ALTERNATIVA: RECARGA NO PRÓPRIO MODAL (FUTURO):
+- Abrir ModalRecarregarFundo dentro de ModalNovoPedido
+- Usuário recarrega sem sair da tela
+- Após confirmação, recarrega saldo e permite criar pedido
+- Melhor UX mas mais complexo
+
+PONTOS DE ATENÇÃO:
+- Frontend deve validar saldo ANTES de enviar request
+- Backend também valida (segurança, dupla validação)
+- Mensagem clara para usuário sobre valor faltante
+- Facilitar acesso à recarga (botão destacado)
+- Considerar sugestão de valor: "Recarregar 30,00 AOA" (exato)
+
+================================================================================
+6. REGRAS DE NEGÓCIO E VALIDAÇÕES
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 6.1. REGRAS GLOBAIS                                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+RN001: UM FUNDO ATIVO POR CLIENTE
+Descrição: Cliente pode ter apenas 1 fundo com status ativo = true
+Validação: Backend (constraint UNIQUE em cliente_id WHERE ativo = true)
+Erro: 400 "Cliente já possui fundo ativo"
+
+RN002: VALORES EM CENTAVOS
+Descrição: Todos os valores monetários armazenados em centavos
+Conversão: 10000 centavos = 100,00 AOA
+Frontend: Sempre converter para exibição (dividir por 100)
+Backend: Armazenar como Long/Integer em centavos
+
+RN003: VALOR MÍNIMO CONFIGURÁVEL
+Descrição: Sistema tem valor mínimo para criação/recarga
+Padrão: 5000 centavos (50,00 AOA)
+Configuração: Tabela configuracao_financeira
+Validação: Backend (consultar sempre antes de validar)
+Frontend: Consultar via GET /config/valor-minimo
+
+RN004: TRANSAÇÕES IMUTÁVEIS
+Descrição: Transações nunca são alteradas após criação
+Motivo: Auditoria, compliance financeiro
+Correção: Criar nova transação (ex: estorno)
+Deleção: Não permitida
+
+RN005: CONCORRÊNCIA OTIMISTA
+Descrição: Campo version controla concorrência
+Incremento: Automático a cada UPDATE do fundo
+Conflito: Retorna 409 Conflict
+Solução: Frontend deve recarregar e tentar novamente
+
+RN006: DÉBITO ATÔMICO
+Descrição: Débito de pedido e atualização de saldo na mesma transação
+Técnica: Lock pessimista (FOR UPDATE) + transação DB
+Rollback: Se qualquer operação falhar, todas revertem
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 6.2. VALIDAÇÕES DE CRIAÇÃO DE FUNDO                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+V001: clienteId obrigatório
+Validação: Frontend + Backend
+Mensagem: "ID do cliente é obrigatório"
+
+V002: Cliente deve existir
+Validação: Backend (query em clientes)
+Mensagem: "Cliente não encontrado"
+
+V003: Cliente não pode ter fundo ativo
+Validação: Backend (query em fundos_consumo)
+Mensagem: "Cliente já possui fundo ativo"
+
+V004: saldoInicial >= valorMinimo
+Validação: Frontend + Backend
+Mensagem: "Saldo inicial deve ser no mínimo {valorMinimo} AOA"
+
+V005: saldoInicial > 0
+Validação: Frontend + Backend
+Mensagem: "Saldo inicial deve ser maior que zero"
+
+V006: observacoes máximo 500 caracteres
+Validação: Backend
+Mensagem: "Observações não podem exceder 500 caracteres"
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 6.3. VALIDAÇÕES DE RECARGA                                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+V007: Fundo deve existir
+Validação: Backend (query em fundos_consumo)
+Mensagem: "Fundo não encontrado"
+
+V008: Fundo deve estar ativo
+Validação: Backend (ativo = true)
+Mensagem: "Fundo encerrado. Não é possível recarregar"
+
+V009: valor > 0
+Validação: Frontend + Backend
+Mensagem: "Valor deve ser maior que zero"
+
+V010: valor >= valorMinimo (opcional)
+Validação: Backend (pode permitir recargas menores)
+Mensagem: "Valor mínimo para recarga é {valorMinimo} AOA"
+
+V011: metodoPagamento válido
+Validação: Frontend + Backend
+Valores: ["GPO", "REF"]
+Mensagem: "Método de pagamento inválido"
+
+V012: descricao máximo 500 caracteres
+Validação: Backend
+Mensagem: "Descrição não pode exceder 500 caracteres"
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 6.4. VALIDAÇÕES DE DÉBITO (PEDIDO PRÉ-PAGO)                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+V013: Cliente deve ter fundo ativo
+Validação: Backend (query em fundos_consumo)
+Mensagem: "Cliente não possui fundo de consumo ativo"
+
+V014: Saldo >= valor do pedido
+Validação: Backend (buscar fundo e comparar)
+Mensagem: "Saldo insuficiente. Saldo: {saldo}, Pedido: {total}"
+
+V015: valorDebito > 0
+Validação: Backend (FundoConsumoService.debitar)
+Mensagem: "Valor de débito deve ser maior que zero"
+
+V016: Fundo ainda está ativo ao debitar
+Validação: Backend (revalidar antes de debitar)
+Mensagem: "Fundo foi encerrado durante processamento"
+
+V017: Versão do fundo não mudou (concorrência)
+Validação: Backend (optimistic locking)
+Mensagem: "Saldo foi atualizado. Recarregue e tente novamente"
+
+================================================================================
+7. CASOS DE USO E EDGE CASES
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 7.1. CLIENTE TENTA CRIAR SEGUNDO FUNDO                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+CENÁRIO:
+Cliente ID 123 já possui fundo ativo (id=1).
+Usuário tenta criar novo fundo para mesmo cliente.
+
+COMPORTAMENTO ESPERADO:
+1. Frontend envia POST /fundos { clienteId: 123, saldoInicial: 10000 }
+2. Backend valida: cliente já tem fundo ativo
+3. Backend retorna 400 Bad Request
+   {
+     "success": false,
+     "message": "Cliente já possui fundo ativo",
+     "errors": [{
+       "field": "clienteId",
+       "message": "Cliente ID 123 já possui um fundo ativo"
+     }]
+   }
+4. Frontend exibe erro amigável
+5. Frontend oferece opções:
+   - Ver fundo existente (redirecionar para /fundos/1)
+   - Recarregar fundo existente
+
+SOLUÇÃO:
+Orientar usuário a usar fundo existente, não criar novo.
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 7.2. SALDO MUDOU DURANTE CRIAÇÃO DE PEDIDO (RACE CONDITION)                │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+CENÁRIO:
+Dois atendentes criam pedidos PRE_PAGO simultaneamente para mesmo cliente.
+
+TIMELINE:
+T0: Fundo tem saldo 10000 (100,00 AOA), version=5
+T1: Atendente A busca fundo → saldo 10000
+T2: Atendente B busca fundo → saldo 10000
+T3: Atendente A cria pedido de 6000 → saldo 4000, version=6
+T4: Atendente B tenta criar pedido de 7000 → saldo insuficiente!
+
+COMPORTAMENTO ESPERADO:
+1. Atendente A: POST /pedidos (total: 6000)
+2. Backend:
+   - Valida saldo: 10000 >= 6000 ✅
+   - BEGIN TRANSACTION
+   - SELECT * FROM fundos_consumo WHERE id = 1 FOR UPDATE (lock)
+   - Debita 6000
+   - saldo = 10000 - 6000 = 4000
+   - version = 5 + 1 = 6
+   - COMMIT
+3. Atendente B: POST /pedidos (total: 7000)
+4. Backend:
+   - Valida saldo: 4000 >= 7000 ❌ (saldo já foi atualizado por A)
+   - Retorna 400 "Saldo insuficiente"
+5. Frontend B exibe erro: "Saldo: 40,00 AOA, Pedido: 70,00 AOA"
+6. Atendente B recarrega saldo e vê valor atualizado
+
+PROTEÇÃO:
+- Lock pessimista (FOR UPDATE) impede leituras sujas
+- Validação de saldo dentro da transação
+- Revalidação antes de debitar
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 7.3. PAGAMENTO APPYPAY DEMORA PARA CONFIRMAR                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+CENÁRIO:
+Cliente recarrega 50,00 AOA via GPO.
+AppyPay está lento, pagamento fica PENDENTE por 10 minutos.
+
+COMPORTAMENTO ESPERADO:
+1. Usuário cria recarga: POST /fundos/1/recarregar
+2. Backend:
+   - Cria pagamento com status PENDENTE
+   - Chama AppyPay, recebe urlPagamento
+   - Retorna para frontend
+3. Frontend:
+   - Exibe botão "Pagar no AppyPay"
+   - Usuário clica, abre AppyPay em nova aba
+4. Usuário completa pagamento no AppyPay
+5. AppyPay processa (pode demorar)
+6. Saldo NÃO é atualizado imediatamente
+7. Após confirmação (webhook), saldo é atualizado
+8. Frontend:
+   - Pode fazer polling: GET /fundos/1/saldo a cada 30s
+   - OU aguardar usuário recarregar página
+   - OU receber WebSocket quando atualizar
+
+ORIENTAÇÃO PARA USUÁRIO:
+"Recarga em processamento. O saldo será atualizado em alguns instantes.
+Você pode fechar esta janela e aguardar a confirmação."
+
+IMPORTANTE:
+- Não bloquear interface aguardando confirmação
+- Permitir usuário continuar navegando
+- Exibir status PENDENTE claramente
+- Polling leve (máximo 1 req/30s)
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 7.4. CLIENTE SEM FUNDO TENTA CRIAR PEDIDO PRÉ-PAGO                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+CENÁRIO:
+Mesa vinculada a cliente que não tem fundo.
+Atendente tenta criar pedido PRE_PAGO.
+
+COMPORTAMENTO ESPERADO:
+1. Frontend:
+   - ModalNovoPedido monta
+   - Busca fundo: GET /fundos/cliente/{id}
+   - Recebe 404 Not Found
+2. Frontend detecta ausência de fundo:
+   - Define fundoConsumo.value = null
+   - Exibe alerta: "Cliente não possui fundo de consumo"
+   - Desabilita opção "PRÉ-PAGO" no select de tipoPagamento
+   - Exibe apenas: "PÓS-PAGO" (se GERENTE/ADMIN)
+3. Exibe botão destacado: "Criar Fundo para este Cliente"
+4. Usuário clica em "Criar Fundo"
+5. Abre ModalCriarFundo com clienteId preenchido
+6. Usuário cria fundo (fluxo 5.1)
+7. Após criar, ModalNovoPedido recarrega fundo
+8. Habilita opção "PRÉ-PAGO"
+9. Usuário pode criar pedido normalmente
+
+ALTERNATIVA (SE BACKEND PERMITIR):
+Backend pode criar fundo automaticamente ao criar primeiro pedido PRE_PAGO.
+Mas ideal é exigir criação explícita (melhor controle).
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 7.5. FUNDO ENCERRADO, USUÁRIO TENTA RECARREGAR                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+CENÁRIO:
+Fundo foi encerrado por administrador (ativo = false).
+Usuário tenta recarregar.
+
+COMPORTAMENTO ESPERADO:
+1. FundoDetalheView carrega fundo:
+   - Recebe: { ativo: false }
+   - Exibe badge: "ENCERRADO" (cinza)
+   - NÃO exibe botão "Recarregar Fundo"
+2. Histórico de transações ainda visível (somente leitura)
+3. Se usuário tentar via URL direta: POST /fundos/{id}/recarregar
+4. Backend valida: fundo.ativo = false
+5. Backend retorna 400 "Fundo encerrado"
+6. Frontend exibe erro: "Este fundo foi encerrado e não pode ser recarregado"
+7. Frontend oferece: "Criar novo fundo para este cliente"
+
+MOTIVOS PARA ENCERRAR FUNDO:
+- Cliente solicitou encerramento
+- Fundo com irregularidades
+- Cliente saiu do sistema
+- Migração de sistema
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 7.6. CANCELAMENTO DE PEDIDO PRÉ-PAGO (ESTORNO)                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+CENÁRIO:
+Pedido PRE_PAGO de 50,00 AOA foi criado (saldo debitado).
+Atendente cancela o pedido.
+
+COMPORTAMENTO ESPERADO:
+1. Atendente: DELETE /pedidos/{id} ou PUT /pedidos/{id}/cancelar
+2. Backend PedidoService:
+   - Valida pedido existe
+   - Valida status permite cancelamento
+   - Valida tipoPagamento = PRE_PAGO
+   - Valida statusFinanceiro = PAGO (já foi debitado)
+3. Backend chama FundoConsumoService.estornar()
+4. Backend:
+   - BEGIN TRANSACTION
+   - SELECT * FROM fundos_consumo WHERE cliente_id = {id} FOR UPDATE
+   - INSERT INTO transacoes_fundo (
+       tipo='ESTORNO',
+       valor=5000,
+       descricao='Estorno ref. Pedido PED-X cancelado',
+       saldo_anterior=2000,
+       saldo_novo=7000,
+       pedido_id={id}
+     )
+   - UPDATE fundos_consumo SET saldo_atual = 7000, version = version + 1
+   - UPDATE pedidos SET status = 'CANCELADO', status_financeiro = 'ESTORNADO'
+   - COMMIT
+5. Backend retorna 200 OK
+6. Frontend:
+   - Exibe notificação: "Pedido cancelado. Saldo estornado: 50,00 AOA"
+   - Atualiza lista de pedidos
+   - Se estiver em FundoDetalheView, atualiza saldo e transações
+
+REGRAS:
+- Estorno é IMEDIATO (não depende de confirmação externa)
+- Valor estornado = valor original do pedido
+- Transação tipo ESTORNO criada automaticamente
+- Pedido fica com status CANCELADO + statusFinanceiro ESTORNADO
+
+================================================================================
+8. TRATAMENTO DE ERROS
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 8.1. ERROS 400 BAD REQUEST                                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+SITUAÇÃO: Dados inválidos ou regra de negócio violada
+
+EXEMPLOS:
+
+Erro: Saldo inicial abaixo do mínimo
+Response:
+{
+  "success": false,
+  "message": "Saldo inicial deve ser no mínimo 50,00 AOA",
+  "errors": [{
+    "field": "saldoInicial",
+    "message": "Valor mínimo para criação de fundo é 5000 centavos"
+  }]
+}
+Frontend: Destaca campo saldoInicial, exibe mensagem específica
+
+Erro: Cliente já possui fundo ativo
+Response:
+{
+  "success": false,
+  "message": "Cliente já possui fundo ativo",
+  "errors": [{
+    "field": "clienteId",
+    "message": "Cliente ID 123 já possui um fundo ativo"
+  }]
+}
+Frontend: Exibe mensagem + oferece ir para fundo existente
+
+Erro: Fundo encerrado
+Response:
+{
+  "success": false,
+  "message": "Fundo encerrado. Não é possível realizar operações",
+  "errors": [{
+    "field": "fundoId",
+    "message": "Fundo ID 1 foi encerrado e não aceita novas operações"
+  }]
+}
+Frontend: Exibe mensagem + oferece criar novo fundo
+
+Erro: Saldo insuficiente
+Response:
+{
+  "success": false,
+  "message": "Saldo insuficiente",
+  "errors": [{
+    "field": "saldoAtual",
+    "message": "Saldo atual: 20,00 AOA. Valor necessário: 50,00 AOA. Faltam: 30,00 AOA"
+  }]
+}
+Frontend: Exibe valores claros + botão "Recarregar"
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 8.2. ERROS 404 NOT FOUND                                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+SITUAÇÃO: Recurso não existe
+
+EXEMPLOS:
+
+Erro: Fundo não encontrado
+Response:
+{
+  "success": false,
+  "message": "Fundo não encontrado",
+  "errors": [{
+    "field": "fundoId",
+    "message": "Fundo com ID 999 não existe"
+  }]
+}
+Frontend: Redireciona para lista de fundos + notificação
+
+Erro: Cliente não possui fundo ativo
+Response:
+{
+  "success": false,
+  "message": "Cliente não possui fundo de consumo ativo",
+  "errors": [{
+    "field": "clienteId",
+    "message": "Cliente ID 123 não tem fundo ativo"
+  }]
+}
+Frontend: Oferece criar fundo
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 8.3. ERROS 409 CONFLICT                                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+SITUAÇÃO: Conflito de concorrência (version desatualizado)
+
+EXEMPLO:
+
+Erro: Saldo foi atualizado por outro usuário
+Response:
+{
+  "success": false,
+  "message": "Saldo foi atualizado. Recarregue e tente novamente",
+  "errors": [{
+    "field": "version",
+    "message": "Versão esperada: 5, Versão atual: 7"
+  }]
+}
+Frontend:
+1. Exibe notificação: "Dados foram atualizados. Recarregando..."
+2. Recarrega fundo: GET /fundos/cliente/{id}
+3. Atualiza interface com novo saldo e version
+4. Permite usuário tentar novamente
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 8.4. ERROS 500 INTERNAL SERVER ERROR                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+SITUAÇÃO: Erro no backend ou integração externa
+
+EXEMPLOS:
+
+Erro: Gateway AppyPay indisponível
+Response:
+{
+  "success": false,
+  "message": "Serviço de pagamento temporariamente indisponível",
+  "errors": [{
+    "field": "gateway",
+    "message": "Não foi possível conectar ao AppyPay. Tente novamente em alguns instantes"
+  }]
+}
+Frontend: Exibe mensagem amigável + botão "Tentar Novamente"
+
+Erro: Falha ao criar transação
+Response:
+{
+  "success": false,
+  "message": "Erro ao processar operação",
+  "errors": [{
+    "field": "transacao",
+    "message": "Falha ao registrar movimentação financeira"
+  }]
+}
+Frontend: Exibe erro genérico + pede para contatar suporte
+
+LOGS BACKEND:
+- Registrar stack trace completo
+- Incluir contexto (fundoId, valor, operação)
+- Alertar equipe de ops imediatamente
+
+================================================================================
+9. MELHORIAS E PRÓXIMOS PASSOS
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 9.1. ENDPOINT DE LISTAGEM COMPLETA                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+NECESSIDADE:
+Frontend precisa listar todos os fundos (não apenas buscar por cliente).
+
+ENDPOINT SUGERIDO:
+GET /api/fundos
+
+Query Params:
+- ativo: filtrar por status (true/false/all)
+- clienteNome: busca parcial por nome do cliente
+- saldoMinimo: filtrar fundos com saldo >= valor
+- saldoMaximo: filtrar fundos com saldo <= valor
+- page: paginação
+- size: tamanho da página
+
+Response:
+{
+  "success": true,
+  "data": {
+    "content": [ ...fundos... ],
+    "totalElements": 150,
+    "totalPages": 15,
+    "page": 0,
+    "size": 10
+  }
+}
+
+USO:
+- Dashboard administrativo
+- Relatórios de fundos
+- Busca de fundos sem saber clienteId
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 9.2. WEBSOCKET PARA ATUALIZAÇÕES EM TEMPO REAL                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+NECESSIDADE:
+Evitar polling, atualizar saldo automaticamente.
+
+TÓPICO SUGERIDO:
+/topic/fundo/{fundoId}
+
+EVENTOS:
+- SALDO_ATUALIZADO: quando saldo muda (crédito/débito/estorno)
+- PAGAMENTO_CONFIRMADO: quando recarga é confirmada
+- FUNDO_ENCERRADO: quando fundo é encerrado
+
+Payload:
+{
+  "event": "SALDO_ATUALIZADO",
+  "fundoId": 1,
+  "novoSaldo": 12500,
+  "version": 8,
+  "timestamp": "2026-02-22T12:30:00"
+}
+
+FRONTEND:
+- Conectar WebSocket ao abrir FundoDetalheView
+- Desconectar ao sair da view
+- Atualizar interface automaticamente ao receber evento
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 9.3. NOTIFICAÇÕES DE SALDO BAIXO                                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+NECESSIDADE:
+Alertar cliente quando saldo está baixo.
+
+IMPLEMENTAÇÃO BACKEND:
+- Job agendado verifica fundos com saldo < limite (ex: 1000 = 10,00 AOA)
+- Envia SMS/Email para cliente
+- Registra notificação enviada (não enviar repetidamente)
+
+CONFIGURAÇÃO:
+- Limite configurável por cliente ou global
+- Frequência de verificação (ex: 1x por dia)
+- Template de mensagem customizável
+
+FRONTEND:
+- Indicador visual quando saldo < limite
+- Banner: "Seu saldo está baixo. Recarregue agora!"
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 9.4. DASHBOARD DE FUNDOS                                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+MÉTRICAS:
+- Total de fundos ativos
+- Saldo total de todos os fundos
+- Recargas do mês (quantidade e valor)
+- Débitos do mês (quantidade e valor)
+- Fundos com saldo baixo (< 1000)
+- Top 10 clientes por saldo
+- Gráfico de movimentação (últimos 30 dias)
+
+ENDPOINT SUGERIDO:
+GET /api/fundos/dashboard
+
+Response:
+{
+  "success": true,
+  "data": {
+    "totalFundosAtivos": 150,
+    "saldoTotalGeral": 1500000,
+    "recargasMes": { "quantidade": 45, "valorTotal": 250000 },
+    "debitosMes": { "quantidade": 320, "valorTotal": 180000 },
+    "fundosSaldoBaixo": 12,
+    "topClientes": [...]
+  }
+}
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 9.5. EXPORTAÇÃO DE EXTRATO                                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+NECESSIDADE:
+Cliente ou administrador quer exportar extrato do fundo.
+
+FORMATOS:
+- PDF: Extrato formatado com logo, cabeçalho, rodapé
+- Excel: Planilha com todas as transações
+- CSV: Dados brutos para análise
+
+ENDPOINT SUGERIDO:
+GET /api/fundos/{fundoId}/extrato?formato=PDF&dataInicio=2026-01-01&dataFim=2026-02-28
+
+Response:
+- Content-Type: application/pdf ou application/vnd.ms-excel
+- Content-Disposition: attachment; filename="extrato-fundo-1.pdf"
+- Body: arquivo binário
+
+FRONTEND:
+- Botão "Exportar Extrato" em FundoDetalheView
+- Modal com opções: formato, período
+- Download automático após gerar
+
+================================================================================
+10. CHECKLIST DE VALIDAÇÃO
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ VALIDAÇÕES BACKEND                                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+[ ] GET /config/valor-minimo retorna formato correto
+[ ] POST /fundos valida clienteId obrigatório
+[ ] POST /fundos valida saldoInicial >= valorMinimo
+[ ] POST /fundos impede cliente ter 2 fundos ativos
+[ ] POST /fundos cria transação inicial tipo CREDITO
+[ ] GET /fundos/cliente/{id} retorna fundo ativo
+[ ] GET /fundos/cliente/{id} retorna 404 se não tem fundo
+[ ] GET /fundos/{id}/saldo retorna saldoAtual atualizado
+[ ] POST /fundos/{id}/recarregar valida fundo ativo
+[ ] POST /fundos/{id}/recarregar integra com AppyPay (GPO)
+[ ] POST /fundos/{id}/recarregar gera entidade+referência (REF)
+[ ] Webhook AppyPay atualiza saldo corretamente
+[ ] GET /fundos/{id}/transacoes retorna histórico completo
+[ ] Transações ordenadas por data DESC
+[ ] Débito de pedido PRE_PAGO atualiza fundo
+[ ] Débito é atômico (lock pessimista + transação)
+[ ] Concorrência tratada (campo version)
+[ ] Estorno de pedido cancelado funciona
+[ ] Valores em centavos (Long/Integer)
+[ ] Response envelope consistente
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ VALIDAÇÕES FRONTEND                                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+[ ] fundoConsumoService consulta valorMinimo ao montar modals
+[ ] ModalCriarFundo valida saldoInicial >= valorMinimo
+[ ] ModalCriarFundo emite evento 'fundo-criado'
+[ ] ModalRecarregarFundo exibe preview de novo saldo
+[ ] ModalRecarregarFundo exibe URL/Referência após criar recarga
+[ ] ModalNovoPedido busca fundo ao montar
+[ ] ModalNovoPedido valida saldo >= totalCarrinho
+[ ] ModalNovoPedido desabilita botão se saldo insuficiente
+[ ] ModalNovoPedido oferece criar fundo se não existir
+[ ] FundoDetalheView exibe saldo formatado (centavos → AOA)
+[ ] FundoDetalheView calcula totalCreditos/Debitos/Estornos
+[ ] FundoDetalheView esconde botão "Recarregar" se encerrado
+[ ] Erros 400/404/409/500 tratados com mensagens amigáveis
+[ ] Valores sempre convertidos (10000 → "100,00 AOA")
+[ ] Formatação de datas (ISO 8601 → formato local)
+[ ] Loading states durante requisições
+[ ] Notificações de sucesso/erro exibidas
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ TESTES INTEGRAÇÃO                                                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+[ ] Criar fundo → visualizar → verificar saldo
+[ ] Criar fundo → recarregar via GPO → verificar saldo atualizado
+[ ] Criar fundo → recarregar via REF → verificar saldo atualizado
+[ ] Criar pedido PRE_PAGO → verificar débito no fundo
+[ ] Cancelar pedido PRE_PAGO → verificar estorno no fundo
+[ ] Tentar criar segundo fundo → receber erro 400
+[ ] Tentar criar pedido sem fundo → receber orientação
+[ ] Tentar criar pedido com saldo insuficiente → receber erro
+[ ] Dois pedidos simultâneos (concorrência) → um falha
+[ ] Recarregar fundo encerrado → receber erro 400
+[ ] Buscar cliente sem fundo → receber 404
+[ ] Histórico de transações completo e ordenado
+
+================================================================================
+FIM DO DOCUMENTO
+================================================================================
+
+Este documento deve ser usado como referência para:
+- Desenvolvimento de novos endpoints
+- Validação de integrações
+- Testes de QA
+- Treinamento de equipe
+- Documentação de API
+
+Qualquer dúvida ou inconsistência deve ser reportada para alinhamento.
+
+Data: 22 de fevereiro de 2026
+Versão: 1.0
+Status: DRAFT PARA REVISÃO

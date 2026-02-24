@@ -4,6 +4,7 @@ import { useCurrency } from '@/utils/currency'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
 import api from '@/services/api'
+import ImageUpload from '@/components/produtos/ImageUpload.vue'
 
 const { formatCurrency } = useCurrency()
 const authStore = useAuthStore()
@@ -168,7 +169,7 @@ const abrirModalEditar = (produto) => {
     codigo: produto.codigo,
     nome: produto.nome,
     descricao: produto.descricao || '',
-    preco: produto.preco.toString(),
+    preco: (produto.preco / 100).toFixed(2), // Converter centavos para decimal
     categoria: produto.categoria,
     urlImagem: produto.urlImagem || '',
     tempoPreparoMinutos: produto.tempoPreparoMinutos?.toString() || '',
@@ -249,7 +250,7 @@ const salvarProduto = async () => {
       codigo: form.value.codigo,
       nome: form.value.nome,
       descricao: form.value.descricao || null,
-      preco: parseFloat(form.value.preco),
+      preco: Math.round(parseFloat(form.value.preco) * 100), // Converter decimal para centavos
       categoria: form.value.categoria,
       urlImagem: form.value.urlImagem || null,
       tempoPreparoMinutos: form.value.tempoPreparoMinutos ? parseInt(form.value.tempoPreparoMinutos) : null,
@@ -309,6 +310,39 @@ const excluirProduto = async (produto) => {
 onMounted(() => {
   carregarProdutos()
 })
+
+// Handlers de upload
+const handleUploadSuccess = (imageUrl) => {
+  console.log('[ProdutosView] Upload bem-sucedido:', imageUrl)
+  form.value.urlImagem = imageUrl
+  
+  // Se estiver editando, atualizar produto na lista
+  if (modoEdicao.value && produtoEditando.value) {
+    produtoEditando.value.urlImagem = imageUrl
+    const index = produtos.value.findIndex(p => p.id === produtoEditando.value.id)
+    if (index !== -1) {
+      produtos.value[index].urlImagem = imageUrl
+    }
+  }
+}
+
+const handleUploadError = (error) => {
+  console.error('[ProdutosView] Erro no upload:', error)
+  notificationStore.erro('Erro ao fazer upload da imagem')
+}
+
+const handleRemoveSuccess = () => {
+  console.log('[ProdutosView] Imagem removida')
+  form.value.urlImagem = ''
+  
+  if (modoEdicao.value && produtoEditando.value) {
+    produtoEditando.value.urlImagem = null
+    const index = produtos.value.findIndex(p => p.id === produtoEditando.value.id)
+    if (index !== -1) {
+      produtos.value[index].urlImagem = null
+    }
+  }
+}
 
 /**
  * Produtos View - Gestão completa do cardápio
@@ -588,13 +622,19 @@ onMounted(() => {
 
           <!-- URL da Imagem -->
           <div>
-            <label class="block text-sm font-medium text-text-primary mb-1">
-              URL da Imagem
+            <label class="block text-sm font-medium text-text-primary mb-2">
+              Imagem do Produto
             </label>
-            <input v-model="form.urlImagem" 
-                   type="url" 
-                   class="input-field w-full"
-                   placeholder="https://exemplo.com/imagem.jpg" />
+            
+            <!-- Componente de Upload -->
+            <ImageUpload 
+              v-model="form.urlImagem"
+              :produto-id="modoEdicao ? produtoEditando?.id : null"
+              :image-alt="form.nome || 'Produto'"
+              @upload-success="handleUploadSuccess"
+              @upload-error="handleUploadError"
+              @remove-success="handleRemoveSuccess"
+            />
           </div>
 
           <!-- Tempo de Preparo e Tipo de Preparo -->

@@ -239,7 +239,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useCurrency } from '@/utils/currency'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
@@ -293,8 +293,16 @@ const abrirModalNovoPedido = () => {
     return
   }
   
-  console.log('[ModalDetalhesMesa] Abrindo novo pedido para mesa:', props.mesa.id)
-  emit('novoPedido', props.mesa)
+  console.log('[ModalDetalhesMesa] Fechando modal de detalhes e abrindo novo pedido para mesa:', props.mesa.id)
+  
+  // Primeiro fechar este modal
+  emit('close')
+  
+  // Aguardar um ciclo para garantir que o modal fechou
+  nextTick(() => {
+    // Então emitir evento para abrir modal de novo pedido
+    emit('novoPedido', props.mesa)
+  })
 }
 
 const filtrosPedidos = [

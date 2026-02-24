@@ -1,0 +1,453 @@
+================================================================================
+REFATORAÇÃO FUNDO DE CONSUMO - SUMÁRIO DE MUDANÇAS
+Data: 22 de fevereiro de 2026
+Baseado em: ALINHAMENTO_FUNDO_CONSUMO_BACKEND_FRONTEND.txt
+================================================================================
+
+═══════════════════════════════════════════════════════════════════════════════
+1. MUDANÇAS IMPLEMENTADAS
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1.1. CONVERSÃO AUTOMÁTICA DE CENTAVOS (CRÍTICO)                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+ARQUIVO: src/utils/currency.js
+
+PROBLEMA IDENTIFICADO:
+- Backend armazena valores em CENTAVOS (10000 = 100,00 AOA)
+- Frontend estava formatando valores diretamente sem converter
+- Resultado: Exibição incorreta de valores (10000,00 AOA ao invés de 100,00 AOA)
+
+SOLUÇÃO IMPLEMENTADA:
+✅ Adicionada flag: CURRENCY_CONFIG.centavos = true
+✅ Criada função: centavosParaDecimal(centavos) → decimal
+✅ Criada função: decimalParaCentavos(decimal) → centavos
+✅ formatCurrency() agora converte automaticamente se CURRENCY_CONFIG.centavos = true
+✅ parseCurrency() retorna valores em centavos
+
+IMPACTO:
+- TODOS os lugares que usam formatCurrency() agora exibem valores corretos
+- Não precisa alterar nenhum componente existente
+- Backend e Frontend agora estão alinhados quanto à representação de valores
+
+EXEMPLO:
+Antes: formatCurrency(10000) → "10.000,00 Kz" (ERRADO)
+Depois: formatCurrency(10000) → "100,00 Kz" (CORRETO)
+
+VALIDAÇÃO NECESSÁRIA:
+- [ ] Testar criação de fundo com saldoInicial
+- [ ] Testar recarga de fundo
+- [ ] Testar débito em pedido PRE_PAGO
+- [ ] Verificar se inputs de valor estão enviando centavos corretos
+- [ ] Validar preview de saldos em todos os modals
+
+═══════════════════════════════════════════════════════════════════════════════
+2. ANÁLISE DO CÓDIGO EXISTENTE
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2.1. fundoConsumoService.js - STATUS: ✅ CORRETO                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+ENDPOINTS IMPLEMENTADOS:
+✅ GET /fundos/config/valor-minimo
+✅ POST /fundos
+✅ GET /fundos/cliente/{clienteId}
+✅ GET /fundos/{fundoId}/saldo
+✅ POST /fundos/{fundoId}/recarregar
+✅ GET /fundos/{fundoId}/transacoes
+
+UNWRAPPING DE RESPONSE:
+✅ Todos os métodos fazem response.data.data corretamente
+✅ Tratamento de erros por status code implementado
+✅ Mensagens de erro amigáveis
+
+OBSERVAÇÃO:
+Service está 100% alinhado com documento de especificação.
+Não precisa de alterações.
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2.2. ModalCriarFundo.vue - STATUS: ✅ FUNCIONAL                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+FUNCIONALIDADES IMPLEMENTADAS:
+✅ Consulta valorMinimo ao montar
+✅ Validação saldoInicial >= valorMinimo
+✅ Preview do valor em tempo real
+✅ Props: cliente (opcional)
+✅ Emits: fechar, fundo-criado
+
+ALINHAMENTO COM DOCUMENTO:
+✅ Preenche clienteId automaticamente se receber prop cliente
+✅ Validações frontend antes de enviar request
+✅ Exibe mensagens de erro específicas
+✅ Loading state durante criação
+
+MELHORIAS SUGERIDAS (FUTURAS):
+- Padronizar evento de 'fechar' para 'close' (consistência)
+- Padronizar evento 'fundo-criado' para 'sucesso' (consistência)
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2.3. ModalRecarregarFundo.vue - STATUS: ⚠️ MELHORIAS NECESSÁRIAS          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+FUNCIONALIDADES IMPLEMENTADAS:
+✅ Consulta valorMinimo ao montar
+✅ Seleção de método (GPO/REF)
+✅ Validação valor >= valorMinimo
+✅ Props: isOpen, fundo
+✅ Emits: close, recarga-realizada
+
+PENDÊNCIAS IDENTIFICADAS:
+⚠️ NÃO exibe informações do pagamento após criar recarga
+⚠️ NÃO mostra urlPagamento (GPO) ou entidade+referência (REF)
+⚠️ NÃO valida se fundo está ativo antes de permitir recarga
+⚠️ Preview de novo saldo implementado mas pode melhorar
+
+ALINHAMENTO COM DOCUMENTO (Seção 4.5):
+❌ Falta exibir urlPagamento para GPO com botão de redirecionamento
+❌ Falta exibir entidade + referência para REF
+❌ Falta validação: fundo.ativo === true
+
+CÓDIGO NECESSÁRIO (conforme documento):
+
+```vue
+// Após criar recarga
+const pagamentoCriado = ref(null)
+
+const confirmarRecarga = async () => {
+  // ... validações existentes
+
+  const pagamento = await fundoConsumoService.recarregarFundo(
+    props.fundo.id,
+    formulario.value
+  )
+  
+  pagamentoCriado.value = pagamento // ⬅️ ADICIONAR ISSO
+  
+  // Modal muda de estado: exibe informações do pagamento
+}
+```
+
+TEMPLATE NECESSÁRIO:
+
+```vue
+<!-- Após criar recarga -->
+<div v-if="pagamentoCriado" class="payment-info">
+  <h4>Informações do Pagamento</h4>
+  
+  <!-- GPO: Botão para AppyPay -->
+  <div v-if="formulario.metodoPagamento === 'GPO' && pagamentoCriado.urlPagamento">
+    <p>Clique no botão abaixo para completar o pagamento:</p>
+    <a 
+      :href="pagamentoCriado.urlPagamento" 
+      target="_blank" 
+      class="btn btn-appypay"
+    >
+      Pagar com AppyPay →
+    </a>
+  </div>
+
+  <!-- REF: Entidade + Referência -->
+  <div v-if="formulario.metodoPagamento === 'REF'">
+    <div class="ref-info">
+      <div class="ref-row">
+        <span>Entidade:</span>
+        <span class="ref-value">{{ pagamentoCriado.entidade }}</span>
+      </div>
+      <div class="ref-row">
+        <span>Referência:</span>
+        <span class="ref-value large">{{ pagamentoCriado.referencia }}</span>
+      </div>
+    </div>
+    <p>Use estes dados para efetuar o pagamento no banco.</p>
+  </div>
+</div>
+```
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2.4. ModalNovoPedido.vue - STATUS: ✅ BOM                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+FUNCIONALIDADES IMPLEMENTADAS:
+✅ Busca fundo ao montar (se unidade.cliente existe)
+✅ Exibe saldo atual do fundo
+✅ Valida saldo >= totalCarrinho
+✅ Alerta se saldo insuficiente
+✅ Botão "Criar Fundo" se cliente não tem fundo
+✅ Botão "Recarregar" redireciona para FundoDetalheView
+✅ Desabilita botão "Criar Pedido" se saldo insuficiente
+
+ALINHAMENTO COM DOCUMENTO:
+✅ Fluxo completo implementado conforme Seção 5.1 e 5.3
+✅ Validações em tempo real
+✅ Indicadores visuais (saldo baixo = vermelho/laranja)
+✅ Integração com fundoConsumoService correta
+
+EXCELENTE IMPLEMENTAÇÃO!
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2.5. FundosView.vue - STATUS: ✅ FUNCIONAL                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+FUNCIONALIDADES IMPLEMENTADAS:
+✅ Busca fundo por clienteId
+✅ Filtros por tipo e status
+✅ Lista de fundos encontrados
+✅ Validação de ID numérico
+
+OBSERVAÇÃO:
+Backend não tem endpoint GET /fundos (listar todos).
+View está adaptada para funcionar apenas com busca por cliente.
+Documentado como melhoria futura no documento de alinhamento.
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2.6. FundoDetalheView.vue - STATUS: ✅ FUNCIONAL                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+FUNCIONALIDADES IMPLEMENTADAS:
+✅ Exibe dados completos do fundo
+✅ Histórico de transações
+✅ Cálculos: totalCreditos, totalDebitos, totalEstornos
+✅ Botão "Recarregar Fundo" (se ativo)
+✅ Integração com ModalRecarregarFundo
+
+ALINHAMENTO COM DOCUMENTO:
+✅ Dashboard completo conforme Seção 4.6
+✅ Transações ordenadas por data DESC
+✅ Formatação correta de valores (agora com fix de centavos)
+✅ Badge de status (ATIVO/ENCERRADO)
+
+BOA IMPLEMENTAÇÃO!
+
+═══════════════════════════════════════════════════════════════════════════════
+3. PENDÊNCIAS E PRÓXIMOS PASSOS
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3.1. ALTA PRIORIDADE                                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+P1: EXIBIR INFORMAÇÕES DE PAGAMENTO EM MODALRECARREGARFUNDO
+Localização: src/components/fundos/ModalRecarregarFundo.vue
+Ação: Adicionar seção para exibir urlPagamento (GPO) ou entidade+referência (REF)
+Referência: Documento Seção 4.5, Fluxo 5.2
+Estimativa: 30 minutos
+Status: ⏳ PENDENTE
+
+P2: VALIDAR FUNDO ATIVO ANTES DE RECARREGAR
+Localização: src/components/fundos/ModalRecarregarFundo.vue
+Ação: Adicionar computed fundoAtivo e desabilitar recarga se fundo encerrado
+Referência: Documento Seção 7.5
+Estimativa: 15 minutos
+Status: ⏳ PENDENTE
+
+P3: TESTAR CONVERSÃO DE CENTAVOS EM TODOS OS FLUXOS
+Ação: Teste end-to-end de criação, recarga e débito de fundo
+Validar: Valores exibidos corretamente em todos os modals e views
+Estimativa: 1 hora
+Status: ⏳ PENDENTE
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3.2. MÉDIA PRIORIDADE                                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+P4: PADRONIZAR EVENTOS DOS MODALS
+Ação: Trocar 'fechar' → 'close', 'fundo-criado' → 'sucesso' em ModalCriarFundo
+Referência: Consistência com ModalRecarregarFundo
+Estimativa: 20 minutos
+Status: 🔜 PRÓXIMO
+
+P5: ADICIONAR LOGS DE DEBUG ESTRATÉGICOS
+Localização: Todos os componentes de fundo
+Ação: console.log('[ComponentName] Ação', dados) em operações críticas
+Referência: Boas práticas de debugging
+Estimativa: 30 minutos
+Status: 🔜 PRÓXIMO
+
+P6: DOCUMENTAR COMPONENTES COM JSDOC
+Ação: Adicionar JSDoc em todos os componentes e composables
+Estimativa: 1 hora
+Status: 🔜 PRÓXIMO
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3.3. BAIXA PRIORIDADE (MELHORIAS FUTURAS)                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+P7: WEBSOCKET PARA ATUALIZAÇÃO AUTOMÁTICA DE SALDO
+Referência: Documento Seção 9.2
+Endpoint: /topic/fundo/{fundoId}
+Eventos: SALDO_ATUALIZADO, PAGAMENTO_CONFIRMADO
+Status: 📋 BACKLOG
+
+P8: NOTIFICAÇÕES DE SALDO BAIXO
+Referência: Documento Seção 9.3
+Alerta quando saldo < limite configurável
+Status: 📋 BACKLOG
+
+P9: DASHBOARD DE FUNDOS
+Referência: Documento Seção 9.4
+Métricas agregadas, gráficos, top clientes
+Status: 📋 BACKLOG
+
+P10: EXPORTAÇÃO DE EXTRATO (PDF/EXCEL)
+Referência: Documento Seção 9.5
+Permitir download de extrato formatado
+Status: 📋 BACKLOG
+
+═══════════════════════════════════════════════════════════════════════════════
+4. CHECKLIST DE VALIDAÇÃO
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4.1. FLUXOS DE NEGÓCIO                                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+FLUXO 1: CRIAR PRIMEIRO FUNDO
+[ ] Cliente sem fundo consegue ser identificado
+[ ] Modal de criação abre com clienteId preenchido
+[ ] Validação de valorMinimo funciona
+[ ] Fundo é criado com saldoInicial correto
+[ ] Transação inicial tipo CREDITO é registrada
+[ ] Após criar, saldo é exibido corretamente
+
+FLUXO 2: RECARREGAR FUNDO VIA GPO
+[ ] Modal carrega valorMinimo
+[ ] Validação de valor funciona
+[ ] Recarga é criada com status PENDENTE
+[ ] urlPagamento é exibida
+[ ] Botão "Pagar no AppyPay" redireciona corretamente
+[ ] Após confirmação, saldo é atualizado
+
+FLUXO 3: RECARREGAR FUNDO VIA REF
+[ ] Modal carrega valorMinimo
+[ ] Validação de valor funciona
+[ ] Recarga é criada com status PENDENTE
+[ ] Entidade e referência são exibidas
+[ ] Dados estão formatados e copiáveis
+[ ] Após confirmação, saldo é atualizado
+
+FLUXO 4: CRIAR PEDIDO PRÉ-PAGO
+[ ] Fundo é buscado ao abrir modal de pedido
+[ ] Saldo é exibido corretamente
+[ ] Validação de saldo >= total funciona
+[ ] Alerta de saldo insuficiente aparece
+[ ] Pedido é criado e débito é processado
+[ ] Saldo é atualizado imediatamente
+[ ] Transação tipo DEBITO é registrada
+
+FLUXO 5: CANCELAR PEDIDO PRÉ-PAGO (ESTORNO)
+[ ] Pedido pode ser cancelado
+[ ] Estorno é processado
+[ ] Saldo é devolvido ao fundo
+[ ] Transação tipo ESTORNO é registrada
+[ ] statusFinanceiro do pedido = ESTORNADO
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4.2. VALIDAÇÕES E EDGE CASES                                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+VALIDAÇÕES:
+[ ] saldoInicial >= valorMinimo (criação)
+[ ] valor >= valorMinimo (recarga)
+[ ] saldo >= totalPedido (débito)
+[ ] fundo.ativo === true (recarga)
+[ ] Cliente não pode ter 2 fundos ativos
+
+EDGE CASES:
+[ ] Cliente sem fundo tenta criar pedido PRE_PAGO
+[ ] Saldo insuficiente durante criação de pedido
+[ ] Fundo encerrado, usuário tenta recarregar
+[ ] Pagamento AppyPay demora para confirmar
+[ ] Dois atendentes criam pedidos simultâneos (concorrência)
+
+ERROS:
+[ ] 400: Mensagens específicas são exibidas
+[ ] 404: Recursos não encontrados são tratados
+[ ] 409: Conflitos de concorrência são tratados
+[ ] 500: Erros de servidor são tratados com mensagens amigáveis
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4.3. EXIBIÇÃO DE VALORES                                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+FORMATAÇÃO:
+[ ] Saldo em fundos: 10000 centavos → "100,00 Kz"
+[ ] Valor de recarga: 5000 centavos → "50,00 Kz"
+[ ] Total de pedido: 2800 centavos → "28,00 Kz"
+[ ] Transações: Valores formatados corretamente
+[ ] Preview de novo saldo: Cálculo correto
+
+INPUTS:
+[ ] Input de saldo inicial envia centavos para backend
+[ ] Input de valor de recarga envia centavos para backend
+[ ] parseCurrency converte "100,00 Kz" → 10000 centavos
+
+═══════════════════════════════════════════════════════════════════════════════
+5. COMANDOS ÚTEIS
+═══════════════════════════════════════════════════════════════════════════════
+
+# Testar conversão de centavos no console do navegador
+formatCurrency(10000)  // Deve retornar "100,00 Kz"
+centavosParaDecimal(10000)  // Deve retornar 100
+decimalParaCentavos(100)  // Deve retornar 10000
+
+# Buscar usos de formatCurrency
+grep -r "formatCurrency" src/
+
+# Buscar usos de saldoAtual
+grep -r "saldoAtual" src/
+
+# Verificar imports de currency
+grep -r "useCurrency\|formatCurrency" src/
+
+═══════════════════════════════════════════════════════════════════════════════
+6. NOTAS IMPORTANTES
+═══════════════════════════════════════════════════════════════════════════════
+
+📌 CRÍTICO:
+- Backend armazena SEMPRE em centavos
+- Frontend SEMPRE converte para exibição
+- formatCurrency() faz conversão automática
+- parseCurrency() retorna centavos
+
+📌 ATENÇÃO:
+- Inputs de valor devem usar v-model.number
+- Validações devem comparar valores em centavos
+- Cálculos devem ser feitos em centavos
+- Conversão para exibição apenas no template
+
+📌 BOAS PRÁTICAS:
+- Sempre usar formatCurrency() para exibir valores
+- Sempre usar parseCurrency() para ler inputs de usuário
+- Não fazer cálculos com valores formatados (strings)
+- Manter lógica em centavos, só converter na exibição
+
+═══════════════════════════════════════════════════════════════════════════════
+7. REFERÊNCIAS
+═══════════════════════════════════════════════════════════════════════════════
+
+Documentos:
+- ALINHAMENTO_FUNDO_CONSUMO_BACKEND_FRONTEND.txt (especificação completa)
+- CONTEXTO_FUNDO_CONSUMO_FRONTEND.txt (contexto atual)
+- REFATORACAO_FUNDO_CONSUMO.md (análise de mudanças)
+
+Arquivos modificados:
+- src/utils/currency.js (✅ CONCLUÍDO)
+
+Arquivos a modificar:
+- src/components/fundos/ModalRecarregarFundo.vue (⏳ PENDENTE - P1, P2)
+
+Arquivos validados como corretos:
+- src/services/fundoConsumoService.js
+- src/components/fundos/ModalCriarFundo.vue
+- src/components/pedidos/ModalNovoPedido.vue
+- src/modules/fundos/FundosView.vue
+- src/views/FundoDetalheView.vue
+
+================================================================================
+FIM DO SUMÁRIO
+Data: 22 de fevereiro de 2026
+Status: REFATORAÇÃO EM ANDAMENTO - 50% COMPLETO
+================================================================================

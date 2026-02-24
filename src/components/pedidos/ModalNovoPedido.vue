@@ -75,8 +75,134 @@
           </button>
         </div>
 
+        <!-- Carrinho -->
+        <div v-if="carrinho.length > 0" class="carrinho">
+          <h4>Itens do Pedido ({{ carrinho.length }})</h4>
+          <div class="carrinho-lista">
+            <div v-for="(item, index) in carrinho" :key="index" class="carrinho-item">
+              <div class="item-info">
+                <span class="nome">{{ item.nome }}</span>
+                <span class="subtotal">{{ formatCurrency(item.preco * item.quantidade) }}</span>
+              </div>
+              <div class="item-controles">
+                <button @click="diminuirQuantidade(index)" class="btn btn-sm">−</button>
+                <span class="quantidade">{{ item.quantidade }}</span>
+                <button @click="aumentarQuantidade(index)" class="btn btn-sm">+</button>
+                <button 
+                  @click="toggleObservacoes(index)" 
+                  class="btn btn-sm"
+                  :class="{ 'active': item.mostrarObservacoes }"
+                  title="Adicionar observações"
+                >
+                  📝
+                </button>
+                <button @click="removerItem(index)" class="btn btn-sm btn-danger">🗑️</button>
+              </div>
+              
+              <!-- Campo de observações -->
+              <div v-if="item.mostrarObservacoes" class="item-observacoes">
+                <textarea 
+                  v-model="item.observacoes"
+                  placeholder="Ex: Sem cebola, ponto da carne mal passado..."
+                  maxlength="500"
+                  rows="2"
+                  class="observacoes-input"
+                  @input="validarObservacoes(index)"
+                ></textarea>
+                <div class="observacoes-info">
+                  <span class="caracteres-count" :class="{ 'limit-warning': (item.observacoes?.length || 0) > 450 }">
+                    {{ item.observacoes?.length || 0 }}/500
+                  </span>
+                  <span class="observacoes-hint">Emojis serão removidos automaticamente</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="carrinho-total">
+            <span>Total:</span>
+            <span class="valor-total">{{ formatCurrency(totalCarrinho) }}</span>
+          </div>
+        </div>
+
+        <!-- Busca de Produtos -->
+        <div class="search-produtos">
+          <input
+            v-model="buscaProduto"
+            type="text"
+            placeholder="🔍 Buscar produtos..."
+            class="form-control"
+          />
+        </div>
+
+        <!-- Lista de Produtos (Cards Quadrados) -->
+        <div class="produtos-grid">
+          <div
+            v-for="produto in produtosFiltrados"
+            :key="produto.id"
+            class="produto-card"
+            :class="{ 'produto-indisponivel': !produto.ativo }"
+            @click="produto.ativo && adicionarProduto(produto)"
+          >
+            <!-- Imagem do Produto -->
+            <div class="produto-imagem">
+              <img 
+                v-if="produto.imagemUrl || produto.urlImagem || produto.imagem" 
+                :src="produto.imagemUrl || produto.urlImagem || produto.imagem" 
+                :alt="produto.nome"
+                @error="handleImageError"
+              />
+              <div v-else class="produto-sem-imagem">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
+              
+              <!-- Badge de Status -->
+              <div v-if="!produto.ativo" class="badge-indisponivel">Indisponível</div>
+            </div>
+
+            <!-- Informações do Produto -->
+            <div class="produto-corpo">
+              <h4 class="produto-nome">{{ produto.nome }}</h4>
+              <p class="produto-descricao">{{ produto.descricao || 'Sem descrição' }}</p>
+              
+              <!-- Badges -->
+              <div class="produto-badges">
+                <span :class="['badge', 'badge-tipo-preparo', getTipoPreparoClasse(produto.tipoPreparo)]">
+                  {{ produto.tipoPreparo }}
+                </span>
+              </div>
+              
+              <!-- Preço e Botão -->
+              <div class="produto-footer">
+                <span class="produto-preco">{{ formatCurrency(produto.preco) }}</span>
+                <button 
+                  v-if="produto.ativo"
+                  class="btn-adicionar"
+                  @click.stop="adicionarProduto(produto)"
+                >
+                  <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                  </svg>
+                  Adicionar
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="produtosFiltrados.length === 0" class="empty-state">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                    d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <p>Nenhum produto encontrado</p>
+          </div>
+        </div>
+
         <!-- Tipo de Pagamento -->
-        <div class="form-group">
+        <div v-if="carrinho.length > 0" class="form-group">
           <label class="form-label">Tipo de Pagamento</label>
           <div class="payment-options">
             <label 
@@ -126,94 +252,6 @@
                 </div>
               </div>
             </label>
-          </div>
-        </div>
-
-        <!-- Busca de Produtos -->
-        <div class="search-produtos">
-          <input
-            v-model="buscaProduto"
-            type="text"
-            placeholder="🔍 Buscar produtos..."
-            class="form-control"
-          />
-        </div>
-
-        <!-- Lista de Produtos -->
-        <div class="produtos-lista">
-          <div
-            v-for="produto in produtosFiltrados"
-            :key="produto.id"
-            class="produto-item"
-            @click="adicionarProduto(produto)"
-          >
-            <div class="produto-info">
-              <h4>{{ produto.nome }}</h4>
-              <p class="descricao">{{ produto.descricao }}</p>
-              <div class="badges">
-                <span :class="['badge', 'badge-tipo-preparo', getTipoPreparoClasse(produto.tipoPreparo)]">
-                  {{ produto.tipoPreparo }}
-                </span>
-              </div>
-            </div>
-            <div class="produto-preco">
-              <span class="preco">{{ formatCurrency(produto.preco) }}</span>
-              <button class="btn btn-sm btn-add">+</button>
-            </div>
-          </div>
-
-          <div v-if="produtosFiltrados.length === 0" class="empty-state">
-            <p>Nenhum produto encontrado</p>
-          </div>
-        </div>
-
-        <!-- Carrinho -->
-        <div v-if="carrinho.length > 0" class="carrinho">
-          <h4>Itens do Pedido ({{ carrinho.length }})</h4>
-          <div class="carrinho-lista">
-            <div v-for="(item, index) in carrinho" :key="index" class="carrinho-item">
-              <div class="item-info">
-                <span class="nome">{{ item.nome }}</span>
-                <span class="subtotal">{{ formatCurrency(item.preco * item.quantidade) }}</span>
-              </div>
-              <div class="item-controles">
-                <button @click="diminuirQuantidade(index)" class="btn btn-sm">−</button>
-                <span class="quantidade">{{ item.quantidade }}</span>
-                <button @click="aumentarQuantidade(index)" class="btn btn-sm">+</button>
-                <button 
-                  @click="toggleObservacoes(index)" 
-                  class="btn btn-sm"
-                  :class="{ 'active': item.mostrarObservacoes }"
-                  title="Adicionar observações"
-                >
-                  📝
-                </button>
-                <button @click="removerItem(index)" class="btn btn-sm btn-danger">🗑️</button>
-              </div>
-              
-              <!-- Campo de observações -->
-              <div v-if="item.mostrarObservacoes" class="item-observacoes">
-                <textarea 
-                  v-model="item.observacoes"
-                  placeholder="Ex: Sem cebola, ponto da carne mal passado..."
-                  maxlength="500"
-                  rows="2"
-                  class="observacoes-input"
-                  @input="validarObservacoes(index)"
-                ></textarea>
-                <div class="observacoes-info">
-                  <span class="caracteres-count" :class="{ 'limit-warning': (item.observacoes?.length || 0) > 450 }">
-                    {{ item.observacoes?.length || 0 }}/500
-                  </span>
-                  <span class="observacoes-hint">Emojis serão removidos automaticamente</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="carrinho-total">
-            <span>Total:</span>
-            <span class="valor-total">{{ formatCurrency(totalCarrinho) }}</span>
           </div>
         </div>
       </div>
@@ -277,6 +315,10 @@ onMounted(() => {
   }
   
   console.log('[ModalNovoPedido] Modal montado, unidade:', props.unidade)
+  console.log('[ModalNovoPedido] Produtos recebidos:', props.produtos?.length || 0)
+  if (props.produtos?.length > 0) {
+    console.log('[ModalNovoPedido] Exemplo de produto:', props.produtos[0])
+  }
   
   // VALIDAÇÃO: Verificar se unidade existe
   if (!props.unidade) {
@@ -470,6 +512,12 @@ const getTipoPreparoClasse = (tipo) => {
     ENTREGA: 'entrega'
   }
   return classes[tipo] || 'default'
+}
+
+// Tratar erro de carregamento de imagem
+const handleImageError = (event) => {
+  event.target.style.display = 'none'
+  event.target.parentElement.classList.add('produto-sem-imagem')
 }
 
 const abrirModalCriarFundo = () => {
@@ -690,50 +738,142 @@ const criarPedido = async () => {
   font-size: 14px;
 }
 
-.produtos-lista {
-  max-height: 300px;
+/* Grid de Cards Quadrados */
+.produtos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+  max-height: 500px;
   overflow-y: auto;
-  margin-bottom: 16px;
-  border: 1px solid #e0e0e0;
+  padding: 16px;
+  background: #f8f9fa;
   border-radius: 8px;
+  margin-bottom: 16px;
 }
 
-.produto-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px;
-  border-bottom: 1px solid #f0f0f0;
+.produto-card {
+  background: white;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
-.produto-item:hover {
-  background: #f9f9f9;
+.produto-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
 }
 
-.produto-info h4 {
-  margin: 0 0 4px 0;
+.produto-card.produto-indisponivel {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.produto-card.produto-indisponivel:hover {
+  transform: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+/* Imagem do Produto (Quadrada) */
+.produto-imagem {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  background: #f0f0f0;
+  overflow: hidden;
+}
+
+.produto-imagem img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.produto-card:hover .produto-imagem img {
+  transform: scale(1.05);
+}
+
+.produto-sem-imagem {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 100%);
+}
+
+.produto-sem-imagem svg {
+  width: 48px;
+  height: 48px;
+  color: #9e9e9e;
+}
+
+.badge-indisponivel {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(244, 67, 54, 0.95);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Corpo do Card */
+.produto-corpo {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.produto-nome {
+  margin: 0 0 6px 0;
   font-size: 15px;
+  font-weight: 600;
   color: #333;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 40px;
 }
 
-.produto-info .descricao {
+.produto-descricao {
   margin: 0 0 8px 0;
-  font-size: 13px;
+  font-size: 12px;
   color: #666;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  flex: 1;
 }
 
-.badges {
+.produto-badges {
   display: flex;
   gap: 6px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 
 .badge-tipo-preparo {
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 10px;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
 }
 
 .badge-tipo-preparo.quente { background: #ffebee; color: #c62828; }
@@ -742,16 +882,65 @@ const criarPedido = async () => {
 .badge-tipo-preparo.bebida { background: #e8f5e9; color: #2e7d32; }
 .badge-tipo-preparo.sobremesa { background: #f3e5f5; color: #6a1b9a; }
 
-.produto-preco {
+/* Footer do Card */
+.produto-footer {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
 }
 
-.produto-preco .preco {
-  font-size: 16px;
+.produto-preco {
+  font-size: 18px;
   font-weight: 700;
   color: #1976d2;
+}
+
+.btn-adicionar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: #4caf50;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-adicionar:hover {
+  background: #45a049;
+  transform: scale(1.05);
+}
+
+.btn-adicionar svg {
+  stroke-width: 2.5;
+}
+
+/* Empty State */
+.empty-state {
+  text-align: center;
+  padding: 48px 20px;
+  color: #999;
+  grid-column: 1 / -1;
+}
+
+.empty-state svg {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 16px;
+  color: #ccc;
+}
+
+.empty-state p {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .carrinho {

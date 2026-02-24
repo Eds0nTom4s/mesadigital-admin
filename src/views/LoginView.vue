@@ -94,6 +94,7 @@ const fazerLogin = async () => {
             </label>
             <input
               id="telefone"
+              data-cy="input-telefone"
               v-model="formulario.telefone"
               type="tel"
               class="input-field w-full"
@@ -111,6 +112,7 @@ const fazerLogin = async () => {
             <div class="relative">
               <input
                 id="password"
+                data-cy="input-senha"
                 v-model="formulario.senha"
                 :type="mostrarSenha ? 'text' : 'password'"
                 class="input-field w-full pr-10"
@@ -120,6 +122,7 @@ const fazerLogin = async () => {
               />
               <button
                 type="button"
+                data-cy="btn-toggle-senha"
                 @click="toggleMostrarSenha"
                 class="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary transition-colors"
                 :disabled="loading"
@@ -149,6 +152,7 @@ const fazerLogin = async () => {
           <!-- Botão -->
           <button
             type="submit"
+            data-cy="btn-entrar"
             class="btn-primary w-full"
             :disabled="loading"
           >

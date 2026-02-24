@@ -7,6 +7,15 @@
       </div>
 
       <div class="modal-body">
+        <!-- Alerta: Fundo Encerrado -->
+        <div v-if="!fundoAtivo" class="alert alert-danger">
+          <span class="alert-icon">⚠️</span>
+          <div class="alert-content">
+            <strong>Fundo Encerrado</strong>
+            <p>Este fundo foi encerrado e não pode receber novas recargas.</p>
+          </div>
+        </div>
+
         <!-- Informações do Fundo -->
         <div class="fundo-info">
           <div class="info-row">
@@ -17,20 +26,26 @@
             <span class="label">Cliente:</span>
             <span class="value">{{ fundo.cliente.nome }}</span>
           </div>
+          <div class="info-row">
+            <span class="label">Status:</span>
+            <span class="badge" :class="fundoAtivo ? 'badge-success' : 'badge-danger'">
+              {{ fundoAtivo ? 'ATIVO' : 'ENCERRADO' }}
+            </span>
+          </div>
         </div>
 
         <!-- Valor da Recarga -->
-        <div class="form-group">
+        <div v-if="fundoAtivo" class="form-group">
           <label class="form-label">
             Valor da Recarga <span class="required">*</span>
           </label>
           <input 
-            v-model.number="formulario.valor" 
+            v-model.number="formulario.valorDecimal" 
             type="number" 
-            :min="valorMinimo"
-            step="100"
+            :min="valorMinimoDecimal"
+            step="0.01"
             class="form-control"
-            placeholder="Ex: 5000"
+            placeholder="Ex: 50.00"
             required
           />
           <p class="form-hint">
@@ -39,7 +54,7 @@
         </div>
 
         <!-- Método de Pagamento -->
-        <div class="form-group">
+        <div v-if="fundoAtivo" class="form-group">
           <label class="form-label">
             Método de Pagamento AppyPay <span class="required">*</span>
           </label>
@@ -75,18 +90,18 @@
         </div>
 
         <!-- Preview do Novo Saldo -->
-        <div class="preview-box">
+        <div v-if="fundoAtivo" class="preview-box">
           <div class="preview-row">
             <span>Saldo Atual:</span>
             <span>{{ formatCurrency(fundo.saldoAtual) }}</span>
           </div>
           <div class="preview-row plus">
             <span>+ Recarga:</span>
-            <span>{{ formatCurrency(formulario.valor) }}</span>
+            <span>{{ formatCurrency(valorRecargaCentavos) }}</span>
           </div>
           <div class="preview-row total">
             <span>Novo Saldo:</span>
-            <span class="preview-value">{{ formatCurrency(fundo.saldoAtual + formulario.valor) }}</span>
+            <span class="preview-value">{{ formatCurrency(fundo.saldoAtual + valorRecargaCentavos) }}</span>
           </div>
         </div>
 
@@ -160,36 +175,56 @@ const emit = defineEmits(['close', 'recarga-realizada'])
 const { formatCurrency } = useCurrency()
 const notificationStore = useNotificationStore()
 
-const valorMinimo = ref(5000)
+const valorMinimo = ref(5000) // centavos
 const loading = ref(false)
 const pagamentoCriado = ref(null)
 const formulario = ref({
-  valor: 5000,
+  valorDecimal: 50.00, // valor em decimal (Kz)
   metodoPagamento: 'GPO'
 })
 
+// Computed para converter decimal → centavos
+const valorRecargaCentavos = computed(() => {
+  return Math.round((formulario.value.valorDecimal || 0) * 100)
+})
+
+// Computed para valor mínimo em decimal
+const valorMinimoDecimal = computed(() => {
+  return (valorMinimo.value / 100).toFixed(2)
+})
+
 const podeConfirmar = computed(() => {
-  return formulario.value.valor >= valorMinimo.value && 
+  return fundoAtivo.value &&
+         valorRecargaCentavos.value >= valorMinimo.value && 
          formulario.value.metodoPagamento
+})
+
+const fundoAtivo = computed(() => {
+  return props.fundo?.ativo === true
 })
 
 onMounted(async () => {
   try {
     const config = await fundoConsumoService.consultarValorMinimo()
-    valorMinimo.value = config.valorMinimo
-    formulario.value.valor = config.valorMinimo
+    valorMinimo.value = config.valorMinimo // já vem em centavos
+    formulario.value.valorDecimal = (config.valorMinimo / 100) // converte para decimal
   } catch (error) {
     console.error('Erro ao carregar valor mínimo:', error)
   }
 })
 
 const confirmarRecarga = async () => {
+  if (!fundoAtivo.value) {
+    notificationStore.erro('Não é possível recarregar um fundo encerrado')
+    return
+  }
+
   if (!podeConfirmar.value) {
     notificationStore.aviso('Preencha todos os campos corretamente')
     return
   }
 
-  if (formulario.value.valor < valorMinimo.value) {
+  if (valorRecargaCentavos.value < valorMinimo.value) {
     notificationStore.aviso(`Valor mínimo de recarga: ${formatCurrency(valorMinimo.value)}`)
     return
   }
@@ -199,7 +234,7 @@ const confirmarRecarga = async () => {
     const pagamento = await fundoConsumoService.recarregarFundo(
       props.fundo.id,
       {
-        valor: formulario.value.valor,
+        valor: valorRecargaCentavos.value, // envia em centavos
         metodoPagamento: formulario.value.metodoPagamento
       }
     )
@@ -556,5 +591,59 @@ const confirmarRecarga = async () => {
 
 .btn-secondary:hover:not(:disabled) {
   background: #e0e0e0;
+}
+
+.alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.alert-danger {
+  background: #fdecea;
+  border: 1px solid #f5c2c7;
+}
+
+.alert-icon {
+  font-size: 20px;
+}
+
+.alert-content {
+  flex: 1;
+}
+
+.alert-content strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #d32f2f;
+  font-size: 14px;
+}
+
+.alert-content p {
+  margin: 0;
+  font-size: 13px;
+  color: #666;
+}
+
+.badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.badge-success {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.badge-danger {
+  background: #ffebee;
+  color: #c62828;
 }
 </style>

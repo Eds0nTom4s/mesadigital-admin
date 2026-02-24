@@ -1,12 +1,15 @@
 <template>
-  <router-view />
-  <ToastNotifications />
+  <ErrorBoundary>
+    <router-view />
+    <ToastNotifications />
+  </ErrorBoundary>
 </template>
 
 <script setup>
 import { onMounted } from 'vue'
 import { useWebSocketStore } from '@/store/websocket'
 import ToastNotifications from '@/components/shared/ToastNotifications.vue'
+import ErrorBoundary from '@/components/shared/ErrorBoundary.vue'
 
 /**
  * Ponto de entrada principal do painel administrativo

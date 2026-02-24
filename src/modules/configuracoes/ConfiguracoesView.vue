@@ -104,6 +104,9 @@
                 Cada mesa/quarto pode ter até 500 AOA em pedidos pós-pago não pagos. 
                 Após atingir o limite, será necessário efetuar pagamento antes de novos pedidos.
               </p>
+              <p class="limit-note">
+                <strong>Nota:</strong> Este limite é fixo no sistema. Para alterá-lo, contate o suporte técnico.
+              </p>
             </div>
           </div>
         </div>
@@ -166,6 +169,8 @@ const carregarConfiguracao = async () => {
     
     if (error.response?.status === 403) {
       notificationStore.erro('Você não tem permissão para acessar configurações')
+    } else if (error.response?.status === 401) {
+      notificationStore.erro('Sessão expirada. Faça login novamente')
     } else {
       notificationStore.erro('Erro ao carregar configurações do sistema')
     }
@@ -223,6 +228,10 @@ const alterarPosPago = async () => {
     
     if (error.response?.status === 403) {
       notificationStore.erro('Você não tem permissão para alterar esta configuração')
+    } else if (error.response?.status === 401) {
+      notificationStore.erro('Sessão expirada. Faça login novamente')
+    } else if (error.response?.status === 400) {
+      notificationStore.erro(error.response?.data?.message || 'Erro de validação ao alterar configuração')
     } else {
       notificationStore.erro(`Erro ao ${acao} pós-pago`)
     }
@@ -596,5 +605,19 @@ onMounted(() => {
   margin: 0;
   font-size: 13px;
   line-height: 1.6;
+}
+
+.limit-note {
+  margin: 12px 0 0 0;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.7);
+  border-left: 3px solid #1976d2;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.limit-note strong {
+  font-weight: 700;
 }
 </style>

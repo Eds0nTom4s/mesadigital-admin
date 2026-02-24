@@ -70,6 +70,39 @@ export const produtosService = {
   async atualizarStatus(id, ativo) {
     const response = await api.patch(`/produtos/${id}/disponibilidade`, { ativo })
     return response.data
+  },
+
+  /**
+   * Upload de imagem do produto
+   * POST /api/produtos/{id}/imagem
+   * 
+   * @param {number} id - ID do produto
+   * @param {File} file - Arquivo de imagem (JPG, PNG, WebP - máx 5MB)
+   * @returns {Promise<string>} URL da imagem no MinIO/S3
+   */
+  async uploadImagem(id, file) {
+    const formData = new FormData()
+    formData.append('imagem', file)
+
+    const response = await api.post(`/produtos/${id}/imagem`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+
+    // Response.data contém a URL direta da imagem
+    return response.data.data || response.data
+  },
+
+  /**
+   * Remover imagem do produto
+   * DELETE /api/produtos/{id}/imagem
+   * 
+   * @param {number} id - ID do produto
+   */
+  async removerImagem(id) {
+    const response = await api.delete(`/produtos/${id}/imagem`)
+    return response.data
   }
 }
 

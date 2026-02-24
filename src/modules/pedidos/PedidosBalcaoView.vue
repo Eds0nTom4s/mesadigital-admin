@@ -153,8 +153,8 @@
       <ModalCriarFundo
         v-if="mostrarModalCriarFundo"
         :cliente="clienteSelecionadoFundo"
-        @fechar="fecharModalCriarFundo"
-        @fundo-criado="handleFundoCriado"
+        @close="fecharModalCriarFundo"
+        @sucesso="handleFundoCriado"
       />
     </Teleport>
 

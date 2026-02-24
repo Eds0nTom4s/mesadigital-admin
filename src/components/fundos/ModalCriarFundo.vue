@@ -1,9 +1,9 @@
 <template>
-  <div class="modal-overlay" @click.self="$emit('fechar')">
+  <div class="modal-overlay" @click.self="$emit('close')">
     <div class="modal-dialog">
       <div class="modal-header">
         <h3>Criar Fundo de Consumo</h3>
-        <button @click="$emit('fechar')" class="btn-close">✕</button>
+        <button @click="$emit('close')" class="btn-close">✕</button>
       </div>
 
       <div class="modal-body">
@@ -40,10 +40,10 @@
             Saldo Inicial <span class="required">*</span>
           </label>
           <input 
-            v-model.number="formulario.saldoInicial" 
+            v-model.number="formulario.saldoInicialDecimal" 
             type="number" 
-            :min="valorMinimo"
-            step="100"
+            :min="valorMinimoDecimal"
+            step="0.01"
             class="form-control"
             required
           />
@@ -66,13 +66,13 @@
         <div class="preview-box">
           <div class="preview-row">
             <span>Saldo Inicial:</span>
-            <span class="preview-value">{{ formatCurrency(formulario.saldoInicial) }}</span>
+            <span class="preview-value">{{ formatCurrency(saldoInicialCentavos) }}</span>
           </div>
         </div>
       </div>
 
       <div class="modal-footer">
-        <button @click="$emit('fechar')" class="btn btn-secondary" :disabled="loading">
+        <button @click="$emit('close')" class="btn btn-secondary" :disabled="loading">
           Cancelar
         </button>
         <button 
@@ -100,29 +100,39 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['fechar', 'fundo-criado'])
+const emit = defineEmits(['close', 'sucesso'])
 
 const { formatCurrency } = useCurrency()
 const notificationStore = useNotificationStore()
 
-const valorMinimo = ref(5000)
+const valorMinimo = ref(5000) // centavos
 const loading = ref(false)
 const formulario = ref({
   clienteId: props.cliente?.id || null,
-  saldoInicial: 5000,
+  saldoInicialDecimal: 50.00, // valor em decimal (Kz)
   observacoes: ''
+})
+
+// Computed para converter decimal → centavos
+const saldoInicialCentavos = computed(() => {
+  return Math.round((formulario.value.saldoInicialDecimal || 0) * 100)
+})
+
+// Computed para valor mínimo em decimal
+const valorMinimoDecimal = computed(() => {
+  return (valorMinimo.value / 100).toFixed(2)
 })
 
 const podeConfirmar = computed(() => {
   return formulario.value.clienteId && 
-         formulario.value.saldoInicial >= valorMinimo.value
+         saldoInicialCentavos.value >= valorMinimo.value
 })
 
 onMounted(async () => {
   try {
     const config = await fundoConsumoService.consultarValorMinimo()
-    valorMinimo.value = config.valorMinimo
-    formulario.value.saldoInicial = config.valorMinimo
+    valorMinimo.value = config.valorMinimo // já vem em centavos
+    formulario.value.saldoInicialDecimal = (config.valorMinimo / 100) // converte para decimal
   } catch (error) {
     console.error('Erro ao carregar valor mínimo:', error)
   }
@@ -134,7 +144,7 @@ const confirmarCriacao = async () => {
     return
   }
 
-  if (formulario.value.saldoInicial < valorMinimo.value) {
+  if (saldoInicialCentavos.value < valorMinimo.value) {
     notificationStore.aviso(`Saldo inicial deve ser no mínimo ${formatCurrency(valorMinimo.value)}`)
     return
   }
@@ -143,12 +153,12 @@ const confirmarCriacao = async () => {
   try {
     const fundo = await fundoConsumoService.criarFundo({
       clienteId: formulario.value.clienteId,
-      saldoInicial: formulario.value.saldoInicial,
+      saldoInicial: saldoInicialCentavos.value, // envia em centavos
       observacoes: formulario.value.observacoes || 'Carga inicial'
     })
 
-    notificationStore.sucesso(`Fundo criado com sucesso! Saldo: ${formatCurrency(formulario.value.saldoInicial)}`)
-    emit('fundo-criado', fundo)
+    notificationStore.sucesso(`Fundo criado com sucesso! Saldo: ${formatCurrency(saldoInicialCentavos.value)}`)
+    emit('sucesso', fundo)
   } catch (error) {
     const mensagem = error.response?.data?.message || error.message || 'Erro ao criar fundo'
     notificationStore.erro(mensagem)
