@@ -136,12 +136,14 @@ const recargaRealizada = async () => {
   }
 }
 
-// Ações mockadas
+// TODO: Ações pendentes de implementação via API
 const encerrarFundo = () => {
+  // Endpoint esperado: PUT /api/fundos/{id}/encerrar
   alert('Funcionalidade de encerramento será implementada com integração backend')
 }
 
 const exportarExtrato = () => {
+  // Endpoint esperado: GET /api/fundos/{id}/extrato/pdf
   alert('Funcionalidade de exportação será implementada')
 }
 </script>

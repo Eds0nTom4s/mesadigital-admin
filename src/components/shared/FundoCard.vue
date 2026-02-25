@@ -34,7 +34,7 @@ const getStatusConfig = (ativo) => {
     : { class: 'badge-secondary', label: 'Encerrado' }
 }
 
-// Formata data (usa createdAt da API ou dataCriacao do mock)
+// Formata data ISO para formato local
 const formatarData = (dataISO) => {
   if (!dataISO) return 'Data indisponível'
   const data = new Date(dataISO)

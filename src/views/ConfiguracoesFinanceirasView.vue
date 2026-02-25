@@ -38,8 +38,9 @@ onMounted(async () => {
   }
 })
 
-// Mock de função de salvar
+// TODO: Implementar salvamento de configurações via API
 const salvarConfiguracoes = () => {
+  // Endpoint esperado: PUT /api/configuracoes/financeiras
   alert('Funcionalidade de edição será implementada com integração backend')
 }
 </script>
@@ -251,7 +252,7 @@ const salvarConfiguracoes = () => {
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div class="p-4 bg-background rounded-lg">
             <p class="text-sm text-text-secondary mb-1">Versão</p>
-            <p class="text-base font-medium text-text-primary">1.0.0 (Mock)</p>
+            <p class="text-base font-medium text-text-primary">1.0.0</p>
           </div>
           <div class="p-4 bg-background rounded-lg">
             <p class="text-sm text-text-secondary mb-1">Ambiente</p>

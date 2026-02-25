@@ -226,7 +226,7 @@ const {
   optimisticUI: true // Ativa optimistic updates
 })
 
-// Mock de produtos disponíveis (em produção vem de outra store)
+// Produtos disponíveis (TODO: integrar com store de produtos)
 const produtosDisponiveis = ref([
   { id: 1, nome: 'Cerveja Heineken', preco: 1200 },
   { id: 2, nome: 'Refrigerante Coca-Cola', preco: 800 },

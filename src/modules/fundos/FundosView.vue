@@ -86,7 +86,6 @@ const fundosFiltrados = computed(() => {
     // Filtro de status (API usa 'ativo' booleano)
     if (statusFiltro.value === 'ATIVO' && !fundo.ativo) return false
     if (statusFiltro.value === 'ENCERRADO' && fundo.ativo) return false
-    if (statusFiltro.value === 'EXPIRADO' && fundo.ativo) return false  // Mock only
     
     // Busca por identificador ou nome do cliente
     if (busca.value) {
