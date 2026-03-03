@@ -7,13 +7,14 @@
 
 /**
  * Status do Pedido Principal
+ * [BACKEND — 01/03/2026] Valores reais: CRIADO, EM_ANDAMENTO, FINALIZADO, CANCELADO
+ * PRONTO e ENTREGUE são estados de SUBPEDIDO, não de Pedido.
  */
 export const STATUS_PEDIDO = {
-  CRIADO: 'CRIADO',           // Pedido registrado, aguardando confirmação automática
-  EM_ANDAMENTO: 'EM_ANDAMENTO', // Ao menos um SubPedido em produção
-  PRONTO: 'PRONTO',           // Todos os SubPedidos prontos
-  ENTREGUE: 'ENTREGUE',       // Pedido entregue ao cliente
-  CANCELADO: 'CANCELADO'      // Pedido cancelado
+  CRIADO:       'CRIADO',        // Pedido registado, aguarda processamento
+  EM_ANDAMENTO: 'EM_ANDAMENTO',  // Pelo menos um SubPedido em produção
+  FINALIZADO:   'FINALIZADO',    // Todos SubPedidos entregues (transição automática)
+  CANCELADO:    'CANCELADO'      // Cancelado por GERENTE/ADMIN
 }
 
 /**
@@ -84,15 +85,10 @@ export const CORES_STATUS_PEDIDO = {
     text: 'text-blue-800',
     border: 'border-blue-300'
   },
-  [STATUS_PEDIDO.PRONTO]: {
+  [STATUS_PEDIDO.FINALIZADO]: {
     bg: 'bg-green-100',
     text: 'text-green-800',
     border: 'border-green-300'
-  },
-  [STATUS_PEDIDO.ENTREGUE]: {
-    bg: 'bg-gray-100',
-    text: 'text-gray-800',
-    border: 'border-gray-300'
   },
   [STATUS_PEDIDO.CANCELADO]: {
     bg: 'bg-red-100',
@@ -144,11 +140,10 @@ export const CORES_STATUS_SUBPEDIDO = {
  * Labels amigáveis para cada status
  */
 export const LABELS_STATUS_PEDIDO = {
-  [STATUS_PEDIDO.CRIADO]: 'Aguardando Confirmação',
+  [STATUS_PEDIDO.CRIADO]:       'Em espera',
   [STATUS_PEDIDO.EM_ANDAMENTO]: 'Em Andamento',
-  [STATUS_PEDIDO.PRONTO]: 'Pronto',
-  [STATUS_PEDIDO.ENTREGUE]: 'Entregue',
-  [STATUS_PEDIDO.CANCELADO]: 'Cancelado'
+  [STATUS_PEDIDO.FINALIZADO]:   'Finalizado',
+  [STATUS_PEDIDO.CANCELADO]:    'Cancelado'
 }
 
 export const LABELS_STATUS_SUBPEDIDO = {

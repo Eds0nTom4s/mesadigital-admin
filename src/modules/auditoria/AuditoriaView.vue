@@ -289,7 +289,9 @@ const carregarLogs = async () => {
     }
   } catch (error) {
     console.error('[AuditoriaView] Erro ao carregar logs:', error)
-    notificationStore.erro('Erro ao carregar logs de auditoria')
+    if (error?.stack) console.error(error.stack)
+    const msg = error.mensagemAmigavel || error.response?.data?.message || error.message
+    notificationStore.erro(msg || 'Erro ao carregar logs de auditoria.')
   } finally {
     loading.value = false
   }
@@ -345,7 +347,8 @@ const exportarCSV = async () => {
     notificationStore.sucesso('CSV exportado com sucesso!')
   } catch (error) {
     console.error('[AuditoriaView] Erro ao exportar CSV:', error)
-    notificationStore.erro('Erro ao exportar CSV')
+    if (error?.stack) console.error(error.stack)
+    notificationStore.erro(error.message || 'Erro ao exportar CSV.')
   }
 }
 
@@ -356,7 +359,8 @@ const exportarPDF = async () => {
     notificationStore.sucesso('PDF exportado com sucesso!')
   } catch (error) {
     console.error('[AuditoriaView] Erro ao exportar PDF:', error)
-    notificationStore.erro('Erro ao exportar PDF')
+    if (error?.stack) console.error(error.stack)
+    notificationStore.erro(error.message || 'Erro ao exportar PDF.')
   }
 }
 

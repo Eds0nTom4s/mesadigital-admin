@@ -17,35 +17,35 @@
 
 /**
  * Status do pedido (ciclo de vida)
+ * [BACKEND — 01/03/2026] Valores reais: CRIADO, EM_ANDAMENTO, FINALIZADO, CANCELADO
+ * PRONTO não existe ao nível de Pedido — mantido apenas para itens/subpedidos (ITEM_STATUS).
  */
 export const PEDIDO_STATUS = Object.freeze({
-  CRIADO: 'CRIADO',
+  CRIADO:       'CRIADO',
   EM_ANDAMENTO: 'EM_ANDAMENTO',
-  PRONTO: 'PRONTO',
-  FINALIZADO: 'FINALIZADO',
-  CANCELADO: 'CANCELADO'
+  FINALIZADO:   'FINALIZADO',
+  CANCELADO:    'CANCELADO'
+  // PRONTO — REMOVIDO: não existe como status de Pedido (apenas de SubPedido/ItemPedido)
 })
 
 /**
  * Labels humanizados dos status
  */
 export const PEDIDO_STATUS_LABEL = Object.freeze({
-  [PEDIDO_STATUS.CRIADO]: 'Criado',
+  [PEDIDO_STATUS.CRIADO]:       'Em espera',
   [PEDIDO_STATUS.EM_ANDAMENTO]: 'Em Andamento',
-  [PEDIDO_STATUS.PRONTO]: 'Pronto',
-  [PEDIDO_STATUS.FINALIZADO]: 'Finalizado',
-  [PEDIDO_STATUS.CANCELADO]: 'Cancelado'
+  [PEDIDO_STATUS.FINALIZADO]:   'Finalizado',
+  [PEDIDO_STATUS.CANCELADO]:    'Cancelado'
 })
 
 /**
  * Cores dos status (Tailwind)
  */
 export const PEDIDO_STATUS_COLOR = Object.freeze({
-  [PEDIDO_STATUS.CRIADO]: 'blue',
+  [PEDIDO_STATUS.CRIADO]:       'blue',
   [PEDIDO_STATUS.EM_ANDAMENTO]: 'yellow',
-  [PEDIDO_STATUS.PRONTO]: 'green',
-  [PEDIDO_STATUS.FINALIZADO]: 'gray',
-  [PEDIDO_STATUS.CANCELADO]: 'red'
+  [PEDIDO_STATUS.FINALIZADO]:   'green',
+  [PEDIDO_STATUS.CANCELADO]:    'red'
 })
 
 /**

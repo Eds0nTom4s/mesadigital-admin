@@ -164,14 +164,8 @@ api.interceptors.response.use(
         error.mensagemAmigavel = 'Erro interno do servidor. Nossa equipe foi notificada.'
         console.error('[API] Erro interno do servidor:', data?.message)
         
-        // Retry automático para erros 500 (apenas uma vez)
-        if (retryCount === 0 && !originalRequest._retry) {
-          requestsInRetry.set(requestKey, 1)
-          originalRequest._retry = true
-          console.warn('[API] Tentando novamente após erro 500...')
-          await new Promise(resolve => setTimeout(resolve, 2000))
-          return api(originalRequest)
-        }
+        // NÃO fazer retry automático para erro 500 (pode ser erro de dados)
+        // O usuário deve corrigir o problema ou contactar suporte
         break
       
       case 502:

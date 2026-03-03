@@ -60,16 +60,16 @@ export const pedidoApi = {
    * [POST] Criar novo pedido
    * 
    * @param {Object} payload - Dados do pedido
-   * @param {number} payload.unidadeConsumoId - ID da unidade (mesa/quarto)
+   * @param {number} payload.sessaoConsumoId - ID da sessão de consumo ativa da mesa
    * @param {string} payload.tipoPagamento - 'PRE_PAGO' | 'POS_PAGO'
    * @param {Array} payload.itens - Array de itens [{produtoId, quantidade, observacoes?}]
    * @param {string} [payload.origem] - 'BALCAO' | 'QRCODE' | 'APP'
    * @returns {Promise<Object>} Pedido criado com ID e número
    * 
-   * Nota: Backend resolve automaticamente fundoConsumoId via cliente da unidade
+   * Nota: Backend resolve automaticamente fundoConsumoId via cliente da sessão
    * 
    * @throws {Error} Validação de payload
-   * @throws {PedidoConflictError} Já existe pedido ativo para a unidade
+   * @throws {PedidoConflictError} Já existe pedido ativo para a sessão
    */
   async criar(payload) {
     const response = await api.post('/pedidos', payload, {
@@ -152,16 +152,24 @@ export const pedidoApi = {
   },
 
   /**
-   * [GET] Listar pedidos por unidade de consumo
+   * [GET] Listar pedidos por sessão de consumo
    * 
-   * @param {number} unidadeConsumoId - ID da unidade
-   * @returns {Promise<Array>} Lista de pedidos da unidade
+   * @param {number} sessaoConsumoId - ID da sessão de consumo
+   * @returns {Promise<Array>} Lista de pedidos da sessão
    */
-  async getByUnidadeConsumo(unidadeConsumoId) {
-    const response = await api.get(`/pedidos/unidade/${unidadeConsumoId}`, {
+  async getBySessaoConsumo(sessaoConsumoId) {
+    const response = await api.get(`/pedidos/sessao-consumo/${sessaoConsumoId}`, {
       timeout: TIMEOUTS.READ
     })
     return response.data
+  },
+
+  /**
+   * @deprecated Use getBySessaoConsumo(sessaoConsumoId)
+   */
+  async getByUnidadeConsumo(sessaoConsumoId) {
+    console.warn('[pedidoApi] getByUnidadeConsumo() deprecated. Use getBySessaoConsumo().')
+    return this.getBySessaoConsumo(sessaoConsumoId)
   },
 
   /**

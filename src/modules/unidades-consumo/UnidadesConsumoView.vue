@@ -3,155 +3,59 @@ import { ref, onMounted, computed } from 'vue'
 import { useCurrency } from '@/utils/currency'
 import { useNotificationStore } from '@/store/notifications'
 import ConfirmDialog from '@/components/shared/ConfirmDialog.vue'
-import { unidadesConsumoService } from '@/services/unidadesConsumoService'
 import { useAuthStore } from '@/store/auth'
+import { useUnidadeConsumo } from '@/composables/useUnidadeConsumo'
 
 const { formatCurrency } = useCurrency()
 const authStore = useAuthStore()
 const notificationStore = useNotificationStore()
 
-const unidades = ref([])
-const loading = ref(false)
-const filtroStatus = ref('TODAS')
-const mostrarModalNova = ref(false)
-const unidadeEmEdicao = ref(null)
-
-// Confirmação de fechar unidade
-const mostrarConfirmacaoFechar = ref(false)
-const unidadeParaFechar = ref(null)
-
-// Form para nova unidade - conforme especificação backend
-const formNovaUnidade = ref({
-  referencia: '',
-  telefoneCliente: '',
-  tipo: 'MESA_FISICA',
-  numero: null,
-  qrCode: '',
-  capacidade: 4,
-  unidadeAtendimentoId: null
-})
-
-const unidadesFiltradas = computed(() => {
-  if (filtroStatus.value === 'TODAS') return unidades.value
-  return unidades.value.filter(u => u.status === filtroStatus.value)
-})
-
-const unidadesOcupadas = computed(() => 
-  unidades.value.filter(u => u.status === 'OCUPADA').length
-)
+const {
+  unidades,
+  form: formNovaUnidade,
+  filtroStatus,
+  carregando: loading,
+  enviando,
+  unidadesFiltradas,
+  totalOcupadas: unidadesOcupadas,
+  percentagemOcupacao: porcentagemOcupacao,
+  carregarUnidades,
+  resetarForm,
+  criarUnidade: criarUnidadeComposable,
+  fecharUnidade: fecharUnidadeComposable
+} = useUnidadeConsumo()
 
 const unidadesTotal = computed(() => unidades.value.length)
 
-const porcentagemOcupacao = computed(() => 
-  unidadesTotal.value > 0 ? Math.round((unidadesOcupadas.value / unidadesTotal.value) * 100) : 0
-)
-
-const carregarUnidades = async () => {
-  try {
-    loading.value = true
-    
-    // Tentar usar endpoint /minhas (recomendado pelo backend)
-    try {
-      const response = await unidadesConsumoService.getMinhas()
-      
-      // Response tem estrutura: { success: true, message: "...", data: [...] }
-      unidades.value = response.data || response
-      
-      console.log('[UnidadesConsumoView] Unidades carregadas via /minhas:', unidades.value.length)
-    } catch (error) {
-      // Fallback para modo dev sem JWT válido
-      if (error.response?.status === 400) {
-        console.warn('[UnidadesConsumoView] Fallback para /api/unidades-consumo (modo dev)')
-        const response = await unidadesConsumoService.getAll()
-        unidades.value = response.data || response
-        console.log('[UnidadesConsumoView] Unidades carregadas via fallback:', unidades.value.length)
-      } else {
-        throw error
-      }
-    }
-  } catch (error) {
-    console.error('[UnidadesConsumoView] Erro ao carregar unidades:', error)
-    
-    // Tratamento de erro conforme documento
-    if (error.response?.status === 401) {
-      notificationStore.erro('Sessão expirada. Faça login novamente.')
-      // Redirecionar para login
-    } else if (error.response?.status !== 400) {
-      // Não mostrar toast para erro 400 (já tem fallback)
-      notificationStore.erro('Erro ao carregar unidades: ' + (error.response?.data?.message || error.message))
-    }
-  } finally {
-    loading.value = false
-  }
-}
+const mostrarModalNova = ref(false)
+const unidadeEmEdicao = ref(null)
+const mostrarConfirmacaoFechar = ref(false)
+const unidadeParaFechar = ref(null)
 
 const abrirModalNova = () => {
-  formNovaUnidade.value = {
-    referencia: '',
-    telefoneCliente: '',
-    tipo: 'MESA_FISICA',
-    numero: null,
-    qrCode: '',
-    capacidade: 4,
-    unidadeAtendimentoId: authStore.user?.unidadeAtendimentoId || null
-  }
+  resetarForm()
   unidadeEmEdicao.value = null
   mostrarModalNova.value = true
 }
 
 const criarUnidade = async () => {
   try {
-    // Validação conforme documento
-    if (!formNovaUnidade.value.referencia) {
-      notificationStore.aviso('Referência é obrigatória')
-      return
-    }
-    
-    if (!formNovaUnidade.value.telefoneCliente) {
-      notificationStore.aviso('Telefone do cliente é obrigatório')
-      return
-    }
-    
-    // Validar formato telefone: +244XXXXXXXXX
-    const telefoneRegex = /^\+244\d{9}$/
-    if (!telefoneRegex.test(formNovaUnidade.value.telefoneCliente)) {
-      notificationStore.aviso('Telefone inválido. Formato: +244XXXXXXXXX (9 dígitos após 244)')
-      return
-    }
-    
-    if (!formNovaUnidade.value.unidadeAtendimentoId && !authStore.isAdmin) {
-      notificationStore.aviso('Unidade de atendimento é obrigatória')
-      return
-    }
-    
-    loading.value = true
-    
-    const response = await unidadesConsumoService.abrir(formNovaUnidade.value)
-    
-    console.log('[UnidadesConsumoView] Unidade criada:', response)
-    
+    await criarUnidadeComposable()
     mostrarModalNova.value = false
-    await carregarUnidades()
-    
     notificationStore.sucesso('Unidade de consumo criada com sucesso!')
   } catch (error) {
-    console.error('[UnidadesConsumoView] Erro ao criar unidade:', error)
-    
-    // Tratamento de erros conforme documento
-    if (error.response?.status === 400) {
-      const msg = error.response.data.message
-      if (msg.includes('já possui uma unidade ativa')) {
-        notificationStore.erro('Este cliente já possui uma unidade ativa. Feche a unidade anterior primeiro.')
-      } else {
-        notificationStore.erro('Erro: ' + msg)
-      }
-    } else if (error.response?.status === 404) {
-      notificationStore.erro('Unidade de atendimento não encontrada')
+    const status = error?.response?.status
+    const msg = error?.response?.data?.message || error?.message || 'Erro ao criar unidade de consumo'
+
+    if (status === 409) {
+      notificationStore.erro('Este cliente já possui uma unidade ativa. Feche a unidade anterior primeiro.')
+    } else if (status === 404) {
+      notificationStore.erro('Unidade de atendimento não encontrada.')
+    } else if (status === 403) {
+      notificationStore.erro('Sem permissão para realizar esta operação.')
     } else {
-      notificationStore.erro('Erro ao criar unidade de consumo')
+      notificationStore.erro(msg)
     }
-  } finally {
-    loading.value = false
   }
 }
 
@@ -162,17 +66,13 @@ const confirmarFecharUnidade = (unidade) => {
 
 const fecharUnidade = async () => {
   try {
-    loading.value = true
-    await unidadesConsumoService.fechar(unidadeParaFechar.value.id)
-    await carregarUnidades()
+    await fecharUnidadeComposable(unidadeParaFechar.value.id)
     notificationStore.sucesso('Unidade fechada com sucesso!')
     mostrarConfirmacaoFechar.value = false
     unidadeParaFechar.value = null
   } catch (error) {
-    console.error('[UnidadesConsumoView] Erro ao fechar unidade:', error)
-    notificationStore.erro('Erro ao fechar unidade de consumo')
-  } finally {
-    loading.value = false
+    const msg = error?.response?.data?.message || 'Erro ao fechar unidade de consumo'
+    notificationStore.erro(msg)
   }
 }
 
@@ -181,12 +81,12 @@ onMounted(() => {
 })
 
 const getStatusBadge = (status) => {
-  // Conforme documento backend: DISPONIVEL, OCUPADA, AGUARDANDO_PAGAMENTO, FINALIZADA
   const badges = {
     'DISPONIVEL': 'badge-info',
     'OCUPADA': 'badge-success',
     'AGUARDANDO_PAGAMENTO': 'badge-warning',
-    'FINALIZADA': 'badge-secondary'
+    'ENCERRADA': 'badge-secondary',
+    'FINALIZADA': 'badge-secondary'  // legacy alias
   }
   return badges[status] || 'badge-info'
 }
@@ -196,7 +96,8 @@ const getStatusBorder = (status) => {
     'DISPONIVEL': 'border-info bg-info/5',
     'OCUPADA': 'border-success bg-success/5',
     'AGUARDANDO_PAGAMENTO': 'border-warning bg-warning/5',
-    'FINALIZADA': 'border-border bg-background'
+    'ENCERRADA': 'border-border bg-background',
+    'FINALIZADA': 'border-border bg-background'  // legacy alias
   }
   return borders[status] || 'border-info bg-info/5'
 }
@@ -206,7 +107,8 @@ const getStatusLabel = (status) => {
     'DISPONIVEL': 'Disponível',
     'OCUPADA': 'Ocupada',
     'AGUARDANDO_PAGAMENTO': 'Aguardando Pagamento',
-    'FINALIZADA': 'Finalizada'
+    'ENCERRADA': 'Encerrada',
+    'FINALIZADA': 'Encerrada'  // legacy alias
   }
   return labels[status] || status
 }
@@ -294,15 +196,26 @@ const getTipoLabel = (tipo) => {
             </span>
           </div>
 
-          <!-- Referência -->
-          <p class="text-sm font-medium text-text-primary mb-2 truncate">{{ unidade.referencia }}</p>
+          <!-- Referência + badge ANÔNIMO -->
+          <div class="flex items-center gap-1 mb-2">
+            <p class="text-sm font-medium text-text-primary truncate flex-1">{{ unidade.referencia }}</p>
+            <span v-if="unidade.modoAnonimo"
+                  class="text-xs px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold shrink-0">
+              ANÓN.
+            </span>
+          </div>
 
-          <!-- Cliente (conforme estrutura backend) -->
-          <p v-if="unidade.cliente" class="text-xs text-text-secondary mb-2 truncate">
-            👤 {{ unidade.cliente.nome }}
-          </p>
-          <p v-if="unidade.cliente?.telefone" class="text-xs text-text-secondary mb-1 truncate">
-            📞 {{ unidade.cliente.telefone }}
+          <!-- Cliente — apenas quando não é modo anónimo (campo é null no modo anónimo) -->
+          <template v-if="!unidade.modoAnonimo">
+            <p v-if="unidade.cliente" class="text-xs text-text-secondary mb-2 truncate">
+              👤 {{ unidade.cliente.nome }}
+            </p>
+            <p v-if="unidade.cliente?.telefone" class="text-xs text-text-secondary mb-1 truncate">
+              📞 {{ unidade.cliente.telefone }}
+            </p>
+          </template>
+          <p v-else class="text-xs text-amber-600 mb-1">
+            🔒 Consumo anónimo
           </p>
 
           <!-- Unidade de Atendimento (para ADMIN) -->
@@ -343,23 +256,7 @@ const getTipoLabel = (tipo) => {
           <button @click="mostrarModalNova = false" class="btn-close">✕</button>
         </div>
         <form @submit.prevent="criarUnidade" class="modal-body space-y-4">
-          
-          <!-- Telefone Cliente (OBRIGATÓRIO conforme backend) -->
-          <div>
-            <label class="block text-sm font-medium text-text-primary mb-1">
-              Telefone do Cliente *
-            </label>
-            <input v-model="formNovaUnidade.telefoneCliente" 
-                   type="tel" 
-                   placeholder="+244923456789"
-                   class="input"
-                   required 
-                   pattern="^\+244\d{9}$"
-                   title="Formato: +244 seguido de 9 dígitos" />
-            <p class="text-xs text-text-secondary mt-1">
-              Formato: +244XXXXXXXXX (9 dígitos)
-            </p>
-          </div>
+
           <div>
             <label class="block text-sm font-medium text-text-primary mb-1">Referência *</label>
             <input v-model="formNovaUnidade.referencia" 

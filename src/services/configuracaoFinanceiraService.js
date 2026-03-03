@@ -1,105 +1,103 @@
 /**
  * Serviço de Configuração Financeira
- * 
- * Gerencia configurações financeiras e operacionais do sistema:
- * - Controle de pós-pago
- * - Taxas e impostos
- * - Métodos de pagamento
- * - Limites financeiros
+ *
+ * Contratos baseados em ALINHAMENTO_FRONTEND.txt (01/03/2026).
+ * Fonte única da verdade: documento de alinhamento oficial.
+ *
+ * Endpoints base: /api/configuracoes-financeiras
+ * Autenticação: Bearer JWT
  */
 
 import api from './api'
 
 export const configuracaoFinanceiraService = {
   /**
-   * Buscar configuração atual do sistema
-   * GET /api/configuracao-financeira
-   * 
-   * @returns {Object} { posPagoAtivo, atualizadoEm, atualizadoPorNome, atualizadoPorRole }
+   * Buscar configuração completa do sistema
+   * GET /api/configuracoes-financeiras
+   * Roles: ADMIN
+   *
+   * Resposta inclui os novos campos:
+   *   - valorMinimoOperacao
+   *   - motivoUltimaAlteracao
+   *   - atualizadoPorNome / atualizadoPorRole / updatedAt
    */
   async buscarConfiguracao() {
-    const response = await api.get('/configuracao-financeira')
-    return response
+    const response = await api.get('/configuracoes-financeiras')
+    return response.data
+  },
+
+  /**
+   * Buscar status rápido do pós-pago (sem carregar configuração completa)
+   * GET /api/configuracoes-financeiras/pos-pago/status
+   * Roles: ATENDENTE, GERENTE, ADMIN
+   *
+   * Usar este endpoint no formulário de criação de pedido.
+   * Retorna: { success: true, data: true|false }
+   */
+  async buscarStatusPosPago() {
+    const response = await api.get('/configuracoes-financeiras/pos-pago/status')
+    // data.data é boolean true|false
+    return response.data?.data ?? false
   },
 
   /**
    * Ativar pós-pago globalmente
-   * POST /api/configuracao-financeira/pos-pago/ativar
-   * 
-   * Apenas ADMIN pode executar
+   * PUT /api/configuracoes-financeiras/pos-pago/ativar
+   * Roles: ADMIN
+   *
+   * @param {string} [motivo] - Razão da ativação (recomendado, aceito pelo backend)
    */
-  async ativarPosPago() {
-    const response = await api.post('/configuracao-financeira/pos-pago/ativar')
-    return response
+  async ativarPosPago(motivo = null) {
+    const params = {}
+    if (motivo?.trim()) params.motivo = motivo.trim()
+    const response = await api.put('/configuracoes-financeiras/pos-pago/ativar', null, { params })
+    return response.data
   },
 
   /**
    * Desativar pós-pago globalmente
-   * POST /api/configuracao-financeira/pos-pago/desativar
-   * 
-   * Apenas ADMIN pode executar
-   * Bloqueia criação de novos pedidos POS_PAGO
+   * PUT /api/configuracoes-financeiras/pos-pago/desativar
+   * Roles: ADMIN
+   *
+   * @param {string} [motivo] - Razão da desativação (recomendado, aceito pelo backend)
    */
-  async desativarPosPago() {
-    const response = await api.post('/configuracao-financeira/pos-pago/desativar')
-    return response
+  async desativarPosPago(motivo = null) {
+    const params = {}
+    if (motivo?.trim()) params.motivo = motivo.trim()
+    const response = await api.put('/configuracoes-financeiras/pos-pago/desativar', null, { params })
+    return response.data
   },
 
   /**
-   * Buscar taxas e impostos configurados
-   * GET /api/configuracao-financeira/taxas
+   * Alterar limite de pós-pago por unidade
+   * PUT /api/configuracoes-financeiras/pos-pago/limite
+   * Roles: ADMIN
+   *
+   * Mínimo aceito pelo backend: 100,00 AOA
+   *
+   * @param {number} novoLimite - Novo limite em AOA (mínimo 100)
+   * @param {string} [motivo]   - Razão da alteração (recomendado)
    */
-  async buscarTaxas() {
-    const response = await api.get('/configuracao-financeira/taxas')
-    return response.data?.data || response.data
+  async alterarLimitePosPago(novoLimite, motivo = null) {
+    const params = { novoLimite }
+    if (motivo?.trim()) params.motivo = motivo.trim()
+    const response = await api.put('/configuracoes-financeiras/pos-pago/limite', null, { params })
+    return response.data
   },
 
   /**
-   * Atualizar taxas e impostos
-   * PUT /api/configuracao-financeira/taxas
-   * @param {Object} dados - Configurações de taxas
+   * Alterar valor mínimo de operação (recarga, débito, estorno)
+   * PUT /api/configuracoes-financeiras/valor-minimo
+   * Roles: ADMIN
+   *
+   * @param {number} novoValor - Novo valor mínimo em AOA
+   * @param {string} [motivo]  - Razão da alteração (recomendado)
    */
-  async atualizarTaxas(dados) {
-    const response = await api.put('/configuracao-financeira/taxas', dados)
-    return response.data?.data || response.data
-  },
-
-  /**
-   * Buscar métodos de pagamento habilitados
-   * GET /api/configuracao-financeira/metodos-pagamento
-   */
-  async buscarMetodosPagamento() {
-    const response = await api.get('/configuracao-financeira/metodos-pagamento')
-    return response.data?.data || response.data
-  },
-
-  /**
-   * Atualizar métodos de pagamento habilitados
-   * PUT /api/configuracao-financeira/metodos-pagamento
-   * @param {Object} metodos - { DINHEIRO: true, CARTAO: true, etc }
-   */
-  async atualizarMetodosPagamento(metodos) {
-    const response = await api.put('/configuracao-financeira/metodos-pagamento', metodos)
-    return response.data?.data || response.data
-  },
-
-  /**
-   * Buscar limites financeiros
-   * GET /api/configuracao-financeira/limites
-   */
-  async buscarLimites() {
-    const response = await api.get('/configuracao-financeira/limites')
-    return response.data?.data || response.data
-  },
-
-  /**
-   * Atualizar limites financeiros
-   * PUT /api/configuracao-financeira/limites
-   * @param {Object} limites - { valorMinimoFundo, valorMaximoPedido, etc }
-   */
-  async atualizarLimites(limites) {
-    const response = await api.put('/configuracao-financeira/limites', limites)
-    return response.data?.data || response.data
+  async alterarValorMinimo(novoValor, motivo = null) {
+    const params = { novoValor }
+    if (motivo?.trim()) params.motivo = motivo.trim()
+    const response = await api.put('/configuracoes-financeiras/valor-minimo', null, { params })
+    return response.data
   }
 }
 

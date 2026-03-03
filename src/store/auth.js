@@ -41,7 +41,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       console.log('[Auth] Iniciando login...', { telefone })
       
-      const response = await fetch('http://localhost:8080/api/auth/admin/login', {
+      const response = await fetch('/api/auth/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ telefone, senha })
@@ -68,24 +68,33 @@ export const useAuthStore = defineStore('auth', () => {
       const userData = responseData.data
       console.log('[Auth] Token extraído:', userData.token ? 'SIM' : 'NÃO')
       console.log('[Auth] Usuário extraído:', { id: userData.id, nome: userData.nome, tipoUsuario: userData.tipoUsuario })
-      
+
+      // [BACKEND] expiresIn é em SEGUNDOS (86400 = 24h), NÃO milissegundos.
+      // A expiração real é lida pelo checkAuth() via claim 'exp' do JWT.
+      // Fórmula correta se necessário: Date.now() + (userData.expiresIn * 1000)
+
       // Armazenar token
       token.value = userData.token
       localStorage.setItem('token', userData.token)
       console.log('[Auth] Token salvo no localStorage')
       
       // Usar dados do usuário da resposta (estrutura real do backend)
+      // [BACKEND] campo é 'tipoUsuario' (string), NÃO 'role' nem 'roles'
       user.value = {
         id: userData.id,
         name: userData.nome,
         telefone: userData.telefone,
         email: userData.email || '',
-        role: userData.tipoUsuario, // GERENTE, ATENDENTE, etc
-        roles: [`ROLE_${userData.tipoUsuario}`],
-        ativo: true, // Se logou, está ativo
-        unidadeAtendimentoId: userData.unidadeAtendimentoId || null,
+        role: userData.tipoUsuario,                    // 'ADMIN' | 'GERENTE' | 'ATENDENTE'
+        roles: [`ROLE_${userData.tipoUsuario}`],       // Derivado do tipoUsuario
+        ativo: true,
+        unidadeAtendimentoId: userData.unidadeAtendimentoId || null, // Não vem no JWT — lido daqui
         permissions: []
       }
+
+      // Persistir dados do utilizador para restaurar após refresh de página
+      // (JWT não contém nome, email, unidadeAtendimentoId)
+      localStorage.setItem('user', JSON.stringify(user.value))
       
       console.log('[Auth] Usuário logado:', user.value)
       
@@ -104,6 +113,7 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated.value = false
     token.value = null
     localStorage.removeItem('token')
+    localStorage.removeItem('user')
   }
 
   const updateUser = (userData) => {
@@ -115,6 +125,7 @@ export const useAuthStore = defineStore('auth', () => {
     const savedToken = localStorage.getItem('token')
     
     if (!savedToken) {
+      console.log('[Auth] checkAuth: Nenhum token encontrado')
       logout()
       return false
     }
@@ -124,28 +135,51 @@ export const useAuthStore = defineStore('auth', () => {
       const payload = JSON.parse(atob(savedToken.split('.')[1]))
       const now = Math.floor(Date.now() / 1000)
       
+      console.log('[Auth] checkAuth: Token decodificado', {
+        exp: payload.exp,
+        now: now,
+        expiresIn: payload.exp ? `${Math.floor((payload.exp - now) / 60)} minutos` : 'SEM EXPIRAÇÃO'
+      })
+      
       if (payload.exp && payload.exp < now) {
         // Token expirado
+        console.warn('[Auth] checkAuth: Token EXPIRADO')
         logout()
         return false
       }
       
-      // Restaurar dados do usuário
+      // Restaurar dados do utilizador
+      // [BACKEND] JWT de /auth/admin/login contém apenas: sub (telefone), roles (STRING), iat, exp
+      // Campos como nome, email, id e unidadeAtendimentoId NÃO estão no JWT.
+      // São restaurados do localStorage (gravados no login()).
+
+      // [BACKEND] roles é STRING simples: "ROLE_ADMIN" (não array)
+      const rolesRaw = payload.roles || ''
+      const rolesList = typeof rolesRaw === 'string'
+        ? rolesRaw.split(',').map(r => r.trim()).filter(Boolean)
+        : (Array.isArray(rolesRaw) ? rolesRaw : [rolesRaw])
+      const roleClean = (rolesList[0] || 'ROLE_ATENDENTE').replace('ROLE_', '')
+
+      // Tentar restaurar dados completos do utilizador do localStorage
+      let storedUser = {}
+      try {
+        const raw = localStorage.getItem('user')
+        if (raw) storedUser = JSON.parse(raw)
+      } catch (_) { /* ignore */ }
+
       token.value = savedToken
       user.value = {
-        id: payload.userId || payload.sub,
-        name: payload.nome || payload.name,
-        email: payload.email || '',
-        role: payload.roles?.[0]?.replace('ROLE_', '') || 'ATENDENTE',
-        roles: payload.roles || [],
-        unidadeAtendimentoId: payload.unidadeAtendimentoId || null,
-        permissions: []
+        ...storedUser,                             // id, name, telefone, email, unidadeAtendimentoId
+        role: roleClean,                           // Sempre derivado do JWT (fonte de verdade)
+        roles: rolesList,                          // Sempre derivado do JWT
+        permissions: storedUser.permissions || []
       }
       isAuthenticated.value = true
       
+      console.log('[Auth] checkAuth: Sessão VÁLIDA', user.value)
       return true
     } catch (error) {
-      console.error('Erro ao verificar autenticação:', error)
+      console.error('[Auth] checkAuth: Erro ao validar token:', error)
       logout()
       return false
     }

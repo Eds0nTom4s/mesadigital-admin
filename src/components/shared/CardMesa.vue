@@ -27,18 +27,18 @@
 
     <!-- Cliente (se ocupada) -->
     <div v-if="mesa.status === 'OCUPADA' || mesa.status === 'AGUARDANDO_PAGAMENTO'" class="space-y-2">
-      <div v-if="mesa.cliente" class="text-xs text-text-secondary truncate">
+      <div v-if="clienteNome" class="text-xs text-text-secondary truncate">
         <div class="flex items-center">
           <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
           </svg>
-          {{ mesa.cliente.nome }}
+          {{ clienteNome }}
         </div>
-        <div v-if="mesa.cliente.telefone" class="flex items-center mt-1">
+        <div v-if="clienteTelefone" class="flex items-center mt-1">
           <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/>
           </svg>
-          {{ mesa.cliente.telefone }}
+          {{ clienteTelefone }}
         </div>
       </div>
 
@@ -47,8 +47,8 @@
         <p class="text-xs text-text-secondary">Valor consumido:</p>
         <p class="text-sm font-bold text-error">{{ formatCurrency(total) }}</p>
         
-        <p v-if="mesa.pedidos && mesa.pedidos.length > 0" class="text-xs text-text-secondary mt-1">
-          {{ mesa.pedidos.length }} pedido(s)
+        <p v-if="numeroPedidos > 0" class="text-xs text-text-secondary mt-1">
+          {{ numeroPedidos }} pedido(s)
         </p>
       </div>
 
@@ -72,7 +72,7 @@
     </div>
 
     <!-- Tempo Aberto (se ocupada) -->
-    <div v-if="mesa.abertaEm && (mesa.status === 'OCUPADA' || mesa.status === 'AGUARDANDO_PAGAMENTO')" 
+    <div v-if="abertaEm && (mesa.status === 'OCUPADA' || mesa.status === 'AGUARDANDO_PAGAMENTO')" 
          class="text-xs text-text-secondary mt-2 flex items-center">
       <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
@@ -92,6 +92,14 @@ const props = defineProps({
   mesa: {
     type: Object,
     required: true
+  },
+  /**
+   * Dados da sessão ativa (SessaoConsumoResponse).
+   * Se fornecido, toma prioridade sobre campos legados em mesa.
+   */
+  sessaoAtiva: {
+    type: Object,
+    default: null
   }
 })
 
@@ -103,7 +111,8 @@ const borderClass = computed(() => {
     'DISPONIVEL': 'border-info bg-info/5',
     'OCUPADA': 'border-success bg-success/5',
     'AGUARDANDO_PAGAMENTO': 'border-warning bg-warning/5',
-    'FINALIZADA': 'border-border bg-background'
+    'ENCERRADA': 'border-border bg-background',
+    'FINALIZADA': 'border-border bg-background'  // legacy alias
   }
   return classes[props.mesa.status] || 'border-border bg-background'
 })
@@ -114,7 +123,8 @@ const statusBadge = computed(() => {
     'DISPONIVEL': 'bg-info text-white',
     'OCUPADA': 'bg-success text-white',
     'AGUARDANDO_PAGAMENTO': 'bg-warning text-white',
-    'FINALIZADA': 'bg-gray-500 text-white'
+    'ENCERRADA': 'bg-gray-500 text-white',
+    'FINALIZADA': 'bg-gray-500 text-white'  // legacy alias
   }
   return badges[props.mesa.status] || 'bg-gray-500 text-white'
 })
@@ -125,7 +135,8 @@ const statusLabel = computed(() => {
     'DISPONIVEL': 'Disponível',
     'OCUPADA': 'Ocupada',
     'AGUARDANDO_PAGAMENTO': 'Aguardando',
-    'FINALIZADA': 'Finalizada'
+    'ENCERRADA': 'Encerrada',
+    'FINALIZADA': 'Encerrada'  // legacy alias
   }
   return labels[props.mesa.status] || props.mesa.status
 })
@@ -142,40 +153,31 @@ const tipoLabel = computed(() => {
   return labels[props.mesa.tipo] || 'Mesa'
 })
 
-// Total consumido
+// Total consumido — prefer sessaoAtiva.totalConsumo, fallback to sum of pedidos
 const total = computed(() => {
-  if (!props.mesa.pedidos || props.mesa.pedidos.length === 0) return 0
-  return props.mesa.pedidos.reduce((sum, p) => sum + (p.total || 0), 0)
+  if (props.sessaoAtiva?.totalConsumo != null) return props.sessaoAtiva.totalConsumo
+  const pedidos = props.sessaoAtiva?.pedidos || props.mesa.pedidos || []
+  return pedidos.reduce((sum, p) => sum + (p.total || 0), 0)
 })
 
 // Modo de pagamento
 const modoPagamento = computed(() => {
-  if (!props.mesa.pedidos || props.mesa.pedidos.length === 0) return null
-  
-  const primeiroPedido = props.mesa.pedidos[0]
+  const pedidos = props.sessaoAtiva?.pedidos || props.mesa.pedidos || []
+  if (!pedidos.length) return null
+  const primeiroPedido = pedidos[0]
   if (!primeiroPedido) return null
-  
-  // Detecta se é pré-pago ou pós-pago
   if (primeiroPedido.tipoPagamento === 'PRE_PAGO') {
-    return {
-      icon: '💰',
-      label: 'Pré-pago',
-      color: 'text-success'
-    }
+    return { icon: '💰', label: 'Pré-pago', color: 'text-success' }
   }
-  
-  return {
-    icon: '💳',
-    label: 'Pós-pago',
-    color: 'text-warning'
-  }
+  return { icon: '💳', label: 'Pós-pago', color: 'text-warning' }
 })
 
-// Tempo decorrido desde abertura
+// Tempo decorrido desde abertura da sessão
 const tempoDecorrido = computed(() => {
-  if (!props.mesa.abertaEm) return ''
+  const abertaEm = props.sessaoAtiva?.abertaEm || props.mesa.abertaEm
+  if (!abertaEm) return ''
   
-  const inicio = new Date(props.mesa.abertaEm)
+  const inicio = new Date(abertaEm)
   const agora = new Date()
   const diff = agora - inicio
   
@@ -187,4 +189,22 @@ const tempoDecorrido = computed(() => {
   }
   return `${minutos}min`
 })
+
+// Dados do cliente (preferência: sessão ativa > legado mesa.cliente)
+const clienteNome = computed(() => {
+  if (props.sessaoAtiva) return props.sessaoAtiva.nomeCliente || null
+  return props.mesa.cliente?.nome || null
+})
+
+const clienteTelefone = computed(() => {
+  if (props.sessaoAtiva) return props.sessaoAtiva.telefoneCliente || null
+  return props.mesa.cliente?.telefone || null
+})
+
+const numeroPedidos = computed(() => {
+  const pedidos = props.sessaoAtiva?.pedidos || props.mesa.pedidos || []
+  return pedidos.length
+})
+
+const abertaEm = computed(() => props.sessaoAtiva?.abertaEm || props.mesa.abertaEm)
 </script>

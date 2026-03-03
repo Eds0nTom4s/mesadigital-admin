@@ -6,24 +6,15 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
-import { useWebSocketStore } from '@/store/websocket'
 import ToastNotifications from '@/components/shared/ToastNotifications.vue'
 import ErrorBoundary from '@/components/shared/ErrorBoundary.vue'
 
 /**
  * Ponto de entrada principal do painel administrativo
  * 
- * Inicializa conexão WebSocket global ao montar a aplicação
+ * WebSocket é inicializado sob demanda em cada componente que precisa
  * Componente ToastNotifications está sempre ativo para exibir notificações
  */
-
-// Conectar ao WebSocket quando aplicação iniciar
-onMounted(() => {
-  console.log('[App] Inicializando conexão WebSocket...')
-  const wsStore = useWebSocketStore()
-  wsStore.conectar()
-})
 </script>
 
 <style>

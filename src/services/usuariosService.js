@@ -274,6 +274,10 @@ const usuariosService = {
     } catch (error) {
       console.error('[UsuariosService] Erro ao confirmar reset:', error)
       
+      // Backend retorna 501 — fluxo de email não está configurado neste ambiente
+      if (error.response?.status === 501) {
+        throw new Error('Redefinição de senha por token não disponível. Contacte o administrador para reset manual via PATCH /usuarios/{id}/senha.')
+      }
       if (error.response?.status === 400) {
         throw new Error('Token inválido ou expirado')
       }
@@ -309,10 +313,14 @@ const usuariosService = {
       console.log('[UsuariosService] Listando logs de acesso:', id)
       const response = await api.get(`/usuarios/${id}/logs`, { params })
       
-      const logs = response.data?.data || response.data
-      
-      return logs
+      // Backend retorna lista (pode ser vazia) — tratar lista vazia como estado normal
+      const logs = response.data?.data ?? response.data ?? []
+      return Array.isArray(logs) ? logs : []
     } catch (error) {
+      // 404 significa ausência de logs — estado normal, não erro
+      if (error.response?.status === 404) {
+        return []
+      }
       console.error('[UsuariosService] Erro ao listar logs:', error)
       throw error
     }

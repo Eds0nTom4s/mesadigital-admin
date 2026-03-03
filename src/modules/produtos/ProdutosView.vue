@@ -4,6 +4,7 @@ import { useCurrency } from '@/utils/currency'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
 import api from '@/services/api'
+import produtosService from '@/services/produtosService'
 import ImageUpload from '@/components/produtos/ImageUpload.vue'
 
 const { formatCurrency } = useCurrency()
@@ -94,6 +95,26 @@ const getLabelTipoPreparo = (tipo) => {
 const getCorTipoPreparo = (tipo) => {
   const t = tiposPreparo.find(tp => tp.valor === tipo)
   return t?.cor || '#9E9E9E'
+}
+
+// Computed para verificar se produto está operacional
+const isProdutoOperacional = (produto) => {
+  if (!produto.ativo || !produto.disponivel) return false
+  if (produto.cozinha && !produto.cozinha.ativa) return false
+  return true
+}
+
+const getStatusProduto = (produto) => {
+  if (!produto.ativo) {
+    return { badge: 'Inativo', cor: '#757575', mensagem: 'Produto desativado' }
+  }
+  if (!produto.disponivel) {
+    return { badge: 'Indisponível', cor: '#F57C00', mensagem: 'Temporariamente indisponível' }
+  }
+  if (produto.cozinha && !produto.cozinha.ativa) {
+    return { badge: 'Cozinha Fechada', cor: '#D32F2F', mensagem: `Cozinha ${produto.cozinha.nome || 'responsável'} temporariamente fechada` }
+  }
+  return { badge: 'Disponível', cor: '#4CAF50', mensagem: 'Disponível para pedidos' }
 }
 
 // Carregar produtos
@@ -282,7 +303,8 @@ const salvarProduto = async () => {
 const alterarStatus = async (produto) => {
   try {
     const novoStatus = !produto.ativo
-    await api.patch(`/produtos/${produto.id}/disponibilidade`, { ativo: novoStatus })
+    // [BACKEND] PATCH /produtos/{id}/disponibilidade?disponivel=true  (query param, não body)
+    await produtosService.atualizarStatus(produto.id, novoStatus)
     produto.ativo = novoStatus
     notificationStore.sucesso(`Produto marcado como ${novoStatus ? 'ativo' : 'inativo'}`)
   } catch (error) {

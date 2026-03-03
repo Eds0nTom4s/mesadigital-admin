@@ -4,7 +4,7 @@
     <div class="page-header">
       <div>
         <h1>⚙️ Configurações do Sistema</h1>
-        <p class="subtitle">Gerencie parâmetros globais do sistema</p>
+        <p class="subtitle">Parâmetros financeiros e operacionais</p>
       </div>
       <div v-if="!isAdmin" class="alert alert-warning">
         <span>⚠️</span>
@@ -12,130 +12,311 @@
       </div>
     </div>
 
-    <!-- Loading -->
-    <div v-if="loading" class="loading-state">
+    <!-- Loading inicial -->
+    <div v-if="carregando" class="loading-state">
       <div class="spinner"></div>
       <p>Carregando configurações...</p>
     </div>
 
-    <!-- Configurações -->
-    <div v-else class="config-sections">
-      <!-- Seção: Financeiro -->
+    <!-- Erro de carregamento -->
+    <div v-else-if="!configuracao && erro" class="alert alert-danger mt-4">
+      <span>❌</span>
+      <p>{{ erro }}</p>
+      <button @click="carregarConfiguracao" class="btn btn-sm btn-primary ml-4">Tentar novamente</button>
+    </div>
+
+    <!-- Conteúdo -->
+    <div v-else-if="configuracao" class="config-sections">
+
+      <!-- ─────────────────────────────────────────────── -->
+      <!-- Barra de auditoria: última alteração            -->
+      <!-- ─────────────────────────────────────────────── -->
+      <div v-if="configuracao.atualizadoPorNome" class="audit-bar">
+        <span class="audit-icon">🕵️</span>
+        <span>
+          Última alteração por <strong>{{ configuracao.atualizadoPorNome }}</strong>
+          ({{ configuracao.atualizadoPorRole }})
+          em {{ formatData(configuracao.updatedAt) }}
+          <span v-if="configuracao.motivoUltimaAlteracao">
+            — <em>"{{ configuracao.motivoUltimaAlteracao }}"</em>
+          </span>
+        </span>
+      </div>
+
+      <!-- ─────────────────────────────────────────────── -->
+      <!-- Secção: Controlo do Pós-Pago                   -->
+      <!-- ─────────────────────────────────────────────── -->
       <div class="config-section">
         <div class="section-header">
-          <div class="section-icon">💰</div>
+          <div class="section-icon">🔄</div>
           <div>
-            <h2>Configurações Financeiras</h2>
-            <p class="section-description">Controle de modalidades de pagamento e limites</p>
+            <h2>Modalidade Pós-Pago</h2>
+            <p class="section-description">Ativar ou desativar pagamento posterior em todo o sistema</p>
           </div>
         </div>
 
         <div class="section-body">
-          <!-- Interruptor Pós-Pago -->
           <div class="config-item">
             <div class="config-info">
               <div class="config-label">
-                <h3>Modalidade Pós-Pago</h3>
-                <span :class="['badge', posPagoAtivo ? 'badge-success' : 'badge-error']">
-                  {{ posPagoAtivo ? '✅ ATIVADO' : '🚫 DESATIVADO' }}
+                <h3>Estado atual</h3>
+                <span :class="['badge', configuracao.posPagoAtivo ? 'badge-success' : 'badge-error']">
+                  {{ configuracao.posPagoAtivo ? '✅ ATIVADO' : '🚫 DESATIVADO' }}
                 </span>
               </div>
               <p class="config-description">
-                {{ posPagoAtivo 
-                  ? 'Sistema aceita criação de pedidos pós-pago (pagamento posterior). Gerentes podem autorizar crédito.'
-                  : 'Pós-pago está bloqueado. Apenas pagamento antecipado (fundo de consumo) é permitido.'
-                }}
+                {{ configuracao.posPagoAtivo
+                  ? 'Pedidos pós-pago podem ser criados (respeitando limite por unidade).'
+                  : 'Pós-pago bloqueado globalmente. Apenas pagamento pré-pago aceite.' }}
               </p>
-              
-              <!-- Detalhes da última atualização -->
-              <div v-if="configuracao" class="config-meta">
-                <span class="meta-item">
-                  <strong>Última atualização:</strong> {{ formatData(configuracao.atualizadoEm) }}
-                </span>
-                <span class="meta-item">
-                  <strong>Por:</strong> {{ configuracao.atualizadoPorNome }} ({{ configuracao.atualizadoPorRole }})
-                </span>
-              </div>
 
-              <!-- Aviso de impacto -->
               <div v-if="isAdmin" class="config-warning">
-                <span class="warning-icon">⚠️</span>
-                <div>
-                  <strong>Atenção:</strong>
-                  <ul>
-                    <li v-if="posPagoAtivo">Desativar bloqueará <strong>novos pedidos pós-pago</strong> imediatamente</li>
-                    <li v-else>Ativar permitirá que Gerentes criem pedidos com pagamento posterior</li>
-                    <li>Pedidos pós-pago existentes não são afetados</li>
-                  </ul>
-                </div>
+                <span>⚠️</span>
+                <ul>
+                  <li v-if="configuracao.posPagoAtivo">Desativar bloqueia <strong>novos pedidos pós-pago</strong> imediatamente.</li>
+                  <li v-else>Ativar permite pedidos com pagamento posterior (respeitando limites).</li>
+                  <li>Pedidos existentes não são afetados.</li>
+                </ul>
               </div>
             </div>
 
-            <!-- Switch -->
-            <div class="config-action">
-              <label class="switch-container">
-                <input 
-                  type="checkbox" 
-                  v-model="posPagoAtivo"
-                  :disabled="!isAdmin || alterando"
-                  @change="alterarPosPago"
-                  class="switch-input"
-                />
-                <span class="switch-slider"></span>
-              </label>
-              <span class="switch-label">
-                {{ posPagoAtivo ? 'Ativado' : 'Desativado' }}
-              </span>
-            </div>
-          </div>
-
-          <!-- Informações de Limite -->
-          <div class="info-box">
-            <div class="info-header">
-              <span class="info-icon">ℹ️</span>
-              <h4>Limites de Pós-Pago</h4>
-            </div>
-            <div class="info-content">
-              <div class="limit-item">
-                <span class="limit-label">Limite por Unidade de Consumo:</span>
-                <span class="limit-value">500,00 AOA</span>
-              </div>
-              <p class="limit-description">
-                Cada mesa/quarto pode ter até 500 AOA em pedidos pós-pago não pagos. 
-                Após atingir o limite, será necessário efetuar pagamento antes de novos pedidos.
-              </p>
-              <p class="limit-note">
-                <strong>Nota:</strong> Este limite é fixo no sistema. Para alterá-lo, contate o suporte técnico.
-              </p>
+            <div v-if="isAdmin" class="config-action">
+              <button
+                v-if="!configuracao.posPagoAtivo"
+                @click="abrirModalPosPago('ativar')"
+                :disabled="carregando"
+                class="btn btn-success"
+              >
+                Ativar Pós-Pago
+              </button>
+              <button
+                v-else
+                @click="abrirModalPosPago('desativar')"
+                :disabled="carregando"
+                class="btn btn-danger"
+              >
+                Desativar Pós-Pago
+              </button>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Seção: Auditoria (Futuro) -->
-      <div class="config-section disabled">
+      <!-- ─────────────────────────────────────────────── -->
+      <!-- Secção: Parâmetros Financeiros                  -->
+      <!-- ─────────────────────────────────────────────── -->
+      <div class="config-section">
         <div class="section-header">
-          <div class="section-icon">📊</div>
+          <div class="section-icon">💰</div>
           <div>
-            <h2>Auditoria e Logs</h2>
-            <p class="section-description">Histórico de alterações e eventos do sistema</p>
-            <span class="badge badge-secondary">Em breve</span>
+            <h2>Parâmetros Financeiros</h2>
+            <p class="section-description">Limites e valores mínimos de operação (carregados do backend)</p>
           </div>
+        </div>
+
+        <div class="section-body">
+
+          <!-- Limite Pós-Pago -->
+          <div class="param-row">
+            <div class="param-info">
+              <h4>Limite Pós-Pago por Unidade</h4>
+              <p>
+                Valor máximo de consumo em aberto por mesa/quarto sem pagamento.
+                Mínimo aceite: <strong>{{ formatCurrency(LIMITE_POS_PAGO_MINIMO) }}</strong>.
+              </p>
+            </div>
+            <div class="param-value">
+              <span class="valor-destaque">{{ formatCurrency(configuracao.limitePosPago) }}</span>
+              <button v-if="isAdmin" @click="abrirModalLimite" class="btn btn-sm btn-secondary">
+                ✏️ Editar
+              </button>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- Valor Mínimo de Operação -->
+          <div class="param-row">
+            <div class="param-info">
+              <h4>Valor Mínimo de Operação</h4>
+              <p>
+                Valor mínimo para recargas, débitos e estornos.
+                Nunca fixo — carregado do backend via GET /configuracoes-financeiras.
+              </p>
+            </div>
+            <div class="param-value">
+              <span class="valor-destaque">{{ formatCurrency(configuracao.valorMinimoOperacao) }}</span>
+              <button v-if="isAdmin" @click="abrirModalValorMinimo" class="btn btn-sm btn-secondary">
+                ✏️ Editar
+              </button>
+            </div>
+          </div>
+
         </div>
       </div>
 
-      <!-- Seção: Notificações (Futuro) -->
-      <div class="config-section disabled">
-        <div class="section-header">
-          <div class="section-icon">🔔</div>
+    </div><!-- /config-sections -->
+
+    <!-- ══════════════════════════════════════════════════ -->
+    <!-- MODAL: Ativar / Desativar Pós-Pago                -->
+    <!-- ══════════════════════════════════════════════════ -->
+    <div v-if="modalPosPago.aberto" class="modal-overlay" @click.self="modalPosPago.aberto = false">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>
+            {{ modalPosPago.acao === 'ativar' ? '✅ Ativar Pós-Pago' : '🚫 Desativar Pós-Pago' }}
+          </h2>
+          <button @click="modalPosPago.aberto = false" class="btn-close">✕</button>
+        </div>
+        <div class="modal-body space-y-4">
+          <p class="text-sm text-gray-600">
+            <template v-if="modalPosPago.acao === 'ativar'">
+              Ao ativar, pedidos pós-pago poderão ser criados (respeitando o limite por unidade).
+            </template>
+            <template v-else>
+              Ao desativar, nenhum novo pedido pós-pago será criado. Pedidos existentes não são afetados.
+            </template>
+          </p>
+
           <div>
-            <h2>Notificações</h2>
-            <p class="section-description">Alertas e notificações em tempo real</p>
-            <span class="badge badge-secondary">Em breve</span>
+            <label class="block text-sm font-medium mb-1">
+              Motivo da alteração
+              <span class="text-xs text-amber-hint ml-1">(recomendado para auditoria)</span>
+            </label>
+            <textarea
+              v-model="modalPosPago.motivo"
+              rows="3"
+              placeholder="Ex: Retomada após auditoria / Excesso de inadimplência..."
+              class="input w-full resize-none"
+              maxlength="500"
+            ></textarea>
+            <p class="text-xs text-gray-400 mt-1">{{ modalPosPago.motivo.length }}/500</p>
           </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="modalPosPago.aberto = false" class="btn btn-secondary">Cancelar</button>
+          <button
+            @click="confirmarAlterarPosPago"
+            :disabled="carregando"
+            :class="['btn', modalPosPago.acao === 'ativar' ? 'btn-success' : 'btn-danger']"
+          >
+            {{ carregando ? 'Aguarde...' : (modalPosPago.acao === 'ativar' ? 'Confirmar Ativação' : 'Confirmar Desativação') }}
+          </button>
         </div>
       </div>
     </div>
+
+    <!-- ══════════════════════════════════════════════════ -->
+    <!-- MODAL: Editar Limite de Pós-Pago                  -->
+    <!-- ══════════════════════════════════════════════════ -->
+    <div v-if="modalLimite.aberto" class="modal-overlay" @click.self="modalLimite.aberto = false">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>✏️ Alterar Limite de Pós-Pago</h2>
+          <button @click="modalLimite.aberto = false" class="btn-close">✕</button>
+        </div>
+        <div class="modal-body space-y-4">
+          <div>
+            <label class="block text-sm font-medium mb-1">
+              Novo limite (AOA) <span class="text-red-500">*</span>
+            </label>
+            <input
+              v-model.number="modalLimite.novoValor"
+              type="number"
+              :min="LIMITE_POS_PAGO_MINIMO"
+              step="0.01"
+              class="input w-full"
+              placeholder="Ex: 500.00"
+            />
+            <p class="text-xs text-gray-400 mt-1">
+              Mínimo aceite: <strong>{{ formatCurrency(LIMITE_POS_PAGO_MINIMO) }}</strong>
+            </p>
+            <p v-if="modalLimite.novoValor !== null && modalLimite.novoValor < LIMITE_POS_PAGO_MINIMO"
+               class="text-xs text-red-500 mt-1">
+              ❌ Valor abaixo do mínimo ({{ formatCurrency(LIMITE_POS_PAGO_MINIMO) }})
+            </p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium mb-1">
+              Motivo da alteração
+              <span class="text-xs text-amber-hint ml-1">(recomendado)</span>
+            </label>
+            <textarea
+              v-model="modalLimite.motivo"
+              rows="3"
+              placeholder="Ex: Ajuste por alta temporada / Redução por risco..."
+              class="input w-full resize-none"
+              maxlength="500"
+            ></textarea>
+            <p class="text-xs text-gray-400 mt-1">{{ modalLimite.motivo.length }}/500</p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="modalLimite.aberto = false" class="btn btn-secondary">Cancelar</button>
+          <button
+            @click="confirmarAlterarLimite"
+            :disabled="carregando || !modalLimite.novoValor || modalLimite.novoValor < LIMITE_POS_PAGO_MINIMO"
+            class="btn btn-primary"
+          >
+            {{ carregando ? 'Aguarde...' : 'Salvar Limite' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════ -->
+    <!-- MODAL: Editar Valor Mínimo de Operação            -->
+    <!-- ══════════════════════════════════════════════════ -->
+    <div v-if="modalValorMinimo.aberto" class="modal-overlay" @click.self="modalValorMinimo.aberto = false">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>✏️ Alterar Valor Mínimo de Operação</h2>
+          <button @click="modalValorMinimo.aberto = false" class="btn-close">✕</button>
+        </div>
+        <div class="modal-body space-y-4">
+          <div>
+            <label class="block text-sm font-medium mb-1">
+              Novo valor mínimo (AOA) <span class="text-red-500">*</span>
+            </label>
+            <input
+              v-model.number="modalValorMinimo.novoValor"
+              type="number"
+              min="0.01"
+              step="0.01"
+              class="input w-full"
+              placeholder="Ex: 15.00"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium mb-1">
+              Motivo da alteração
+              <span class="text-xs text-amber-hint ml-1">(recomendado)</span>
+            </label>
+            <textarea
+              v-model="modalValorMinimo.motivo"
+              rows="3"
+              placeholder="Ex: Ajuste operacional Q1 2026..."
+              class="input w-full resize-none"
+              maxlength="500"
+            ></textarea>
+            <p class="text-xs text-gray-400 mt-1">{{ modalValorMinimo.motivo.length }}/500</p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="modalValorMinimo.aberto = false" class="btn btn-secondary">Cancelar</button>
+          <button
+            @click="confirmarAlterarValorMinimo"
+            :disabled="carregando || !modalValorMinimo.novoValor || modalValorMinimo.novoValor <= 0"
+            class="btn btn-primary"
+          >
+            {{ carregando ? 'Aguarde...' : 'Salvar Valor Mínimo' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -143,481 +324,472 @@
 import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
-import configuracaoFinanceiraService from '@/services/configuracaoFinanceiraService'
+import { useConfiguracaoFinanceira } from '@/composables/useConfiguracaoFinanceira'
+import { useCurrency } from '@/utils/currency'
 
 const authStore = useAuthStore()
 const notificationStore = useNotificationStore()
+const { formatCurrency } = useCurrency()
 
-const configuracao = ref(null)
-const posPagoAtivo = ref(true)
-const loading = ref(false)
-const alterando = ref(false)
+const {
+  configuracao,
+  carregando,
+  erro,
+  carregarConfiguracao,
+  ativarPosPago,
+  desativarPosPago,
+  alterarLimitePosPago,
+  alterarValorMinimo
+} = useConfiguracaoFinanceira()
+
+// Mínimo de pós-pago aceite pelo backend (ALINHAMENTO §3.3 — baixou de 1.000 para 100 AOA)
+const LIMITE_POS_PAGO_MINIMO = 100
 
 const isAdmin = computed(() => authStore.isAdmin)
 
-// Carregar configuração
-const carregarConfiguracao = async () => {
-  loading.value = true
-  try {
-    const response = await configuracaoFinanceiraService.buscarConfiguracao()
-    configuracao.value = response.data
-    posPagoAtivo.value = response.data.posPagoAtivo
-    
-    console.log('[Configuracoes] Configuração carregada:', configuracao.value)
-  } catch (error) {
-    console.error('[Configuracoes] Erro ao carregar:', error)
-    
-    if (error.response?.status === 403) {
-      notificationStore.erro('Você não tem permissão para acessar configurações')
-    } else if (error.response?.status === 401) {
-      notificationStore.erro('Sessão expirada. Faça login novamente')
-    } else {
-      notificationStore.erro('Erro ao carregar configurações do sistema')
-    }
-  } finally {
-    loading.value = false
+// ─── Estado dos modais ────────────────────────────────────────────────────────
+
+const modalPosPago = ref({ aberto: false, acao: 'ativar', motivo: '' })
+const modalLimite = ref({ aberto: false, novoValor: null, motivo: '' })
+const modalValorMinimo = ref({ aberto: false, novoValor: null, motivo: '' })
+
+// ─── Abrir modais ─────────────────────────────────────────────────────────────
+
+function abrirModalPosPago(acao) {
+  modalPosPago.value = { aberto: true, acao, motivo: '' }
+}
+
+function abrirModalLimite() {
+  modalLimite.value = {
+    aberto: true,
+    novoValor: configuracao.value?.limitePosPago ?? null,
+    motivo: ''
   }
 }
 
-// Alterar pós-pago
-const alterarPosPago = async () => {
-  if (!isAdmin.value) {
-    notificationStore.erro('Apenas administradores podem alterar configurações')
-    // Reverter o switch
-    posPagoAtivo.value = !posPagoAtivo.value
-    return
-  }
-
-  const novoEstado = posPagoAtivo.value
-  const acao = novoEstado ? 'ativar' : 'desativar'
-  
-  // Confirmar ação
-  const confirmacao = confirm(
-    novoEstado
-      ? '⚠️ Ativar pós-pago?\n\nGerentes poderão criar pedidos com pagamento posterior.'
-      : '⚠️ Desativar pós-pago?\n\nNovos pedidos pós-pago serão bloqueados imediatamente.\nPedidos existentes não serão afetados.'
-  )
-  
-  if (!confirmacao) {
-    // Reverter o switch
-    posPagoAtivo.value = !novoEstado
-    return
-  }
-
-  alterando.value = true
-  try {
-    let response
-    if (novoEstado) {
-      response = await configuracaoFinanceiraService.ativarPosPago()
-      notificationStore.sucesso('✅ Pós-pago ATIVADO com sucesso')
-    } else {
-      response = await configuracaoFinanceiraService.desativarPosPago()
-      notificationStore.sucesso('🚫 Pós-pago DESATIVADO com sucesso')
-    }
-    
-    // Atualizar dados
-    configuracao.value = response.data
-    posPagoAtivo.value = response.data.posPagoAtivo
-    
-    console.log(`[Configuracoes] Pós-pago ${acao}do:`, configuracao.value)
-  } catch (error) {
-    console.error(`[Configuracoes] Erro ao ${acao} pós-pago:`, error)
-    
-    // Reverter o switch
-    posPagoAtivo.value = !novoEstado
-    
-    if (error.response?.status === 403) {
-      notificationStore.erro('Você não tem permissão para alterar esta configuração')
-    } else if (error.response?.status === 401) {
-      notificationStore.erro('Sessão expirada. Faça login novamente')
-    } else if (error.response?.status === 400) {
-      notificationStore.erro(error.response?.data?.message || 'Erro de validação ao alterar configuração')
-    } else {
-      notificationStore.erro(`Erro ao ${acao} pós-pago`)
-    }
-  } finally {
-    alterando.value = false
+function abrirModalValorMinimo() {
+  modalValorMinimo.value = {
+    aberto: true,
+    novoValor: configuracao.value?.valorMinimoOperacao ?? null,
+    motivo: ''
   }
 }
 
-// Formatar data
-const formatData = (isoDate) => {
+// ─── Confirmar alterações ─────────────────────────────────────────────────────
+
+async function confirmarAlterarPosPago() {
+  const { acao, motivo } = modalPosPago.value
+  try {
+    if (acao === 'ativar') {
+      await ativarPosPago(motivo)
+      notificationStore.sucesso('✅ Pós-pago ativado com sucesso.')
+    } else {
+      await desativarPosPago(motivo)
+      notificationStore.sucesso('🚫 Pós-pago desativado com sucesso.')
+    }
+    modalPosPago.value.aberto = false
+  } catch (e) {
+    const msg = e?.response?.data?.message || e?.message || 'Erro ao alterar pós-pago'
+    notificationStore.erro(msg)
+  }
+}
+
+async function confirmarAlterarLimite() {
+  const { novoValor, motivo } = modalLimite.value
+  if (!novoValor || novoValor < LIMITE_POS_PAGO_MINIMO) {
+    notificationStore.aviso(`Valor mínimo permitido é ${formatCurrency(LIMITE_POS_PAGO_MINIMO)}`)
+    return
+  }
+  try {
+    await alterarLimitePosPago(novoValor, motivo)
+    notificationStore.sucesso('Limite de pós-pago atualizado com sucesso.')
+    modalLimite.value.aberto = false
+  } catch (e) {
+    const msg = e?.response?.data?.message || e?.message || 'Erro ao alterar limite'
+    notificationStore.erro(msg)
+  }
+}
+
+async function confirmarAlterarValorMinimo() {
+  const { novoValor, motivo } = modalValorMinimo.value
+  if (!novoValor || novoValor <= 0) {
+    notificationStore.aviso('Informe um valor maior que zero.')
+    return
+  }
+  try {
+    await alterarValorMinimo(novoValor, motivo)
+    notificationStore.sucesso('Valor mínimo de operação atualizado com sucesso.')
+    modalValorMinimo.value.aberto = false
+  } catch (e) {
+    const msg = e?.response?.data?.message || e?.message || 'Erro ao alterar valor mínimo'
+    notificationStore.erro(msg)
+  }
+}
+
+// ─── Formatação ───────────────────────────────────────────────────────────────
+
+function formatData(isoDate) {
   if (!isoDate) return '-'
-  const data = new Date(isoDate)
-  return data.toLocaleString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
+  return new Date(isoDate).toLocaleString('pt-AO', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit'
   })
 }
 
+// ─── Inicialização ────────────────────────────────────────────────────────────
+
 onMounted(() => {
-  carregarConfiguracao()
+  carregarConfiguracao().catch(e => {
+    const status = e?.response?.status
+    const msg = e?.response?.data?.message || e?.message
+    if (status === 403) {
+      notificationStore.erro('Sem permissão para aceder às configurações.')
+    } else if (status === 401) {
+      notificationStore.erro('Sessão expirada. Faça login novamente.')
+    } else {
+      notificationStore.erro(msg || 'Erro ao carregar configurações.')
+    }
+  })
 })
 </script>
 
 <style scoped>
 .configuracoes-container {
   padding: 24px;
-  max-width: 1200px;
+  max-width: 900px;
   margin: 0 auto;
 }
 
 .page-header {
-  margin-bottom: 32px;
+  margin-bottom: 28px;
 }
 
 .page-header h1 {
-  font-size: 32px;
+  font-size: 28px;
   font-weight: 700;
   color: #1a1a1a;
-  margin: 0 0 8px 0;
+  margin: 0 0 6px 0;
 }
 
 .subtitle {
-  font-size: 16px;
+  font-size: 15px;
   color: #666;
   margin: 0;
 }
 
+/* ── Audit bar ───────────────────────────────────────────── */
+.audit-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #0369a1;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.audit-icon { font-size: 18px; }
+
+/* ── Secções ─────────────────────────────────────────────── */
+.config-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.config-section {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.08);
+  overflow: hidden;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e5e7eb;
+  background: linear-gradient(to right, #f8f9fa, white);
+}
+
+.section-icon {
+  font-size: 30px;
+  width: 52px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 2px 6px rgba(0,0,0,.08);
+}
+
+.section-header h2 {
+  margin: 0 0 3px 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.section-description {
+  margin: 0;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.section-body { padding: 24px; }
+
+/* ── Config item (Pós-pago) ──────────────────────────────── */
+.config-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.config-info { flex: 1; min-width: 0; }
+
+.config-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.config-label h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.config-description {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.config-warning {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+}
+
+.config-warning ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: #92400e;
+}
+
+.config-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ── Parâmetros financeiros ──────────────────────────────── */
+.param-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px 0;
+}
+
+.param-info { flex: 1; min-width: 0; }
+
+.param-info h4 {
+  margin: 0 0 4px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.param-info p {
+  margin: 0;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.param-value {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.valor-destaque {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1d4ed8;
+}
+
+.divider { border-top: 1px solid #f3f4f6; }
+
+/* ── Badges ─────────────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.badge-success { background: #dcfce7; color: #166534; }
+.badge-error   { background: #fee2e2; color: #991b1b; }
+
+/* ── Alerts ─────────────────────────────────────────────── */
 .alert {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
   border-radius: 8px;
-  margin-top: 16px;
 }
 
-.alert-warning {
-  background: #fff3cd;
-  border: 1px solid #ffc107;
-  color: #856404;
-}
+.alert-warning { background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; }
+.alert-danger  { background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; }
+.alert p { margin: 0; font-size: 14px; }
+.mt-4 { margin-top: 16px; }
 
-.alert span {
-  font-size: 20px;
-}
-
-.alert p {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.loading-state {
-  text-align: center;
-  padding: 80px 20px;
-}
+/* ── Loading ─────────────────────────────────────────────── */
+.loading-state { text-align: center; padding: 60px 20px; }
 
 .spinner {
-  width: 48px;
-  height: 48px;
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #1976d2;
+  width: 40px;
+  height: 40px;
+  border: 4px solid #e5e7eb;
+  border-top-color: #1976d2;
   border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin: 0 auto 20px;
+  animation: spin .9s linear infinite;
+  margin: 0 auto 16px;
 }
 
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
+@keyframes spin { to { transform: rotate(360deg); } }
 
-.config-sections {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
-.config-section {
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
-}
-
-.config-section.disabled {
-  opacity: 0.6;
-  pointer-events: none;
-}
-
-.section-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 24px;
-  border-bottom: 1px solid #e0e0e0;
-  background: linear-gradient(to right, #f8f9fa, white);
-}
-
-.section-icon {
-  font-size: 36px;
-  width: 60px;
-  height: 60px;
+/* ── Modais ─────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.45);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.section-header h2 {
-  margin: 0 0 4px 0;
-  font-size: 20px;
-  font-weight: 700;
-  color: #1a1a1a;
-}
-
-.section-description {
-  margin: 0;
-  font-size: 14px;
-  color: #666;
-}
-
-.section-body {
-  padding: 24px;
-}
-
-.config-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 32px;
-  padding: 24px;
-  background: #f8f9fa;
-  border-radius: 12px;
-  margin-bottom: 20px;
-}
-
-.config-info {
-  flex: 1;
-}
-
-.config-label {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.config-label h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 700;
-  color: #1a1a1a;
-}
-
-.badge {
-  padding: 4px 12px;
-  border-radius: 12px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.badge-success {
-  background: #d4edda;
-  color: #155724;
-}
-
-.badge-error {
-  background: #f8d7da;
-  color: #721c24;
-}
-
-.badge-secondary {
-  background: #e2e3e5;
-  color: #383d41;
-}
-
-.config-description {
-  margin: 0 0 16px 0;
-  font-size: 14px;
-  color: #666;
-  line-height: 1.6;
-}
-
-.config-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  font-size: 13px;
-  color: #666;
-  padding: 12px;
-  background: white;
-  border-radius: 6px;
-  margin-bottom: 12px;
-}
-
-.meta-item {
-  display: flex;
-  gap: 4px;
-}
-
-.config-warning {
-  display: flex;
-  gap: 12px;
-  padding: 12px;
-  background: #fff3cd;
-  border: 1px solid #ffc107;
-  border-radius: 8px;
-  margin-top: 12px;
-}
-
-.warning-icon {
-  font-size: 20px;
-}
-
-.config-warning strong {
-  color: #856404;
-}
-
-.config-warning ul {
-  margin: 8px 0 0 0;
-  padding-left: 20px;
-  font-size: 13px;
-  color: #856404;
-}
-
-.config-warning li {
-  margin: 4px 0;
-}
-
-.config-action {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-
-/* Switch Toggle */
-.switch-container {
-  position: relative;
-  display: inline-block;
-  width: 64px;
-  height: 34px;
-}
-
-.switch-input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.switch-slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: #ccc;
-  transition: .4s;
-  border-radius: 34px;
-}
-
-.switch-slider:before {
-  position: absolute;
-  content: "";
-  height: 26px;
-  width: 26px;
-  left: 4px;
-  bottom: 4px;
-  background-color: white;
-  transition: .4s;
-  border-radius: 50%;
-}
-
-.switch-input:checked + .switch-slider {
-  background-color: #4caf50;
-}
-
-.switch-input:checked + .switch-slider:before {
-  transform: translateX(30px);
-}
-
-.switch-input:disabled + .switch-slider {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.switch-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #666;
-}
-
-/* Info Box */
-.info-box {
-  background: #e3f2fd;
-  border: 1px solid #90caf9;
-  border-radius: 8px;
+  z-index: 50;
   padding: 16px;
 }
 
-.info-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
+.modal-content {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0,0,0,.25);
+  width: 100%;
+  max-width: 480px;
+  overflow: hidden;
 }
 
-.info-icon {
-  font-size: 20px;
-}
-
-.info-header h4 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-  color: #0d47a1;
-}
-
-.info-content {
-  font-size: 14px;
-  color: #0d47a1;
-}
-
-.limit-item {
+.modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 0;
-  border-bottom: 1px solid #90caf9;
-  margin-bottom: 8px;
+  padding: 18px 20px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f9fafb;
 }
 
-.limit-label {
-  font-weight: 600;
-}
-
-.limit-value {
+.modal-header h2 {
+  margin: 0;
   font-size: 18px;
   font-weight: 700;
+  color: #111827;
 }
 
-.limit-description {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.6;
+.btn-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: #6b7280;
+  padding: 0;
+  line-height: 1;
 }
 
-.limit-note {
-  margin: 12px 0 0 0;
+.btn-close:hover { color: #111827; }
+
+.modal-body { padding: 20px; }
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+/* ── Botões ─────────────────────────────────────────────── */
+.btn {
+  padding: 8px 18px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: opacity .2s;
+}
+
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary   { background: #1d4ed8; color: white; }
+.btn-primary:hover:not(:disabled)   { background: #1e40af; }
+.btn-secondary { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+.btn-secondary:hover:not(:disabled) { background: #e5e7eb; }
+.btn-success   { background: #16a34a; color: white; }
+.btn-success:hover:not(:disabled)   { background: #15803d; }
+.btn-danger    { background: #dc2626; color: white; }
+.btn-danger:hover:not(:disabled)    { background: #b91c1c; }
+.btn-sm        { padding: 5px 12px; font-size: 13px; }
+
+/* ── Input / Textarea ───────────────────────────────────── */
+.input {
+  width: 100%;
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.7);
-  border-left: 3px solid #1976d2;
-  border-radius: 4px;
-  font-size: 12px;
-  line-height: 1.5;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color .2s;
+  box-sizing: border-box;
+  font-family: inherit;
 }
 
-.limit-note strong {
-  font-weight: 700;
-}
+.input:focus { border-color: #1d4ed8; box-shadow: 0 0 0 3px rgba(29,78,216,.1); }
+
+/* ── Utils ──────────────────────────────────────────────── */
+.space-y-4 > * + * { margin-top: 16px; }
+.w-full   { width: 100%; }
+.resize-none { resize: none; }
+.ml-4 { margin-left: 16px; }
+.block { display: block; }
+.text-sm { font-size: 14px; }
+.text-xs { font-size: 12px; }
+.font-medium { font-weight: 500; }
+.mb-1 { margin-bottom: 4px; }
+.mt-1 { margin-top: 4px; }
+.text-gray-400 { color: #9ca3af; }
+.text-gray-600 { color: #4b5563; }
+.text-red-500  { color: #ef4444; }
 </style>

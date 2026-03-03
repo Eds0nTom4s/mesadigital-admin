@@ -344,17 +344,13 @@ const marcarEntregue = async (subPedidoId) => {
   }
 }
 
-const finalizarPedido = async () => {
-  if (!confirm('Finalizar este pedido? Esta ação não pode ser desfeita.')) return
-  
-  try {
-    await pedidosBalcaoService.finalizar(props.pedidoAtivo.id)
-    notificationStore.sucesso('Pedido finalizado com sucesso')
-    emit('pedido-atualizado')
-  } catch (error) {
-    console.error('[PainelUnidade] Erro ao finalizar pedido:', error)
-    notificationStore.erro(error.response?.data?.message || 'Erro ao finalizar pedido')
-  }
+const finalizarPedido = () => {
+  // [BACKEND] Não existe endpoint /finalizar.
+  // O pedido é finalizado AUTOMATICAMENTE quando o último SubPedido é marcado como ENTREGUE.
+  // Orientar o operador a marcar todos os itens como entregues.
+  notificationStore.aviso(
+    'O pedido será finalizado automaticamente quando todos os itens forem marcados como entregues.'
+  )
 }
 
 const cancelarPedido = async () => {

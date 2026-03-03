@@ -113,18 +113,23 @@ export const usePedidoStore = defineStore('pedido', () => {
   })
 
   /**
-   * Pedidos por unidade de consumo
+   * Pedidos por sessão de consumo
    */
-  const pedidosPorUnidade = computed(() => {
+  const pedidosPorSessao = computed(() => {
     const map = new Map()
     todosPedidos.value.forEach(pedido => {
-      if (!map.has(pedido.unidadeConsumoId)) {
-        map.set(pedido.unidadeConsumoId, [])
+      if (!map.has(pedido.sessaoConsumoId)) {
+        map.set(pedido.sessaoConsumoId, [])
       }
-      map.get(pedido.unidadeConsumoId).push(pedido)
+      map.get(pedido.sessaoConsumoId).push(pedido)
     })
     return map
   })
+
+  /**
+   * @deprecated Use pedidosPorSessao
+   */
+  const pedidosPorUnidade = pedidosPorSessao
 
   /**
    * Total de pedidos ativos
@@ -309,20 +314,28 @@ export const usePedidoStore = defineStore('pedido', () => {
   }
 
   /**
-   * Buscar pedidos por unidade de consumo
+   * Buscar pedidos por sessão de consumo
    */
-  async function fetchByUnidadeConsumo(unidadeConsumoId) {
+  async function fetchBySessaoConsumo(sessaoConsumoId) {
     try {
-      const pedidos = await pedidoService.getByUnidadeConsumo(unidadeConsumoId)
+      const pedidos = await pedidoService.getBySessaoConsumo(sessaoConsumoId)
 
       // Atualiza cache
       pedidos.forEach(pedido => setPedido(pedido))
 
       return pedidos
     } catch (error) {
-      console.error(`[Store] Erro ao buscar pedidos da unidade ${unidadeConsumoId}:`, error)
+      console.error(`[Store] Erro ao buscar pedidos da sessão ${sessaoConsumoId}:`, error)
       throw error
     }
+  }
+
+  /**
+   * @deprecated Use fetchBySessaoConsumo(sessaoConsumoId)
+   */
+  async function fetchByUnidadeConsumo(sessaoConsumoId) {
+    console.warn('[pedido.store] fetchByUnidadeConsumo() deprecated. Use fetchBySessaoConsumo().')
+    return fetchBySessaoConsumo(sessaoConsumoId)
   }
 
   /**
@@ -614,7 +627,8 @@ export const usePedidoStore = defineStore('pedido', () => {
     todosPedidos,
     pedidosAtivos,
     pedidosFinalizados,
-    pedidosPorUnidade,
+    pedidosPorSessao,
+    pedidosPorUnidade,  // @deprecated — alias para pedidosPorSessao
     totalPedidosAtivos,
     isLoading,
     isCacheStale,
@@ -629,7 +643,8 @@ export const usePedidoStore = defineStore('pedido', () => {
     // Actions
     fetchPedido,
     fetchAtivos,
-    fetchByUnidadeConsumo,
+    fetchBySessaoConsumo,
+    fetchByUnidadeConsumo,  // @deprecated — alias para fetchBySessaoConsumo
     criar,
     adicionarItem,
     atualizarQuantidadeItem,

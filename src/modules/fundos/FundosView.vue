@@ -61,8 +61,14 @@ const buscarPorCliente = async () => {
       notificationStore.aviso('Cliente não possui fundo de consumo')
     }
   } catch (err) {
-    error.value = err.message || 'Erro ao buscar fundo'
-    notificationStore.erro(error.value)
+    console.error('[FundosView] Erro ao buscar fundo do cliente:', err)
+    if (err?.stack) console.error(err.stack)
+    if (err.response?.status === 404) {
+      notificationStore.aviso('Cliente não possui fundo de consumo cadastrado')
+    } else {
+      const msg = err.mensagemAmigavel || err.response?.data?.message || err.message
+      notificationStore.erro(msg || 'Erro ao buscar fundo. Tente novamente.')
+    }
   } finally {
     buscando.value = false
   }
@@ -164,15 +170,8 @@ const confirmarCriacaoFundo = () => {
 }
 
 // Carrega valor mínimo ao abrir modal
-const abrirModal = async () => {
-  try {
-    const resp = await fundoConsumoService.consultarValorMinimo()
-    valorMinimo.value = resp.valorMinimo // já vem em centavos
-    formulario.value.saldoInicialDecimal = (resp.valorMinimo / 100) // converte para decimal
-    modalAberto.value = true
-  } catch (err) {
-    notificationStore.erro('Erro ao carregar configurações: ' + (err.response?.data?.message || err.message))
-  }
+const abrirModal = () => {
+  modalAberto.value = true
 }
 
 // Cria novo fundo (chamado após confirmação)
@@ -198,8 +197,10 @@ const criarFundo = async () => {
     fundos.value.unshift(resp)
     
   } catch (err) {
-    const msg = err.response?.data?.message || err.message
-    notificationStore.erro('Erro ao criar fundo: ' + msg)
+    console.error('[FundosView] Erro ao criar fundo:', err)
+    if (err?.stack) console.error(err.stack)
+    const msg = err.mensagemAmigavel || err.response?.data?.message || err.message
+    notificationStore.erro(msg || 'Erro ao criar fundo. Tente novamente.')
   } finally {
     criandoFundo.value = false
   }
@@ -237,37 +238,38 @@ const recarregarFundo = async () => {
   try {
     recargando.value = true
     
-    if (valorRecargaCentavos.value < valorMinimo.value) {
-      notificationStore.aviso(`Valor mínimo de recarga: ${formatCurrency(valorMinimo.value)}`)
+    const token = fundoSelecionado.value?.tokenPortador
+    if (!token) {
+      notificationStore.aviso('Recarga directa disponível apenas para fundos anónimos (com token portador)')
       recargando.value = false
       return
     }
-    
-    const pagamento = await fundoConsumoService.recarregarFundo(
-      fundoSelecionado.value.id,
-      {
-        valor: valorRecargaCentavos.value, // envia em centavos
-        metodoPagamento: formularioRecarga.value.metodoPagamento
-      }
-    )
-    
-    // Pagamento criado com status PENDENTE
-    if (formularioRecarga.value.metodoPagamento === 'GPO') {
-      // Redireciona para AppyPay
-      notificationStore.sucesso('Redirecionando para pagamento AppyPay...')
-      window.open(pagamento.urlPagamento, '_blank')
-    } else if (formularioRecarga.value.metodoPagamento === 'REF') {
-      // Exibe referência bancária
-      notificationStore.sucesso(
-        `Referência gerada! Entidade: ${pagamento.entidade} | Referência: ${pagamento.referencia}`
-      )
+
+    if (!formularioRecarga.value.valorDecimal || formularioRecarga.value.valorDecimal <= 0) {
+      notificationStore.aviso('Informe um valor válido para recarga')
+      recargando.value = false
+      return
     }
-    
+
+    await fundoConsumoService.recarregarFundo(
+      token,
+      formularioRecarga.value.valorDecimal,
+      `Recarga balcão — ${formularioRecarga.value.metodoPagamento || 'Directo'}`
+    )
+
+    notificationStore.sucesso(`Fundo recarregado: ${formatCurrency(formularioRecarga.value.valorDecimal)}`)
     modalRecargaAberto.value = false
-    
-    // Nota: Saldo será atualizado automaticamente após confirmação do pagamento via callback
+
+    // Atualiza saldo local
+    const fundoAtualizado = await fundoConsumoService.consultarFundo(token)
+    const idx = fundos.value.findIndex(f => f.id === fundoSelecionado.value.id)
+    if (idx !== -1) fundos.value[idx] = fundoAtualizado
+
   } catch (err) {
-    notificationStore.erro('Erro ao recarregar fundo: ' + (err.response?.data?.message || err.message))
+    console.error('[FundosView] Erro ao recarregar fundo:', err)
+    if (err?.stack) console.error(err.stack)
+    const msg = err.mensagemAmigavel || err.response?.data?.message || err.message
+    notificationStore.erro(msg || 'Erro ao recarregar fundo. Tente novamente.')
   } finally {
     recargando.value = false
   }
@@ -379,12 +381,12 @@ const fecharModalRecarga = () => {
           </select>
         </div>
         
-        <!-- Busca por Telefone -->
+        <!-- Busca por ID do Cliente -->
         <div class="flex items-center space-x-2">
           <input 
             v-model="busca" 
-            type="tel" 
-            placeholder="Buscar por telefone (+244...)" 
+            type="number" 
+            placeholder="Buscar por ID do cliente" 
             class="input-field w-full md:w-64"
             @keyup.enter="buscarPorCliente"
           />

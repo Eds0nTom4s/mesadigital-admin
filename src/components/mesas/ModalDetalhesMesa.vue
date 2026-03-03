@@ -59,7 +59,7 @@
           <!-- Body -->
           <div class="p-6 space-y-6">
             <!-- Informações do Cliente -->
-            <div v-if="mesa.cliente" class="card">
+            <div v-if="sessao?.clienteId || sessao?.nomeCliente || mesa.cliente" class="card">
               <h3 class="text-lg font-semibold text-text-primary mb-4 flex items-center">
                 <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
@@ -69,15 +69,11 @@
               <div class="grid grid-cols-2 gap-4">
                 <div>
                   <p class="text-sm text-text-secondary">Nome:</p>
-                  <p class="font-medium text-text-primary">{{ mesa.cliente.nome }}</p>
+                  <p class="font-medium text-text-primary">{{ sessao?.nomeCliente || mesa.cliente?.nome || '—' }}</p>
                 </div>
                 <div>
                   <p class="text-sm text-text-secondary">Telefone:</p>
-                  <p class="font-medium text-text-primary">{{ mesa.cliente.telefone }}</p>
-                </div>
-                <div v-if="mesa.cliente.email">
-                  <p class="text-sm text-text-secondary">Email:</p>
-                  <p class="font-medium text-text-primary">{{ mesa.cliente.email }}</p>
+                  <p class="font-medium text-text-primary">{{ sessao?.telefoneCliente || mesa.cliente?.telefone || '—' }}</p>
                 </div>
               </div>
             </div>
@@ -259,6 +255,14 @@ const props = defineProps({
     type: Object,
     required: true
   },
+  /**
+   * Dados da sessão ativa (SessaoConsumoResponse).
+   * Null quando mesa está DISPONÍVEL.
+   */
+  sessao: {
+    type: Object,
+    default: null
+  },
   fundo: {
     type: Object,
     default: null
@@ -325,29 +329,40 @@ const tipoLabel = computed(() => {
 })
 
 const statusLabel = computed(() => {
+  // Prefer session status over mesa derived status
+  const status = props.sessao?.status || props.mesa.status
   const labels = {
     'DISPONIVEL': 'Disponível',
     'OCUPADA': 'Ocupada',
     'AGUARDANDO_PAGAMENTO': 'Aguardando Pagamento',
-    'FINALIZADA': 'Finalizada'
+    'ABERTA': 'Sessão Aberta',
+    'ENCERRADA': 'Encerrada',
+    'FINALIZADA': 'Encerrada'  // legacy
   }
-  return labels[props.mesa.status] || props.mesa.status
+  return labels[status] || status
 })
 
-// Pedidos filtrados
+// Pedidos filtrados — prefer dados da sessão ativa
 const pedidosFiltrados = computed(() => {
-  if (!props.mesa.pedidos) return []
+  const pedidos = props.sessao?.pedidos || props.mesa.pedidos || []
   
   if (filtroPedidoAtivo.value === 'TODOS') {
-    return props.mesa.pedidos
+    return pedidos
   }
   
-  return props.mesa.pedidos.filter(p => p.status === filtroPedidoAtivo.value)
+  return pedidos.filter(p => p.status === filtroPedidoAtivo.value)
 })
 
-// Totais
+// Totais — prefer dados da sessão ativa
 const totais = computed(() => {
-  const pedidos = props.mesa.pedidos || []
+  if (props.sessao?.totalConsumo != null) {
+    return {
+      totalConsumido: props.sessao.totalConsumo,
+      totalPago: 0,
+      totalPendente: props.sessao.totalConsumo
+    }
+  }
+  const pedidos = props.sessao?.pedidos || props.mesa.pedidos || []
   
   const totalConsumido = pedidos.reduce((sum, p) => sum + (p.total || 0), 0)
   const totalPago = pedidos
@@ -360,11 +375,12 @@ const totais = computed(() => {
   return { totalConsumido, totalPago, totalPendente }
 })
 
-// Formatar data de abertura
+// Formatar data de abertura da sessão
 const formatarDataAbertura = computed(() => {
-  if (!props.mesa.abertaEm) return 'Não especificado'
+  const abertaEm = props.sessao?.abertaEm || props.mesa.abertaEm
+  if (!abertaEm) return 'Não especificado'
   
-  const data = new Date(props.mesa.abertaEm)
+  const data = new Date(abertaEm)
   return data.toLocaleString('pt-PT', {
     day: '2-digit',
     month: '2-digit',
@@ -376,9 +392,10 @@ const formatarDataAbertura = computed(() => {
 
 // Tempo decorrido
 const tempoDecorrido = computed(() => {
-  if (!props.mesa.abertaEm) return ''
+  const abertaEm = props.sessao?.abertaEm || props.mesa.abertaEm
+  if (!abertaEm) return ''
   
-  const inicio = new Date(props.mesa.abertaEm)
+  const inicio = new Date(abertaEm)
   const agora = new Date()
   const diff = agora - inicio
   
@@ -393,7 +410,9 @@ const tempoDecorrido = computed(() => {
 
 // Permissões
 const podeFecharMesa = computed(() => {
-  return authStore.isAdmin || authStore.isGerente
+  const temPermissao = authStore.isAdmin || authStore.isGerente
+  const sessaoEncerrável = props.sessao?.status === 'ABERTA' || props.sessao?.status === 'AGUARDANDO_PAGAMENTO'
+  return temPermissao && sessaoEncerrável
 })
 
 // Formatar data genérica
@@ -459,7 +478,7 @@ const gerarQrCode = async () => {
     
     const novoQrCode = await qrcodeService.gerarQrCode({
       tipo: 'MESA',
-      unidadeDeConsumoId: props.mesa.id,
+      mesaId: props.mesa.id,
       validadeMinutos: 525600 // 1 ano
     })
     

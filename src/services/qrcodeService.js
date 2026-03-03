@@ -13,20 +13,20 @@ import api from './api'
 /**
  * Gerar novo QR Code
  * POST /api/qrcode
- * 
+ *
  * @param {Object} dados
  * @param {string} dados.tipo - "MESA" | "ENTREGA" | "PAGAMENTO"
- * @param {number} [dados.unidadeDeConsumoId] - Obrigatório para tipo MESA
+ * @param {number} [dados.mesaId] - Obrigatório para tipo MESA (substitui unidadeDeConsumoId)
  * @param {number} [dados.pedidoId] - Obrigatório para ENTREGA/PAGAMENTO
  * @param {number} [dados.validadeMinutos] - Opcional (default: 60)
  * @param {Object} [dados.metadados] - Opcional
  * @returns {Promise<Object>} QR Code gerado (apenas token, NÃO imagem)
  */
-export const gerarQrCode = async ({ tipo, unidadeDeConsumoId, pedidoId, validadeMinutos, metadados }) => {
+export const gerarQrCode = async ({ tipo, mesaId, pedidoId, validadeMinutos, metadados }) => {
   try {
     const response = await api.post('/qrcode', {
       tipo,
-      unidadeDeConsumoId,
+      mesaId,
       pedidoId,
       validadeMinutos,
       metadados
@@ -51,22 +51,30 @@ export const gerarQrCode = async ({ tipo, unidadeDeConsumoId, pedidoId, validade
 }
 
 /**
- * Buscar QR Codes de uma unidade de consumo
- * GET /api/qrcode/unidade-consumo/{id}
- * 
- * @param {number} unidadeId - ID da unidade de consumo
+ * Buscar QR Codes de uma mesa
+ * GET /api/qrcode/mesa/{id}
+ *
+ * @param {number} mesaId - ID da mesa
  * @returns {Promise<Array>} Lista de QR Codes ativos
  */
-export const buscarQrCodeUnidade = async (unidadeId) => {
+export const buscarQrCodeMesa = async (mesaId) => {
   try {
-    const response = await api.get(`/qrcode/unidade-consumo/${unidadeId}`)
-    return response.data.data
+    const response = await api.get(`/qrcode/mesa/${mesaId}`)
+    return response.data.data ?? response.data
   } catch (error) {
     if (error.response?.status === 404) {
       return [] // Nenhum QR Code encontrado
     }
     throw new Error(error.response?.data?.message || 'Erro ao buscar QR Code')
   }
+}
+
+/**
+ * @deprecated Use buscarQrCodeMesa(mesaId) — endpoint antigo removido
+ */
+export const buscarQrCodeUnidade = async (unidadeId) => {
+  console.warn('[qrcodeService] buscarQrCodeUnidade() está deprecated. Use buscarQrCodeMesa(mesaId).')
+  return buscarQrCodeMesa(unidadeId)
 }
 
 /**
@@ -183,7 +191,8 @@ export const baixarQrCode = (token, filename) => {
 
 export default {
   gerarQrCode,
-  buscarQrCodeUnidade,
+  buscarQrCodeMesa,
+  buscarQrCodeUnidade, // @deprecated — alias para buscarQrCodeMesa
   validarQrCode,
   renovarQrCode,
   cancelarQrCode,

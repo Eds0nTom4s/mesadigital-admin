@@ -7,9 +7,12 @@ import dashboardService from '@/services/dashboardService'
 const { formatCurrency } = useCurrency()
 const notificationStore = useNotificationStore()
 
-// Estatísticas reativas baseadas na documentação do backend
+// Estatísticas reativas — campos que o backend retorna em GET /dashboard/stats:
+// totalPedidosHoje, pedidosPendentes, receitaHoje, clientesAtivos
+// Os demais campos não são fornecidos pelo backend (exibidos como 0).
 const stats = ref({
   totalPedidosHoje: 0,
+  pedidosPendentes: 0,
   pedidosEmAndamento: 0,
   pedidosConcluidos: 0,
   pedidosCancelados: 0,
@@ -54,23 +57,26 @@ const carregarDados = async () => {
       dashboardService.obterProdutosMaisVendidos()
     ])
     
-    stats.value = statsData
+    // Backend retorna apenas: totalPedidosHoje, pedidosPendentes, receitaHoje, clientesAtivos
+    stats.value = { ...stats.value, ...statsData }
     atividadesRecentes.value = atividadesData
     produtosMaisVendidos.value = produtosData
     ultimaAtualizacao.value = new Date()
     
   } catch (error) {
     console.error('[Dashboard] Erro ao carregar dados:', error)
-    
+    if (error?.stack) console.error(error.stack)
+
+    const mensagem = error.mensagemAmigavel
+      || error.response?.data?.message
+      || error.message
+
     if (error.response?.status === 401) {
       notificationStore.erro('Sessão expirada. Por favor, faça login novamente.')
-      // Redirecionar para login (implementar conforme seu router)
     } else if (error.response?.status === 403) {
       notificationStore.erro('Acesso negado. Você não tem permissão para visualizar o dashboard.')
     } else {
-      notificationStore.erro('Erro ao carregar dados do dashboard. Tentando novamente...')
-      // Retry após 5 segundos
-      setTimeout(carregarDados, 5000)
+      notificationStore.erro(mensagem || 'Erro ao carregar dados do dashboard. Tente novamente.')
     }
   } finally {
     loading.value = false
@@ -125,7 +131,7 @@ onMounted(async () => {
   timerStats = setInterval(async () => {
     try {
       const statsData = await dashboardService.obterEstatisticas()
-      stats.value = statsData
+      stats.value = { ...stats.value, ...statsData }
       ultimaAtualizacao.value = new Date()
     } catch (error) {
       console.error('[Dashboard] Erro ao atualizar estatísticas:', error)
@@ -182,11 +188,24 @@ onUnmounted(() => {
         <h2 class="text-2xl font-bold text-text-primary">Dashboard</h2>
         <p class="text-text-secondary mt-1">Visão geral do sistema</p>
       </div>
-      <div class="flex items-center space-x-2 text-sm text-text-secondary">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-        </svg>
-        <span>Atualizado há {{ tempoUltimaAtualizacao }}</span>
+      <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-2 text-sm text-text-secondary">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <span>Atualizado há {{ tempoUltimaAtualizacao }}</span>
+        </div>
+        <button
+          @click="carregarDados"
+          :disabled="loading"
+          class="flex items-center gap-1 text-sm text-primary hover:text-primary/80 disabled:opacity-50"
+          title="Atualizar dados"
+        >
+          <svg class="w-4 h-4" :class="{ 'animate-spin': loading }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          Atualizar
+        </button>
       </div>
     </div>
 
@@ -351,21 +370,13 @@ onUnmounted(() => {
               </div>
               <div class="flex-1 min-w-0">
                 <p class="text-sm font-medium text-text-primary truncate">{{ produto.nome }}</p>
-                <div class="flex items-center space-x-2 mt-0.5">
-                  <span class="text-xs text-text-secondary">{{ produto.codigo }}</span>
-                  <span class="text-xs text-text-secondary">•</span>
-                  <span class="text-xs text-text-secondary">{{ produto.quantidadeVendida }} vendas</span>
-                </div>
+                <p class="text-xs text-text-secondary mt-0.5">
+                  {{ produto.quantidadeVendida }} vendas
+                </p>
                 <p class="text-xs font-medium text-success mt-0.5">
-                  Receita: {{ formatCurrency(produto.receitaTotal) }}
+                  Receita: {{ formatCurrency(produto.valorTotal) }}
                 </p>
               </div>
-            </div>
-            <div class="text-right ml-3">
-              <p class="text-sm font-semibold text-text-primary">
-                {{ formatCurrency(produto.precoUnitario) }}
-              </p>
-              <p class="text-xs text-text-secondary">por unidade</p>
             </div>
           </div>
         </div>

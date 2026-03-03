@@ -175,7 +175,8 @@ import { ref, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue
 import { useCurrency } from '@/utils/currency'
 import { useNotificationStore } from '@/store/notifications'
 import { useAuthStore } from '@/store/auth'
-import { unidadesConsumoService } from '@/services/unidadesConsumoService'
+import mesasService from '@/services/mesasService'
+import sessoesConsumoService from '@/services/sessoesConsumoService'
 import produtosService from '@/services/produtosService'
 import pedidosBalcaoService from '@/services/pedidosBalcaoService'
 import PainelUnidadeConsumo from '@/components/pedidos/PainelUnidadeConsumo.vue'
@@ -268,28 +269,41 @@ const unidadesFiltradas = computed(() => {
 const carregarUnidades = async () => {
   loading.value = true
   try {
-    let response
-    try {
-      response = await unidadesConsumoService.getMinhas()
-    } catch (error) {
-      if (error.response?.status === 400) {
-        console.warn('[PedidosBalcao] Fallback para endpoint /status/OCUPADA')
-        response = await unidadesConsumoService.getAbertas()
-      } else {
-        throw error
-      }
+    const unidadeId = authStore.user?.unidadeAtendimentoId ?? null
+    let rawMesas
+    if (unidadeId) {
+      rawMesas = await mesasService.getPorUnidadeAtendimento(unidadeId)
+    } else {
+      rawMesas = await mesasService.getTodas()
     }
-    
-    const unidades = response.data || []
-    unidadesConsumo.value = unidades.map(unidade => ({
-      ...unidade,
-      ...unidadesConsumoService.calcularResumo(unidade)
+    rawMesas = Array.isArray(rawMesas) ? rawMesas : rawMesas.data || []
+
+    // Enriquecer com dados de sessão
+    let sessoesMap = new Map()
+    try {
+      const sessoes = await sessoesConsumoService.getAbertas()
+      const rawSessoes = Array.isArray(sessoes) ? sessoes : sessoes.data || []
+      rawSessoes.forEach(s => sessoesMap.set(s.mesaId, s))
+    } catch (err) {
+      console.warn('[PedidosBalcao] Aviso ao carregar sessões:', err)
+    }
+
+    unidadesConsumo.value = rawMesas.map(mesa => ({
+      ...mesa,
+      sessaoAtiva: sessoesMap.get(mesa.id) || null,
+      sessaoConsumoId: sessoesMap.get(mesa.id)?.id || null,
+      cliente: sessoesMap.get(mesa.id) ? {
+        id: sessoesMap.get(mesa.id).clienteId,
+        nome: sessoesMap.get(mesa.id).nomeCliente,
+        telefone: sessoesMap.get(mesa.id).telefoneCliente
+      } : null,
+      totalConsumido: sessoesMap.get(mesa.id)?.totalConsumo || 0
     }))
-    
-    console.log('[PedidosBalcao] Unidades carregadas:', unidadesConsumo.value.length)
+
+    console.log('[PedidosBalcao] Mesas carregadas:', unidadesConsumo.value.length)
   } catch (error) {
-    console.error('[PedidosBalcao] Erro ao carregar unidades:', error)
-    notificationStore.erro('Erro ao carregar unidades abertas')
+    console.error('[PedidosBalcao] Erro ao carregar mesas:', error)
+    notificationStore.erro('Erro ao carregar mesas')
     unidadesConsumo.value = []
   } finally {
     loading.value = false
@@ -312,47 +326,43 @@ const carregarProdutos = async () => {
   }
 }
 
-const carregarPedidoAtivo = async (unidadeId) => {
+const carregarPedidoAtivo = async (sessaoConsumoId) => {
   try {
-    console.log('[PedidosBalcao] Endpoint /pedidos/unidade-consumo/{id}/ativo não implementado no backend - aguardando')
-    // TODO: Descomentar quando backend implementar GET /pedidos/unidade-consumo/{id}/ativo
-    // const response = await pedidosBalcaoService.getPedidoAtivoUnidade(unidadeId)
+    if (!sessaoConsumoId) { pedidoAtivo.value = null; return }
+    console.log('[PedidosBalcao] Carregando pedido ativo da sessão:', sessaoConsumoId)
+    // TODO: Descomentar quando backend implementar GET /pedidos/sessao-consumo/{id}/ativo
+    // const response = await pedidosBalcaoService.getPedidoAtivoSessao(sessaoConsumoId)
     // pedidoAtivo.value = response.data
-    // console.log('[PedidosBalcao] Pedido ativo carregado:', pedidoAtivo.value)
-    
-    // // Inscrever no WebSocket do pedido
-    // if (pedidoAtivo.value?.id) {
-    //   cleanupPedidoWS = inscreverPedido(pedidoAtivo.value.id)
-    // }
-    
     pedidoAtivo.value = null
   } catch (error) {
     if (error.response?.status === 404) {
-      console.log('[PedidosBalcao] Nenhum pedido ativo encontrado')
       pedidoAtivo.value = null
     } else {
       console.error('[PedidosBalcao] Erro ao carregar pedido ativo:', error)
-      throw error
     }
   }
 }
 
 const recarregarPedido = async () => {
   if (!unidadeSelecionada.value?.id) return
-  
+
   try {
-    await carregarPedidoAtivo(unidadeSelecionada.value.id)
-    
-    // Recarregar também a unidade para atualizar saldo
-    const response = await unidadesConsumoService.getById(unidadeSelecionada.value.id)
-    const unidadeAtualizada = response.data
-    const resumo = unidadesConsumoService.calcularResumo(unidadeAtualizada)
-    unidadeSelecionada.value = { ...unidadeAtualizada, ...resumo }
-    
-    // Atualizar na lista também
-    const index = unidadesConsumo.value.findIndex(u => u.id === unidadeSelecionada.value.id)
-    if (index !== -1) {
-      unidadesConsumo.value[index] = unidadeSelecionada.value
+    await carregarPedidoAtivo(unidadeSelecionada.value.sessaoConsumoId)
+
+    // Recarregar sessão ativa para atualizar saldo e dados
+    if (unidadeSelecionada.value.sessaoConsumoId) {
+      const sessao = await sessoesConsumoService.getById(unidadeSelecionada.value.sessaoConsumoId)
+      const sessaoData = sessao.data || sessao
+      unidadeSelecionada.value = {
+        ...unidadeSelecionada.value,
+        sessaoAtiva: sessaoData,
+        totalConsumido: sessaoData.totalConsumo || 0,
+        cliente: sessaoData.clienteId ? {
+          id: sessaoData.clienteId,
+          nome: sessaoData.nomeCliente,
+          telefone: sessaoData.telefoneCliente
+        } : null
+      }
     }
   } catch (error) {
     console.error('[PedidosBalcao] Erro ao recarregar pedido:', error)
@@ -363,8 +373,8 @@ const recarregarPedido = async () => {
 const selecionarUnidade = async (unidade) => {
   unidadeSelecionada.value = unidade
   
-  // Carregar pedido ativo
-  await carregarPedidoAtivo(unidade.id)
+  // Carregar pedido ativo da sessão de consumo
+  await carregarPedidoAtivo(unidade.sessaoConsumoId)
   
   // Inscrever no tópico da unidade
   cleanupUnidadeWS = inscreverUnidade(unidade.id)
@@ -496,7 +506,8 @@ const labelStatusUnidade = (status) => {
     DISPONIVEL: 'Disponível',
     OCUPADA: 'Ocupada',
     AGUARDANDO_PAGAMENTO: 'Aguardando Pagamento',
-    FINALIZADA: 'Finalizada'
+    ENCERRADA: 'Encerrada',
+    FINALIZADA: 'Encerrada' // legacy alias
   }
   return labels[status] || status
 }
@@ -678,6 +689,7 @@ onUnmounted(() => {
   color: #f57c00;
 }
 
+.badge-ENCERRADA,
 .badge-FINALIZADA {
   background-color: #f3f3f3;
   color: #757575;

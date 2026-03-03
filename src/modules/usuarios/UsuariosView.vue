@@ -1,21 +1,5 @@
 <template>
   <div class="space-y-6">
-    <!-- Banner de Desenvolvimento -->
-    <div v-if="usandoMock" class="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
-      <div class="flex items-start">
-        <svg class="w-5 h-5 text-yellow-400 mt-0.5 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-          <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
-        </svg>
-        <div class="flex-1">
-          <h3 class="text-sm font-medium text-yellow-800">Módulo em Desenvolvimento</h3>
-          <p class="mt-1 text-sm text-yellow-700">
-            O endpoint <code class="bg-yellow-100 px-1 py-0.5 rounded text-xs">/api/usuarios</code> ainda não está implementado no backend.
-            Exibindo dados de exemplo para demonstração. 
-            <a href="/ALINHAMENTO_FRONTEND_BACKEND_RESUMO.md" target="_blank" class="underline">Ver documentação</a>
-          </p>
-        </div>
-      </div>
-    </div>
 
     <!-- Header -->
     <div class="flex items-center justify-between">
@@ -75,35 +59,7 @@
 
       <!-- Empty State -->
       <div v-else-if="usuarios.length === 0" class="text-center py-16">
-        <div v-if="usandoMock" class="max-w-md mx-auto">
-          <!-- Ícone de desenvolvimento -->
-          <div class="w-20 h-20 mx-auto mb-6 bg-yellow-100 rounded-full flex items-center justify-center">
-            <svg class="w-10 h-10 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-            </svg>
-          </div>
-          
-          <h3 class="text-xl font-semibold text-text-primary mb-3">Módulo em Desenvolvimento</h3>
-          <p class="text-text-secondary mb-4">
-            O sistema de gestão de usuários está sendo desenvolvido pela equipe de backend.
-          </p>
-          
-          <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 text-left text-sm">
-            <p class="text-text-secondary mb-2">
-              <strong class="text-text-primary">Endpoint necessário:</strong>
-            </p>
-            <code class="block bg-white px-3 py-2 rounded border border-gray-200 text-xs mb-3 font-mono">
-              GET /api/usuarios
-            </code>
-            <p class="text-text-secondary text-xs">
-              📋 Consulte: 
-              <a href="#" class="text-primary hover:underline">ALINHAMENTO_FRONTEND_BACKEND_RESUMO.md</a>
-            </p>
-          </div>
-        </div>
-        
-        <div v-else class="text-text-secondary">
+        <div class="text-text-secondary">
           <svg class="w-16 h-16 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
           </svg>
@@ -245,7 +201,6 @@ const notificationStore = useNotificationStore()
 // Estado
 const usuarios = ref([])
 const loading = ref(false)
-const usandoMock = ref(false)  // Flag para mostrar banner de desenvolvimento
 const filtroRole = ref('')
 const filtroAtivo = ref('')
 const buscaTexto = ref('')
@@ -268,22 +223,12 @@ const carregarUsuarios = async () => {
     if (filtroAtivo.value) params.ativo = filtroAtivo.value === 'true'
     if (buscaTexto.value) params.busca = buscaTexto.value
     
-    try {
-      usuarios.value = await usuariosService.listar(params)
-      usandoMock.value = false
-    } catch (apiError) {
-      // Se erro 404, módulo não implementado
-      if (apiError.message?.includes('não implementado')) {
-        console.warn('[UsuariosView] ⚠️ Endpoint /api/usuarios não implementado no backend')
-        usandoMock.value = true
-        usuarios.value = []
-      } else {
-        throw apiError
-      }
-    }
+    usuarios.value = await usuariosService.listar(params)
   } catch (error) {
     console.error('[UsuariosView] Erro ao carregar usuários:', error)
-    notificationStore.erro('Erro ao carregar usuários. Tente novamente.')
+    if (error?.stack) console.error(error.stack)
+    const mensagem = error.mensagemAmigavel || error.response?.data?.message || error.message
+    notificationStore.erro(mensagem || 'Erro ao carregar usuários. Tente novamente.')
   } finally {
     loading.value = false
   }

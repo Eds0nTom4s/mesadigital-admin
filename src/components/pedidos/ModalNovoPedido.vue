@@ -8,7 +8,7 @@
 
       <div class="modal-body">
         <!-- Loading inicial -->
-        <div v-if="carregandoFundo || carregandoSaldoAberto" class="loading-overlay">
+        <div v-if="carregandoFundo || carregandoPosPagoStatus" class="loading-overlay">
           <div class="spinner"></div>
           <p class="loading-text">Carregando dados...</p>
         </div>
@@ -17,9 +17,13 @@
         <div class="info-unidade">
           <div class="info-item">
             <span class="label">Cliente:</span>
-            <span class="value">{{ unidade?.cliente?.nome || 'Não associado' }}</span>
+            <!-- Não renderizar dados de cliente quando modoAnonimo = true (ALINHAMENTO §4.2) -->
+            <span v-if="unidade?.modoAnonimo" class="value text-amber-600">
+              🔒 Consumo anónimo
+            </span>
+            <span v-else class="value">{{ unidade?.cliente?.nome || 'Não associado' }}</span>
           </div>
-          <div class="info-item" v-if="fundoConsumo">
+          <div class="info-item" v-if="fundoConsumo && !unidade?.modoAnonimo">
             <span class="label">Saldo Fundo:</span>
             <span class="value" :class="{'text-danger': fundoConsumo.saldoAtual < 1000, 'text-warning': fundoConsumo.saldoAtual < 5000}">
               {{ formatCurrency(fundoConsumo.saldoAtual) }}
@@ -27,8 +31,21 @@
           </div>
         </div>
 
-        <!-- Alerta: Unidade sem cliente -->
-        <div v-if="!unidade?.cliente" class="alert alert-warning">
+        <!-- Alerta: Unidade anónima não tem cliente (modo correto) -->
+        <div v-if="unidade?.modoAnonimo" class="alert alert-warning">
+          <div class="alert-content">
+            <svg class="alert-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+            <div>
+              <p class="alert-title">Unidade em modo anónimo</p>
+              <p class="alert-message">Apenas pagamento Pré-Pago está disponível. Pós-pago não é permitido nesta unidade.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Alerta: Unidade sem cliente (modo identificado apenas — anónimas não têm cliente por design) -->
+        <div v-if="!unidade?.modoAnonimo && !unidade?.cliente" class="alert alert-warning">
           <div class="alert-content">
             <svg class="alert-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
@@ -202,20 +219,34 @@
         </div>
 
         <!-- Tipo de Pagamento -->
+        <!-- POS_PAGO só aparece se: status global = true E unidade não é anónima (ALINHAMENTO §6.1) -->
         <div v-if="carrinho.length > 0" class="form-group">
           <label class="form-label">Tipo de Pagamento</label>
+
+          <!-- Aviso de bloqueio quando pós-pago não disponível -->
+          <div v-if="!podeUsarPosPago && motivoBloqueioPosPago"
+               class="mb-3 flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">
+            <span>⚠️</span>
+            <span>{{ motivoBloqueioPosPago }}. Apenas pagamento pré-pago disponível.</span>
+          </div>
+
+          <div v-if="carregandoPosPagoStatus" class="text-xs text-text-secondary mb-2">
+            Verificando modalidades de pagamento...
+          </div>
+
           <div class="payment-options">
-            <label 
-              class="payment-option" 
-              :class="{ 
+            <!-- PRÉ-PAGO — sempre exibido -->
+            <label
+              class="payment-option"
+              :class="{
                 'selected': tipoPagamento === 'PRE_PAGO',
                 'disabled': !podeUsarPrePago
               }"
               :title="!podeUsarPrePago ? tooltipPrePago : ''"
             >
-              <input 
-                type="radio" 
-                v-model="tipoPagamento" 
+              <input
+                type="radio"
+                v-model="tipoPagamento"
                 value="PRE_PAGO"
                 :disabled="!podeUsarPrePago"
               />
@@ -228,27 +259,23 @@
                 </div>
               </div>
             </label>
-            
-            <label 
-              class="payment-option" 
-              :class="{ 
-                'selected': tipoPagamento === 'POS_PAGO',
-                'disabled': !podeUsarPosPago
-              }"
-              :title="!podeUsarPosPago ? tooltipPosPago : ''"
+
+            <!-- PÓS-PAGO — OCULTAR completamente quando não permitido (não apenas desabilitar) -->
+            <label
+              v-if="podeUsarPosPago"
+              class="payment-option"
+              :class="{ 'selected': tipoPagamento === 'POS_PAGO' }"
             >
-              <input 
-                type="radio" 
-                v-model="tipoPagamento" 
+              <input
+                type="radio"
+                v-model="tipoPagamento"
                 value="POS_PAGO"
-                :disabled="!podeUsarPosPago"
               />
               <div class="option-content">
                 <div class="option-icon">📋</div>
                 <div class="option-details">
                   <span class="option-title">Pós-Pago</span>
                   <span class="option-desc">Pagar ao finalizar</span>
-                  <span v-if="!podeUsarPosPago" class="option-warning">{{ tooltipPosPago }}</span>
                 </div>
               </div>
             </label>
@@ -274,9 +301,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCurrency } from '@/utils/currency'
-import api from '@/services/api'
 import pedidosBalcaoService from '@/services/pedidosBalcaoService'
 import fundoConsumoService from '@/services/fundoConsumoService'
+import { configuracaoFinanceiraService } from '@/services/configuracaoFinanceiraService'
 import { useNotificationStore } from '@/store/notifications'
 import { useAuthStore } from '@/store/auth'
 
@@ -302,9 +329,9 @@ const loading = ref(false)
 const tipoPagamento = ref('PRE_PAGO')
 const fundoConsumo = ref(null)
 const carregandoFundo = ref(false)
-const saldoEmAberto = ref(0)
-const limitePosPago = ref(50000) // 500 AOA por padrão
-const carregandoSaldoAberto = ref(false)
+const carregandoPosPagoStatus = ref(false)
+// Status pós-pago carregado do backend — nunca hardcoded (ALINHAMENTO §6.1)
+const posPagoStatusGlobal = ref(false)
 
 // Buscar fundo do cliente ao montar (SIMPLIFICADO - sem travamento)
 onMounted(() => {
@@ -326,36 +353,32 @@ onMounted(() => {
     return
   }
   
-  // Se usuário não pode usar POS_PAGO, forçar PRE_PAGO (se disponível)
-  if (!podeUsarPosPago.value && tipoPagamento.value === 'POS_PAGO') {
-    if (podeUsarPrePago.value) {
-      tipoPagamento.value = 'PRE_PAGO'
-    }
-  }
-  
-  // Buscar fundo APENAS se tiver cliente (sem bloquear)
-  if (props.unidade?.cliente?.id) {
+  // Regra ALINHAMENTO §6.1: consultar status antes de montar seletor de pagamento
+  buscarPosPagoStatus()
+
+  // Buscar fundo APENAS se unidade tiver cliente (não anónima)
+  if (props.unidade?.cliente?.id && !props.unidade?.modoAnonimo) {
     buscarFundoCliente().catch(err => {
       console.warn('[ModalNovoPedido] Erro ao buscar fundo (não crítico):', err)
     })
   }
 })
 
-const buscarSaldoEmAberto = async () => {
-  // Simplificado - não buscar automaticamente para evitar travamento
-  // Será usado valor padrão
+/**
+ * Consulta o status do pós-pago via endpoint leve.
+ * GET /api/configuracoes-financeiras/pos-pago/status
+ * Chamado antes de montar o seletor de tipo de pagamento (ALINHAMENTO §6.1).
+ */
+const buscarPosPagoStatus = async () => {
+  carregandoPosPagoStatus.value = true
   try {
-    carregandoSaldoAberto.value = true
-    
-    // Apenas buscar limite de pós-pago se necessário
-    const configResponse = await api.get('/configuracao-financeira')
-    if (configResponse.data?.limitePosPago) {
-      limitePosPago.value = configResponse.data.limitePosPago
-    }
+    posPagoStatusGlobal.value = await configuracaoFinanceiraService.buscarStatusPosPago()
   } catch (err) {
-    console.warn('[ModalNovoPedido] Usando limite padrão de pós-pago')
+    // Em caso de falha, tratar como desativado
+    posPagoStatusGlobal.value = false
+    console.error('[ModalNovoPedido] Erro ao buscar status pós-pago:', err?.message)
   } finally {
-    carregandoSaldoAberto.value = false
+    carregandoPosPagoStatus.value = false
   }
 }
 
@@ -383,21 +406,23 @@ const buscarFundoCliente = async () => {
   }
 }
 
-// Validar se pode usar PRE_PAGO (requer cliente vinculado + fundo ativo)
+// Validar se pode usar PRE_PAGO
+// Unidades ANÓNIMAS: sempre podem usar PRE_PAGO — backend resolve fundo via QR code (ALINHAMENTO §5-B)
+// Unidades IDENTIFICADAS: requer cliente vinculado + fundo ativo
 const podeUsarPrePago = computed(() => {
-  // Primeiro: unidade deve ter cliente vinculado
-  if (!props.unidade?.cliente?.id) {
-    return false
+  if (props.unidade?.modoAnonimo) {
+    // Modo anónimo: backend debitará do fundo associado ao QR Code — nenhuma verificação local necessária
+    return true
   }
-  // Segundo: cliente deve ter fundo ativo
-  if (!fundoConsumo.value) {
-    return false
-  }
+  // Modo identificado: verificar cliente e fundo
+  if (!props.unidade?.cliente?.id) return false
+  if (!fundoConsumo.value) return false
   return true
 })
 
 // Mensagem de tooltip quando PRE_PAGO está desabilitado
 const tooltipPrePago = computed(() => {
+  if (props.unidade?.modoAnonimo) return '' // Nunca desabilitado para anónimas
   if (!props.unidade?.cliente?.id) {
     return 'Vincule um cliente à unidade primeiro'
   }
@@ -407,21 +432,25 @@ const tooltipPrePago = computed(() => {
   return ''
 })
 
-// Validar se pode usar POS_PAGO (apenas ADMIN e GERENTE) - SIMPLIFICADO
+/**
+ * POS_PAGO permitido somente se AMBAS as condições forem verdadeiras:
+ *   (a) GET /configuracoes-financeiras/pos-pago/status retorna true
+ *   (b) A unidade de consumo NÃO está em modoAnonimo
+ * (ALINHAMENTO_FRONTEND.txt §6.1)
+ */
 const podeUsarPosPago = computed(() => {
-  const role = authStore.user?.role
-  return role === 'ADMIN' || role === 'GERENTE'
+  if (!posPagoStatusGlobal.value) return false
+  if (props.unidade?.modoAnonimo) return false
+  return true
 })
 
-// Mensagem de tooltip quando POS_PAGO está desabilitado - SIMPLIFICADO
-const tooltipPosPago = computed(() => {
-  const role = authStore.user?.role
-  const temPermissao = role === 'ADMIN' || role === 'GERENTE'
-  
-  if (!temPermissao) {
-    return 'Apenas Gerente ou Admin podem usar Pós-Pago'
+const motivoBloqueioPosPago = computed(() => {
+  if (props.unidade?.modoAnonimo) {
+    return 'Pós-pago não permitido em unidade anónima'
   }
-  
+  if (!posPagoStatusGlobal.value) {
+    return 'Pós-pago desativado globalmente pelo administrador'
+  }
   return ''
 })
 
@@ -443,13 +472,15 @@ const totalCarrinho = computed(() => {
 const podeCriarPedido = computed(() => {
   if (carrinho.value.length === 0) return false
   if (loading.value) return false
-  
-  // Se for PRE_PAGO (fundo), verificar saldo
+
   if (tipoPagamento.value === 'PRE_PAGO') {
+    // Modo anónimo: sem fundo local — backend valida saldo via QR code e devolve 422 se insuficiente
+    if (props.unidade?.modoAnonimo) return true
+    // Modo identificado: validar fundo e saldo localmente
     if (!fundoConsumo.value) return false
     if (totalCarrinho.value > fundoConsumo.value.saldoAtual) return false
   }
-  
+
   return true
 })
 
@@ -543,25 +574,27 @@ const criarPedido = async () => {
 
   // Validações específicas por tipo de pagamento
   if (tipoPagamento.value === 'PRE_PAGO') {
-    if (!props.unidade?.cliente?.id) {
-      notificationStore.erro('Unidade deve ter cliente vinculado para pagamento PRÉ-PAGO')
-      return
-    }
-    
-    if (!fundoConsumo.value) {
-      notificationStore.aviso('Cliente não possui fundo de consumo. Crie um fundo primeiro.')
-      return
-    }
-    
-    // Validar saldo maior que zero
-    if (fundoConsumo.value.saldoAtual <= 0) {
-      notificationStore.erro('Saldo do fundo é zero. Recarregue o fundo antes de criar pedido.')
-      return
-    }
-    
-    if (totalCarrinho.value > fundoConsumo.value.saldoAtual) {
-      notificationStore.aviso(`Saldo insuficiente. Faltam ${formatCurrency(totalCarrinho.value - fundoConsumo.value.saldoAtual)}. Recarregue o fundo.`)
-      return
+    if (props.unidade?.modoAnonimo) {
+      // Modo anónimo: o backend valida e debita o fundo via QR code — sem verificação local.
+      // Se saldo insuficiente, a API retorna 422 com mensagem directa (ALINHAMENTO §6.4).
+    } else {
+      // Modo identificado: verificações locais para melhor UX
+      if (!props.unidade?.cliente?.id) {
+        notificationStore.erro('Unidade deve ter cliente vinculado para pagamento PRÉ-PAGO')
+        return
+      }
+      if (!fundoConsumo.value) {
+        notificationStore.aviso('Cliente não possui fundo de consumo. Crie um fundo primeiro.')
+        return
+      }
+      if (fundoConsumo.value.saldoAtual <= 0) {
+        notificationStore.erro('Saldo do fundo é zero. Recarregue o fundo antes de criar pedido.')
+        return
+      }
+      if (totalCarrinho.value > fundoConsumo.value.saldoAtual) {
+        notificationStore.aviso(`Saldo insuficiente. Faltam ${formatCurrency(totalCarrinho.value - fundoConsumo.value.saldoAtual)}. Recarregue o fundo.`)
+        return
+      }
     }
   }
   
@@ -582,7 +615,7 @@ const criarPedido = async () => {
     console.log('[ModalNovoPedido] Tipo Pagamento:', tipoPagamento.value)
     
     const dados = {
-      unidadeConsumoId: props.unidade.id,
+      sessaoConsumoId: props.unidade.sessaoConsumoId ?? props.unidade.id,
       tipoPagamento: tipoPagamento.value,
       itens: carrinho.value.map(item => {
         const itemPedido = {
@@ -612,33 +645,28 @@ const criarPedido = async () => {
     emit('pedido-criado', response.data)
   } catch (error) {
     console.error('[ModalNovoPedido] Erro:', error)
-    
-    // Mensagens amigáveis para erros específicos
-    const mensagemBackend = error.response?.data?.message || ''
-    
-    if (mensagemBackend.includes('Limite de pós-pago excedido')) {
-      // Extrair valores se possível
-      const limiteMatch = mensagemBackend.match(/Limite: ([0-9.,]+)/)
-      const abertoMatch = mensagemBackend.match(/Total aberto: ([0-9.,]+)/)
-      
-      notificationStore.erro(
-        `❌ Limite de Crédito Excedido!\n\n` +
-        `Você já possui ${abertoMatch ? abertoMatch[1] : 'valor'} em contas pendentes.\n` +
-        `Limite máximo: ${limiteMatch ? limiteMatch[1] : 'não disponível'}\n\n` +
-        `⚠️ Soluções:\n` +
-        `• Regularize as contas pendentes primeiro\n` +
-        `• Use pagamento Pré-Pago (Fundo de Consumo)\n` +
-        `• Recarregue o fundo do cliente`,
-        {
-          duration: 8000
-        }
-      )
-    } else if (mensagemBackend.includes('Valor de débito deve ser maior que zero')) {
-      notificationStore.erro('Erro ao processar pagamento. Verifique se o fundo possui saldo e tente novamente.')
-    } else if (mensagemBackend.includes('Saldo insuficiente')) {
-      notificationStore.erro('Saldo insuficiente no fundo. Recarregue e tente novamente.')
+
+    const status = error?.response?.status
+    // Para todos os erros, exibir a mensagem do backend directamente
+    // nunca substituir mensagem de domínio por texto genérico (ALINHAMENTO §3.5)
+    const mensagemBackend = error?.response?.data?.message || error?.message || 'Erro ao criar pedido'
+
+    if (status === 422) {
+      // 422 = regra de negócio (saldo insuficiente, pós-pago bloqueado, etc.)
+      // Mostrar mensagem da API com CTA quando aplicável
+      notificationStore.erro(mensagemBackend)
+      // Se for saldo insuficiente, oferecer CTA de recarga
+      if (mensagemBackend.toLowerCase().includes('saldo insuficiente') && fundoConsumo.value?.id) {
+        setTimeout(() => abrirModalRecarregar(), 800)
+      }
+    } else if (status === 403) {
+      notificationStore.erro('Sem permissão para realizar esta operação.')
+    } else if (status === 409) {
+      notificationStore.erro(mensagemBackend)
+    } else if (status === 400) {
+      notificationStore.erro(mensagemBackend)
     } else {
-      notificationStore.erro(mensagemBackend || 'Erro ao criar pedido')
+      notificationStore.erro(mensagemBackend)
     }
   } finally {
     loading.value = false

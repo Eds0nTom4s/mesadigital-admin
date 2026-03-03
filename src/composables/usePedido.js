@@ -175,6 +175,7 @@ export function usePedido(options = {}) {
 
     let message = 'Erro ao processar operação'
     let type = 'error'
+    const errorMessage = err.response?.data?.message || ''
 
     if (err instanceof ValidationError) {
       message = err.message
@@ -186,28 +187,57 @@ export function usePedido(options = {}) {
       message = 'O pedido foi modificado por outro usuário. Atualizando...'
       type = 'info'
     } else if (err.response) {
-      switch (err.response.status) {
-        case 400:
-          message = err.response.data?.message || 'Dados inválidos'
-          break
-        case 401:
-          message = 'Sessão expirada. Faça login novamente.'
-          break
-        case 403:
-          message = 'Você não tem permissão para esta operação'
-          break
-        case 404:
-          message = 'Pedido não encontrado'
-          break
-        case 409:
-          message = 'Conflito de versão. Atualizando...'
-          type = 'info'
-          break
-        case 500:
-          message = 'Erro no servidor. Tente novamente.'
-          break
-        default:
-          message = err.response.data?.message || 'Erro desconhecido'
+      // Tratamento de erros específicos por mensagem do backend
+      if (errorMessage.includes('Cozinha') && errorMessage.includes('inativa')) {
+        message = '⚠️ Cozinha temporariamente fechada. Alguns produtos não estão disponíveis.'
+        type = 'warning'
+        // Notificar para recarregar produtos
+        setTimeout(() => {
+          notificationStore.add({
+            type: 'info',
+            message: 'Recarregando lista de produtos...',
+            duration: 2000
+          })
+        }, 1500)
+      } else if (errorMessage.includes('Limite de pós-pago') || errorMessage.includes('limite')) {
+        message = '💳 Limite de crédito atingido. Efetue o pagamento antes de fazer novos pedidos.'
+        type = 'warning'
+      } else if (errorMessage.includes('Valor mínimo') || errorMessage.includes('valorMinimo')) {
+        const match = errorMessage.match(/(\d+[.,]\d+)/)
+        const valorMinimo = match ? match[1] : '10,00'
+        message = `💰 Valor mínimo não atingido: ${valorMinimo} AOA. Adicione mais itens.`
+        type = 'warning'
+      } else if (errorMessage.includes('Saldo insuficiente')) {
+        message = '💰 Saldo insuficiente no fundo de consumo. Recarregue para continuar.'
+        type = 'warning'
+      } else if (errorMessage.includes('Produto') && errorMessage.includes('inativo')) {
+        message = '⚠️ Um ou mais produtos não estão mais disponíveis. Revise seu pedido.'
+        type = 'warning'
+      } else {
+        // Tratamento padrão por código HTTP
+        switch (err.response.status) {
+          case 400:
+            message = errorMessage || 'Dados inválidos'
+            break
+          case 401:
+            message = 'Sessão expirada. Faça login novamente.'
+            break
+          case 403:
+            message = 'Você não tem permissão para esta operação'
+            break
+          case 404:
+            message = 'Pedido não encontrado'
+            break
+          case 409:
+            message = 'Conflito de versão. Atualizando...'
+            type = 'info'
+            break
+          case 500:
+            message = 'Erro no servidor. Tente novamente.'
+            break
+          default:
+            message = errorMessage || 'Erro desconhecido'
+        }
       }
     } else if (err.message) {
       message = err.message

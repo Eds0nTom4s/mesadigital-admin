@@ -92,6 +92,31 @@
       {{ validationMessage }}
     </div>
 
+    <!-- Campo URL da Imagem -->
+    <!-- [BACKEND] Backend não suporta multipart/form-data. Inserir URL directamente. -->
+    <div v-if="!disabled" class="url-input-section" style="margin-top:0.75rem;">
+      <label class="url-input-label" style="font-size:0.8rem;color:#6b7280;display:block;margin-bottom:0.25rem;">
+        URL da imagem (Cloudinary, Imgur, etc.)
+      </label>
+      <div style="display:flex;gap:0.5rem;">
+        <input
+          v-model="urlInput"
+          type="url"
+          placeholder="https://res.cloudinary.com/..."
+          style="flex:1;padding:0.4rem 0.6rem;border:1px solid #d1d5db;border-radius:6px;font-size:0.85rem;"
+          @keyup.enter="salvarUrl"
+        />
+        <button
+          type="button"
+          @click="salvarUrl"
+          :disabled="!urlInput.trim() || uploading"
+          style="padding:0.4rem 0.8rem;background:#3b82f6;color:white;border:none;border-radius:6px;font-size:0.85rem;cursor:pointer;white-space:nowrap;"
+        >
+          Guardar URL
+        </button>
+      </div>
+    </div>
+
     <!-- Ajuda -->
     <div class="help-text">
       <p class="help-title">Requisitos da imagem:</p>
@@ -139,6 +164,7 @@ const uploading = ref(false)
 const uploadProgress = ref(0)
 const validationMessage = ref('')
 const validationClass = ref('')
+const urlInput = ref('')   // URL manual (substitui upload multipart)
 
 // Constantes de validação
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5 MB
@@ -226,68 +252,57 @@ const handleFileChange = async (event) => {
 }
 
 // Upload de arquivo
-const uploadFile = async (file) => {
+// [BACKEND] NÃO existe endpoint multipart/form-data.
+// Ao seleccionar ficheiro: mostra pré-visualização local e pede URL externa.
+const uploadFile = async (_file) => {
+  // O preview local já foi definido em handleFileChange via FileReader.
+  // Instruir o operador a usar hosting externo.
+  validationMessage.value =
+    'ℹ️ O backend não suporta upload directo de ficheiros. ' +
+    'Farei upload para Cloudinary, Imgur ou similar e cole a URL no campo abaixo.'
+  validationClass.value = 'validation-warning'
+  uploading.value = false
+  uploadProgress.value = 0
+}
+
+// Guardar URL da imagem via PUT /api/produtos/{id}
+const salvarUrl = async () => {
+  const url = urlInput.value.trim()
+  if (!url) return
+
   if (!props.produtoId) {
-    validationMessage.value = 'Salve o produto antes de fazer upload da imagem'
-    validationClass.value = 'validation-warning'
+    // Sem ID (produto ainda não salvo): apenas emitir para o pai guardar no PUT
+    currentImageUrl.value = url
+    emit('update:modelValue', url)
+    validationMessage.value = 'URL definida. Será guardada quando o produto for salvo.'
+    validationClass.value = 'validation-success'
+    urlInput.value = ''
     return
   }
 
   uploading.value = true
-  uploadProgress.value = 0
-
   try {
-    // Simulação de progresso
-    const progressInterval = setInterval(() => {
-      if (uploadProgress.value < 90) {
-        uploadProgress.value += 10
-      }
-    }, 100)
-
-    // Usar produtosService ao invés de fetch direto
-    const imageUrl = await produtosService.uploadImagem(props.produtoId, file)
-
-    clearInterval(progressInterval)
-    uploadProgress.value = 100
-
-    // Atualizar URL da imagem
-    currentImageUrl.value = imageUrl
-    emit('update:modelValue', imageUrl)
-    emit('upload-success', imageUrl)
-
-    validationMessage.value = 'Imagem enviada com sucesso!'
+    await produtosService.setUrlImagem(props.produtoId, url)
+    currentImageUrl.value = url
+    emit('update:modelValue', url)
+    emit('upload-success', url)
+    validationMessage.value = 'URL da imagem guardada com sucesso!'
     validationClass.value = 'validation-success'
-
-    // Limpar mensagem após 3 segundos
-    setTimeout(() => {
-      validationMessage.value = ''
-    }, 3000)
-
+    urlInput.value = ''
   } catch (error) {
-    console.error('[ImageUpload] Erro ao fazer upload:', error)
-    
-    // Tratamento específico para erro 403 (Forbidden)
-    if (error.response?.status === 403) {
-      validationMessage.value = '❌ Permissão negada. Você não tem autorização para fazer upload de imagens. Entre em contato com o administrador.'
-    } else if (error.response?.status === 401) {
-      validationMessage.value = '⚠️ Sessão expirada. Faça login novamente.'
-    } else {
-      validationMessage.value = error.response?.data?.message || error.message || 'Erro ao fazer upload da imagem'
-    }
-    
+    console.error('[ImageUpload] Erro ao guardar URL:', error)
+    validationMessage.value = error.response?.data?.message || 'Erro ao guardar URL da imagem'
     validationClass.value = 'validation-error'
     emit('upload-error', error)
-    
-    // Reverter preview
-    currentImageUrl.value = props.modelValue
   } finally {
     uploading.value = false
-    uploadProgress.value = 0
-    fileInput.value.value = '' // Limpar input
+    setTimeout(() => { validationMessage.value = '' }, 4000)
   }
 }
 
 // Remover imagem
+// [BACKEND] NÃO existe DELETE /api/produtos/{id}/imagem.
+// Usa PUT /api/produtos/{id} com urlImagem: null.
 const removerImagem = async () => {
   if (!props.produtoId) {
     currentImageUrl.value = ''
@@ -296,40 +311,25 @@ const removerImagem = async () => {
     return
   }
 
-  if (!confirm('Tem certeza que deseja remover esta imagem?')) {
-    return
-  }
-
   uploading.value = true
-
   try {
-    // Usar produtosService ao invés de fetch direto
-    await produtosService.removerImagem(props.produtoId)
-
+    await produtosService.setUrlImagem(props.produtoId, null)
     currentImageUrl.value = ''
     fileInfo.value = null
     emit('update:modelValue', '')
     emit('remove-success')
-
     validationMessage.value = 'Imagem removida com sucesso!'
     validationClass.value = 'validation-success'
-
-    setTimeout(() => {
-      validationMessage.value = ''
-    }, 3000)
-
+    setTimeout(() => { validationMessage.value = '' }, 3000)
   } catch (error) {
     console.error('[ImageUpload] Erro ao remover imagem:', error)
-    
-    // Tratamento específico para erro 403 (Forbidden)
     if (error.response?.status === 403) {
-      validationMessage.value = '❌ Permissão negada. Você não tem autorização para remover imagens. Entre em contato com o administrador.'
+      validationMessage.value = '❌ Permissão negada para remover imagem.'
     } else if (error.response?.status === 401) {
       validationMessage.value = '⚠️ Sessão expirada. Faça login novamente.'
     } else {
       validationMessage.value = error.response?.data?.message || 'Erro ao remover imagem'
     }
-    
     validationClass.value = 'validation-error'
   } finally {
     uploading.value = false

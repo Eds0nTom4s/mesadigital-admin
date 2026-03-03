@@ -144,16 +144,25 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   const requiresAuth = to.matched.some(record => record.meta.requiresAuth)
   
-  // Verificar token no localStorage
-  const token = localStorage.getItem('token')
-  const isAuthenticated = !!token
+  if (!requiresAuth) {
+    // Rota pública, permite acesso direto
+    next()
+    return
+  }
   
-  if (requiresAuth && !isAuthenticated) {
-    // Redireciona para login se não autenticado
-    console.warn('[Router] Acesso negado - redirecionando para login')
+  // Importar store dinâmico (aguarda Pinia estar pronto)
+  const { useAuthStore } = await import('@/store/auth')
+  const authStore = useAuthStore()
+  
+  // Verificar autenticação completa (valida expiração do token)
+  const isAuthenticated = await authStore.checkAuth()
+  
+  if (!isAuthenticated) {
+    // Token inválido ou expirado - redireciona para login
+    console.warn('[Router] Sessão expirada - redirecionando para login')
     next('/login')
-  } else if (to.path === '/login' && isAuthenticated) {
-    // Se já autenticado e tenta acessar login, redireciona para dashboard
+  } else if (to.path === '/login') {
+    // Já autenticado, evita acessar login novamente
     next('/admin/dashboard')
   } else {
     next()

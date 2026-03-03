@@ -85,8 +85,6 @@
             <option value="TODOS">Todos os Status</option>
             <option value="DISPONIVEL">Disponíveis</option>
             <option value="OCUPADA">Ocupadas</option>
-            <option value="AGUARDANDO_PAGAMENTO">Aguardando Pagamento</option>
-            <option value="FINALIZADA">Finalizadas</option>
           </select>
           
           <select v-model="tipoFiltro" class="input-field w-48">
@@ -124,6 +122,7 @@
         v-for="mesa in mesasFiltradas" 
         :key="mesa.id"
         :mesa="mesa"
+        :sessao-ativa="mesa.sessaoAtiva"
         @click="abrirDetalhesMesa(mesa)"
       />
     </div>
@@ -145,22 +144,6 @@
           <button @click="fecharModalNova" class="btn-close">✕</button>
         </div>
         <form @submit.prevent="criarMesa" class="modal-body space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-text-primary mb-1">
-              Telefone do Cliente *
-            </label>
-            <input v-model="formNovaMesa.telefoneCliente" 
-                   type="tel" 
-                   placeholder="+244923456789"
-                   class="input-field w-full"
-                   required 
-                   pattern="^\+244\d{9}$"
-                   title="Formato: +244 seguido de 9 dígitos" />
-            <p class="text-xs text-text-secondary mt-1">
-              Formato: +244XXXXXXXXX (9 dígitos)
-            </p>
-          </div>
-
           <div>
             <label class="block text-sm font-medium text-text-primary mb-1">Referência *</label>
             <input v-model="formNovaMesa.referencia" 
@@ -225,6 +208,7 @@
     <ModalDetalhesMesa
       :is-open="modalDetalhesAberto"
       :mesa="mesaSelecionada || {}"
+      :sessao="sessaoAtiva"
       :fundo="fundoSelecionado"
       :qr-code="qrCodeSelecionado"
       @close="fecharDetalhesMesa"
@@ -234,6 +218,45 @@
       @recarregar="recarregarFundo"
       @atualizar-qr-code="atualizarQrCode"
     />
+
+    <!-- Modal: Abrir Sessão -->
+    <div v-if="modalSessaoAberto" class="modal-overlay" @click.self="fecharModalSessao">
+      <div class="modal-content max-w-md">
+        <div class="modal-header">
+          <h2>🟢 Abrir Sessão — {{ mesaSelecionada?.referencia }}</h2>
+          <button @click="fecharModalSessao" class="btn-close">✕</button>
+        </div>
+        <form @submit.prevent="confirmarAbrirSessao" class="modal-body space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-text-primary mb-1">Telefone do Cliente (opcional)</label>
+            <input
+              v-model="formNovaSessao.telefoneCliente"
+              type="tel"
+              placeholder="+351 912 345 678"
+              class="input-field w-full"
+              :disabled="formNovaSessao.modoAnonimo"
+            />
+            <p class="text-xs text-text-secondary mt-1">Vincula a sessão a um cliente cadastrado</p>
+          </div>
+
+          <div>
+            <label class="flex items-center space-x-2 cursor-pointer">
+              <input type="checkbox" v-model="formNovaSessao.modoAnonimo" class="rounded" />
+              <span class="text-sm text-text-primary">Modo anônimo (sem cliente vinculado)</span>
+            </label>
+          </div>
+
+          <div class="flex space-x-2 pt-4">
+            <button type="button" @click="fecharModalSessao" class="btn-secondary flex-1">
+              Cancelar
+            </button>
+            <button type="submit" :disabled="abrindoSessao" class="btn-primary flex-1">
+              {{ abrindoSessao ? 'Abrindo...' : 'Abrir Sessão' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <!-- Modal: Novo Pedido -->
     <ModalNovoPedido
@@ -251,7 +274,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
-import unidadesConsumoService from '@/services/unidadesConsumoService'
+import mesasService from '@/services/mesasService'
+import sessoesConsumoService from '@/services/sessoesConsumoService'
 import fundoConsumoService from '@/services/fundoConsumoService'
 import qrcodeService from '@/services/qrcodeService'
 import CardMesa from '@/components/shared/CardMesa.vue'
@@ -268,12 +292,11 @@ const statusFiltro = ref('TODOS')
 const tipoFiltro = ref('TODOS')
 const busca = ref('')
 
-// Modal Nova Mesa
+// ── Modal Nova Mesa ────────────────────────────────────────────────────────
 const modalNovaAberto = ref(false)
 const criandoMesa = ref(false)
 const formNovaMesa = ref({
   referencia: '',
-  telefoneCliente: '',
   tipo: 'MESA_FISICA',
   numero: null,
   capacidade: 4,
@@ -281,71 +304,86 @@ const formNovaMesa = ref({
   gerarQrCode: true
 })
 
-// Modal Detalhes
+// ── Modal Abrir Sessão ─────────────────────────────────────────────────────
+const modalSessaoAberto = ref(false)
+const abrindoSessao = ref(false)
+const formNovaSessao = ref({
+  mesaId: null,
+  telefoneCliente: '',
+  modoAnonimo: false
+})
+
+// ── Modal Detalhes ─────────────────────────────────────────────────────────
 const modalDetalhesAberto = ref(false)
 const mesaSelecionada = ref(null)
+const sessaoAtiva = ref(null)
 const fundoSelecionado = ref(null)
 const qrCodeSelecionado = ref(null)
 
-// Modal Novo Pedido
+// ── Modal Novo Pedido ──────────────────────────────────────────────────────
 const modalNovoPedidoAberto = ref(false)
 const unidadeParaPedido = ref(null)
 
-// Estatísticas
+// ── Estatísticas ───────────────────────────────────────────────────────────
 const estatisticas = computed(() => {
   const total = mesas.value.length
   const ocupadas = mesas.value.filter(m => m.status === 'OCUPADA').length
   const disponiveis = mesas.value.filter(m => m.status === 'DISPONIVEL').length
-  const aguardandoPagamento = mesas.value.filter(m => m.status === 'AGUARDANDO_PAGAMENTO').length
+  // Aguardando pagamento = sessão com status AGUARDANDO_PAGAMENTO (sessão interna)
+  const aguardandoPagamento = mesas.value.filter(m => m.sessaoAtiva?.status === 'AGUARDANDO_PAGAMENTO').length
   const taxaOcupacao = total > 0 ? Math.round((ocupadas / total) * 100) : 0
 
-  return {
-    total,
-    ocupadas,
-    disponiveis,
-    aguardandoPagamento,
-    taxaOcupacao
-  }
+  return { total, ocupadas, disponiveis, aguardandoPagamento, taxaOcupacao }
 })
 
-// Mesas filtradas
+// ── Mesas filtradas ────────────────────────────────────────────────────────
 const mesasFiltradas = computed(() => {
   return mesas.value.filter(mesa => {
-    // Filtro de status
-    if (statusFiltro.value !== 'TODOS' && mesa.status !== statusFiltro.value) {
-      return false
-    }
-    
-    // Filtro de tipo
-    if (tipoFiltro.value !== 'TODOS' && mesa.tipo !== tipoFiltro.value) {
-      return false
-    }
-    
-    // Busca por referência ou nome do cliente
+    if (statusFiltro.value !== 'TODOS' && mesa.status !== statusFiltro.value) return false
+    if (tipoFiltro.value !== 'TODOS' && mesa.tipo !== tipoFiltro.value) return false
+
     if (busca.value) {
-      const buscaLower = busca.value.toLowerCase()
+      const q = busca.value.toLowerCase()
       return (
-        mesa.referencia?.toLowerCase().includes(buscaLower) ||
-        mesa.cliente?.nome?.toLowerCase().includes(buscaLower) ||
-        mesa.numero?.toString().includes(buscaLower)
+        mesa.referencia?.toLowerCase().includes(q) ||
+        mesa.sessaoAtiva?.nomeCliente?.toLowerCase().includes(q) ||
+        mesa.numero?.toString().includes(q)
       )
     }
-    
     return true
   })
 })
 
-// Carregar mesas
+// ── Carregar Mesas + Sessões ───────────────────────────────────────────────
 const carregarMesas = async () => {
   try {
     loading.value = true
-    
-    // Usa endpoint /minhas para filtro automático por role
-    const response = await unidadesConsumoService.getMinhas()
-    mesas.value = response.data || response
-    
+
+    const unidadeId = authStore.user?.unidadeAtendimentoId ?? null
+    let rawMesas
+    if (unidadeId) {
+      rawMesas = await mesasService.getPorUnidadeAtendimento(unidadeId)
+    } else {
+      rawMesas = await mesasService.getTodas()
+    }
+    rawMesas = Array.isArray(rawMesas) ? rawMesas : rawMesas.data || []
+
+    // Carregar sessões abertas para enriquecer os cards
+    let sessoesMap = new Map()
+    try {
+      const sessoes = await sessoesConsumoService.getAbertas()
+      const rawSessoes = Array.isArray(sessoes) ? sessoes : sessoes.data || []
+      rawSessoes.forEach(s => sessoesMap.set(s.mesaId, s))
+    } catch (err) {
+      console.warn('[GestaoMesasView] Aviso ao carregar sessões:', err)
+    }
+
+    mesas.value = rawMesas.map(mesa => ({
+      ...mesa,
+      sessaoAtiva: sessoesMap.get(mesa.id) || null
+    }))
+
     console.log('[GestaoMesasView] Mesas carregadas:', mesas.value.length)
-    console.log('[GestaoMesasView] Primeira mesa (exemplo):', mesas.value[0])
   } catch (error) {
     console.error('[GestaoMesasView] Erro ao carregar mesas:', error)
     notificationStore.erro('Erro ao carregar mesas: ' + (error.response?.data?.message || error.message))
@@ -354,11 +392,10 @@ const carregarMesas = async () => {
   }
 }
 
-// Abrir modal nova mesa
+// ── Modal Nova Mesa ────────────────────────────────────────────────────────
 const abrirModalNova = () => {
   formNovaMesa.value = {
     referencia: '',
-    telefoneCliente: '',
     tipo: 'MESA_FISICA',
     numero: null,
     capacidade: 4,
@@ -368,23 +405,27 @@ const abrirModalNova = () => {
   modalNovaAberto.value = true
 }
 
-// Criar mesa
+const fecharModalNova = () => {
+  modalNovaAberto.value = false
+}
+
 const criarMesa = async () => {
   try {
     criandoMesa.value = true
-    
-    // 1. Criar unidade de consumo
-    const response = await unidadesConsumoService.criar(formNovaMesa.value)
-    const novaUnidade = response.data
-    
-    console.log('[GestaoMesasView] Mesa criada:', novaUnidade)
-    
-    // 2. Gerar QR Code se solicitado
+
+    // Remover flag UI (gerarQrCode não vai no payload da API)
+    const { gerarQrCode: _flag, ...dadosMesa } = formNovaMesa.value
+    const novaMesa = await mesasService.criar(dadosMesa)
+    const mesaData = novaMesa.data || novaMesa
+
+    console.log('[GestaoMesasView] Mesa criada:', mesaData)
+
+    // Gerar QR Code se solicitado
     if (formNovaMesa.value.gerarQrCode) {
       try {
         await qrcodeService.gerarQrCode({
           tipo: 'MESA',
-          unidadeDeConsumoId: novaUnidade.id,
+          mesaId: mesaData.id,
           validadeMinutos: 525600 // 1 ano
         })
         notificationStore.sucesso('Mesa criada com QR Code!')
@@ -395,20 +436,13 @@ const criarMesa = async () => {
     } else {
       notificationStore.sucesso('Mesa criada com sucesso!')
     }
-    
+
     modalNovaAberto.value = false
     await carregarMesas()
-    
   } catch (error) {
     console.error('[GestaoMesasView] Erro ao criar mesa:', error)
-    
     if (error.response?.status === 400) {
-      const msg = error.response.data.message
-      if (msg?.includes('já possui uma unidade ativa')) {
-        notificationStore.erro('Este cliente já possui uma mesa ativa')
-      } else {
-        notificationStore.erro('Erro: ' + msg)
-      }
+      notificationStore.erro('Erro: ' + (error.response.data?.message || 'Dados inválidos'))
     } else {
       notificationStore.erro('Erro ao criar mesa')
     }
@@ -417,146 +451,167 @@ const criarMesa = async () => {
   }
 }
 
-// Fechar modal nova
-const fecharModalNova = () => {
-  modalNovaAberto.value = false
+// ── Modal Abrir Sessão ─────────────────────────────────────────────────────
+const abrirModalSessao = (mesa) => {
+  formNovaSessao.value = {
+    mesaId: mesa.id,
+    telefoneCliente: '',
+    modoAnonimo: false
+  }
+  mesaSelecionada.value = mesa
+  modalSessaoAberto.value = true
 }
 
-// Abrir detalhes da mesa
-const abrirDetalhesMesa = async (mesa) => {
+const fecharModalSessao = () => {
+  modalSessaoAberto.value = false
+  mesaSelecionada.value = null
+}
+
+const confirmarAbrirSessao = async () => {
   try {
-    // Primeiro abre o modal com dados básicos
-    mesaSelecionada.value = mesa
-    modalDetalhesAberto.value = true
-    
-    let mesaCompleta = mesa // Usar dados básicos como fallback
-    
-    // Depois busca dados completos em background
-    try {
-      const response = await unidadesConsumoService.getById(mesa.id)
-      console.log('[GestaoMesasView] Response getById:', response)
-      
-      // Backend retorna { success: true, message: "Sucesso", data: {...} }
-      // Extrair apenas o data
-      mesaCompleta = response.data || response
-      mesaSelecionada.value = mesaCompleta
-      console.log('[GestaoMesasView] Mesa completa (extraída):', mesaCompleta)
-    } catch (err) {
-      console.warn('[GestaoMesasView] Erro ao buscar detalhes completos, usando dados básicos:', err)
+    abrindoSessao.value = true
+
+    const payload = { ...formNovaSessao.value }
+    // Limpar telefone se modo anônimo
+    if (payload.modoAnonimo) delete payload.telefoneCliente
+
+    await sessoesConsumoService.abrir(payload)
+    notificationStore.sucesso('Sessão aberta! Mesa está ocupada.')
+    modalSessaoAberto.value = false
+    mesaSelecionada.value = null
+    await carregarMesas()
+  } catch (error) {
+    console.error('[GestaoMesasView] Erro ao abrir sessão:', error)
+    if (error.response?.status === 409) {
+      const msg = error.response.data?.message || ''
+      if (msg.toLowerCase().includes('cliente')) {
+        notificationStore.erro('Este cliente já possui uma sessão aberta em outra mesa')
+      } else {
+        notificationStore.erro('Esta mesa já possui uma sessão ativa')
+      }
+    } else if (error.response?.status === 422) {
+      notificationStore.erro('Mesa inativa — não é possível abrir uma sessão')
+    } else {
+      notificationStore.erro('Erro ao abrir sessão: ' + (error.response?.data?.message || error.message))
     }
-    
+  } finally {
+    abrindoSessao.value = false
+  }
+}
+
+// ── Abrir Detalhes da Mesa ─────────────────────────────────────────────────
+const abrirDetalhesMesa = async (mesa) => {
+  // Mesa DISPONÍVEL → fluxo de abrir sessão
+  if (mesa.status === 'DISPONIVEL') {
+    abrirModalSessao(mesa)
+    return
+  }
+
+  // Mesa OCUPADA → mostrar detalhes + sessão ativa
+  mesaSelecionada.value = mesa
+  sessaoAtiva.value = mesa.sessaoAtiva || null
+  modalDetalhesAberto.value = true
+
+  try {
+    // Buscar sessão completa (inclui pedidos, atendente, etc.)
+    if (mesa.sessaoAtivaId || mesa.sessaoAtiva?.id) {
+      const sessaoId = mesa.sessaoAtivaId || mesa.sessaoAtiva.id
+      const sessaoCompleta = await sessoesConsumoService.getById(sessaoId)
+      sessaoAtiva.value = sessaoCompleta.data || sessaoCompleta
+    } else {
+      const s = await sessoesConsumoService.getSessaoAtivaMesa(mesa.id)
+      sessaoAtiva.value = s
+    }
+
     // Buscar dados adicionais em paralelo
     const promises = []
-    
-    // Buscar fundo se cliente tem
-    if (mesaCompleta.cliente?.id) {
+
+    // Fundo do cliente (se sessão tem cliente vinculado)
+    if (sessaoAtiva.value?.clienteId) {
       promises.push(
-        fundoConsumoService.buscarFundoPorCliente(mesaCompleta.cliente.id)
+        fundoConsumoService.buscarFundoPorCliente(sessaoAtiva.value.clienteId)
           .then(fundo => { fundoSelecionado.value = fundo })
           .catch(() => { fundoSelecionado.value = null })
       )
     } else {
       fundoSelecionado.value = null
     }
-    
-    // Buscar QR Code
+
+    // QR Code da mesa
     promises.push(
-      qrcodeService.buscarQrCodeUnidade(mesaCompleta.id)
-        .then(qrCodes => { 
-          qrCodeSelecionado.value = qrCodes.length > 0 ? qrCodes[0] : null 
-        })
+      qrcodeService.buscarQrCodeMesa(mesa.id)
+        .then(qrCodes => { qrCodeSelecionado.value = Array.isArray(qrCodes) && qrCodes.length > 0 ? qrCodes[0] : null })
         .catch(() => { qrCodeSelecionado.value = null })
     )
-    
+
     await Promise.all(promises)
-    
-  } catch (error) {
-    console.error('[GestaoMesasView] Erro ao abrir detalhes:', error)
-    notificationStore.erro('Erro ao carregar detalhes da mesa')
+  } catch (err) {
+    console.warn('[GestaoMesasView] Aviso ao buscar detalhes da sessão:', err)
   }
 }
 
-// Fechar detalhes
 const fecharDetalhesMesa = () => {
   modalDetalhesAberto.value = false
   mesaSelecionada.value = null
+  sessaoAtiva.value = null
   fundoSelecionado.value = null
   qrCodeSelecionado.value = null
 }
 
-// Fechar mesa
+// ── Fechar Mesa (encerrar sessão) ──────────────────────────────────────────
 const fecharMesa = async (mesa) => {
+  const sessaoId = sessaoAtiva.value?.id
+  if (!sessaoId) {
+    notificationStore.erro('Sessão não identificada')
+    return
+  }
   try {
-    await unidadesConsumoService.fechar(mesa.id)
-    notificationStore.sucesso('Mesa fechada com sucesso!')
+    await sessoesConsumoService.fechar(sessaoId)
+    notificationStore.sucesso('Sessão encerrada com sucesso!')
     fecharDetalhesMesa()
     await carregarMesas()
   } catch (error) {
-    console.error('[GestaoMesasView] Erro ao fechar mesa:', error)
-    notificationStore.erro('Erro ao fechar mesa')
+    console.error('[GestaoMesasView] Erro ao fechar sessão:', error)
+    notificationStore.erro('Erro ao encerrar sessão: ' + (error.response?.data?.message || error.message))
   }
 }
 
-// Novo pedido
+// ── Novo Pedido ────────────────────────────────────────────────────────────
 const novoPedido = async (mesa) => {
-  // VALIDAÇÃO CRÍTICA: Verificar se mesa existe
-  if (!mesa || !mesa.id) {
-    console.error('[GestaoMesasView] ERRO: novoPedido chamado sem mesa válida')
+  if (!mesa?.id) {
     notificationStore.erro('Mesa não identificada. Tente novamente.')
     return
   }
-  
-  console.log('[GestaoMesasView] Iniciando novo pedido para mesa:', mesa.id)
-  
-  try {
-    let mesaParaPedido = mesa
-    
-    // Tentar buscar dados completos (com timeout de 3 segundos)
-    try {
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout')), 3000)
-      )
-      const dadosPromise = unidadesConsumoService.getById(mesa.id)
-      
-      const response = await Promise.race([dadosPromise, timeoutPromise])
-      // Backend retorna envelope { success, message, data }
-      mesaParaPedido = response.data || response
-      console.log('[GestaoMesasView] Mesa completa para pedido:', mesaParaPedido)
-    } catch (err) {
-      console.warn('[GestaoMesasView] Usando dados básicos da mesa (não foi possível buscar completos):', err.message)
-      // Usa dados básicos que já temos
-      mesaParaPedido = mesa
-    }
-    
-    // Validação adicional após fetch
-    if (!mesaParaPedido || !mesaParaPedido.id) {
-      throw new Error('Dados da mesa inválidos após fetch')
-    }
-    
-    unidadeParaPedido.value = {
-      id: mesaParaPedido.id,
-      referencia: mesaParaPedido.referencia,
-      tipo: mesaParaPedido.tipo,
-      cliente: mesaParaPedido.cliente || null,
-      fundoConsumo: fundoSelecionado.value
-    }
-    
-    console.log('[GestaoMesasView] Unidade para pedido:', unidadeParaPedido.value)
-    
-    modalNovoPedidoAberto.value = true
-  } catch (error) {
-    console.error('[GestaoMesasView] Erro ao preparar pedido:', error)
-    notificationStore.erro('Erro ao abrir modal de pedido')
+
+  const sessao = sessaoAtiva.value
+
+  if (!sessao?.id) {
+    notificationStore.erro('Não há sessão ativa nesta mesa. Abra uma sessão primeiro.')
+    return
   }
+
+  unidadeParaPedido.value = {
+    id: mesa.id,
+    referencia: mesa.referencia,
+    tipo: mesa.tipo,
+    sessaoConsumoId: sessao.id,         // ← campo-chave para o POST /pedidos
+    cliente: sessao.clienteId ? {
+      id: sessao.clienteId,
+      nome: sessao.nomeCliente,
+      telefone: sessao.telefoneCliente
+    } : null,
+    fundoConsumo: fundoSelecionado.value
+  }
+
+  console.log('[GestaoMesasView] Unidade para pedido:', unidadeParaPedido.value)
+  modalNovoPedidoAberto.value = true
 }
 
-// Fechar modal de novo pedido
 const fecharModalNovoPedido = () => {
   modalNovoPedidoAberto.value = false
   unidadeParaPedido.value = null
 }
 
-// Pedido criado com sucesso
 const pedidoCriado = async () => {
   fecharModalNovoPedido()
   fecharDetalhesMesa()
@@ -564,31 +619,21 @@ const pedidoCriado = async () => {
   notificationStore.sucesso('Pedido criado com sucesso!')
 }
 
-// Imprimir conta
-const imprimirConta = (mesa) => {
+// ── Outros ────────────────────────────────────────────────────────────────
+const imprimirConta = () => {
   notificationStore.info('Funcionalidade de impressão em desenvolvimento')
-  // TODO: Gerar PDF da conta
 }
 
-// Recarregar fundo
 const recarregarFundo = (fundo) => {
-  if (!fundo || !fundo.id) {
-    notificationStore.erro('Fundo não encontrado')
-    return
-  }
-  
-  // Redirecionar para página de detalhes do fundo
+  if (!fundo?.id) { notificationStore.erro('Fundo não encontrado'); return }
   router.push({ name: 'fundo-detalhe', params: { id: fundo.id } })
 }
 
-// Atualizar QR Code
 const atualizarQrCode = (novoQrCode) => {
   qrCodeSelecionado.value = novoQrCode
 }
 
-onMounted(() => {
-  carregarMesas()
-})
+onMounted(() => { carregarMesas() })
 </script>
 
 <style scoped>

@@ -7,7 +7,7 @@ import api from './api'
 
 export const pedidosBalcaoService = {
   /**
-   * Criar pedido para uma unidade de consumo existente
+   * Criar pedido para uma sessão de consumo ativa
    * POST /api/pedidos
    * 
    * Backend automaticamente:
@@ -19,7 +19,7 @@ export const pedidosBalcaoService = {
    * - Processa pagamento (se PRE_PAGO - débito imediato do fundo)
    * 
    * @param {Object} dados
-   * @param {number} dados.unidadeConsumoId - ID da unidade de consumo
+   * @param {number} dados.sessaoConsumoId - ID da sessão de consumo ativa
    * @param {Array} dados.itens - Array [{produtoId, quantidade, observacoes?}]
    * @param {string} dados.tipoPagamento - PRE_PAGO (débito do fundo) ou POS_PAGO (pagar depois)
    * @param {string} dados.observacoes - Observações opcionais
@@ -30,15 +30,23 @@ export const pedidosBalcaoService = {
   },
 
   /**
-   * Buscar pedido ATIVO de uma unidade de consumo
-   * GET /api/pedidos/unidade-consumo/{unidadeConsumoId}/ativo
+   * Buscar pedido ATIVO de uma sessão de consumo
+   * GET /api/pedidos/sessao-consumo/{sessaoConsumoId}/ativo
    * 
    * Retorna o pedido ativo (status != FINALIZADO && status != CANCELADO)
    * com todos os SubPedidos, ItemPedidos e dados de Cozinha
    */
-  async getPedidoAtivoUnidade(unidadeConsumoId) {
-    const response = await api.get(`/pedidos/unidade-consumo/${unidadeConsumoId}/ativo`)
+  async getPedidoAtivoSessao(sessaoConsumoId) {
+    const response = await api.get(`/pedidos/sessao-consumo/${sessaoConsumoId}/ativo`)
     return response.data
+  },
+
+  /**
+   * @deprecated Use getPedidoAtivoSessao(sessaoConsumoId)
+   */
+  async getPedidoAtivoUnidade(sessaoConsumoId) {
+    console.warn('[pedidosBalcaoService] getPedidoAtivoUnidade() deprecated. Use getPedidoAtivoSessao().')
+    return this.getPedidoAtivoSessao(sessaoConsumoId)
   },
 
   /**
@@ -53,43 +61,57 @@ export const pedidosBalcaoService = {
   },
 
   /**
-   * Finalizar pedido
-   * POST /api/pedidos/{id}/finalizar
-   * 
-   * Backend valida:
-   * - Todos SubPedidos estão ENTREGUE
-   * - Pedido ainda não está FINALIZADO
-   * - Atualiza StatusPedido para FINALIZADO
+   * [BACKEND] NÃO existe POST /api/pedidos/{id}/finalizar.
+   * O status FINALIZADO é atribuído AUTOMATICAMENTE pelo backend
+   * quando o último SubPedido do pedido é marcado como ENTREGUE.
+   *
+   * Fluxo correto:
+   *   PUT /api/subpedidos/{id}/assumir       → EM_PREPARACAO
+   *   PUT /api/subpedidos/{id}/marcar-pronto → PRONTO
+   *   PUT /api/subpedidos/{id}/marcar-entregue → ENTREGUE
+   *   (último ENTREGUE → Pedido vira FINALIZADO automaticamente)
+   *
+   * Este método é mantido apenas para não quebrar chamadores existentes.
+   * @deprecated Usar subpedidosService.marcarEntregue() para o último SubPedido
    */
-  async finalizar(id) {
-    const response = await api.post(`/pedidos/${id}/finalizar`)
-    return response.data
+  async finalizar(_id) {
+    console.warn(
+      '[pedidosBalcaoService] finalizar() não tem endpoint no backend.\n' +
+      'O pedido será finalizado automaticamente quando todos os SubPedidos forem marcados como ENTREGUE.'
+    )
+    return { success: true, message: 'O pedido será finalizado automaticamente pelo backend.' }
   },
 
   /**
    * Cancelar pedido
-   * POST /api/pedidos/{id}/cancelar
-   * 
+   * PUT /api/pedidos/{id}/cancelar?motivo=TEXTO   (roles: GERENTE, ADMIN)
+   *
+   * [BACKEND] Método HTTP: PUT (não POST)
+   * [BACKEND] motivo é query parameter, NÃO body
+   * [BACKEND] motivo é OBRIGATÓRIO — se omitido retorna 400
+   *
    * @param {number} id - ID do pedido
-   * @param {string} motivo - Motivo do cancelamento
+   * @param {string} motivo - Motivo do cancelamento (obrigatório)
    */
   async cancelar(id, motivo) {
-    const response = await api.post(`/pedidos/${id}/cancelar`, { motivo })
+    const response = await api.put(`/pedidos/${id}/cancelar`, null, {
+      params: { motivo }
+    })
     return response.data
   },
 
   /**
-   * Processar pagamento de pedido
-   * POST /api/pagamentos
-   * 
-   * @param {Object} dados
-   * @param {number} dados.pedidoId - ID do pedido (OBRIGATÓRIO)
-   * @param {string} dados.metodoPagamento - DINHEIRO, CARTAO, etc
-   * @param {number} dados.valorPago - Valor pago
+   * [BACKEND] NÃO existe POST /api/pagamentos.
+   * O pagamento via AppyPay é 100% interno (webhook /api/pagamentos/callback).
+   * Para pagamento pós-pago, usar endpoints de ConfiguracaoFinanceira.
+   * @deprecated Remover chamadas a este método
    */
-  async processarPagamento(dados) {
-    const response = await api.post('/pagamentos', dados)
-    return response.data
+  async processarPagamento(_dados) {
+    console.warn(
+      '[pedidosBalcaoService] processarPagamento() não tem endpoint no backend.\n' +
+      'O processamento de pagamento é gerido internamente pelo backend.'
+    )
+    throw new Error('Endpoint /api/pagamentos não disponível. Ver RESPOSTAS_BACKEND_PERGUNTAS.txt §3.4.')
   }
 }
 

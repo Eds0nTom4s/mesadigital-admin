@@ -189,14 +189,7 @@ const validators = {
         'REQUIRED'
       )
     }
-
-    if (dados.origem && !['BALCAO', 'QRCODE', 'APP'].includes(dados.origem)) {
-      throw new ValidationError(
-        'Origem inválida',
-        'origem',
-        'INVALID_VALUE'
-      )
-    }
+    // [BACKEND] O campo 'origem' não existe em CriarPedidoRequest — é ignorado se enviado.
   },
 
   /**
@@ -493,16 +486,10 @@ export const pedidoService = {
       )
     }
 
-    // Nota: Para PRE_PAGO, débito do fundo já foi feito na CRIAÇÃO do pedido
-    // Este endpoint é usado principalmente para POS_PAGO (confirmar pagamento ao fechar)
-    if (dados.formaPagamento === FORMA_PAGAMENTO.PRE_PAGO) {
-      if (!pedido.data.fundoConsumoId) {
-        throw new BusinessRuleError(
-          'Pedido não possui fundo de consumo associado',
-          'FUNDO_NAO_ASSOCIADO'
-        )
-      }
-    }
+    // [BACKEND] PedidoResponse NÃO tem 'fundoConsumoId'.
+    // O vínculo fundo↔pedido é gerido internamente pelo backend.
+    // Para PRE_PAGO, o débito do fundo já foi feito na CRIAÇÃO do pedido.
+    // Este endpoint é para POS_PAGO (confirmar pagamento ao fechar).
 
     const payload = {
       formaPagamento: dados.formaPagamento,

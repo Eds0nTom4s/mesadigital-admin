@@ -2,7 +2,7 @@ export default {
   name: 'Painel Administrativo',
   version: '1.0.0',
   websocket: {
-    url: 'http://localhost:8080/api/ws',
+    url: '/api/ws',
     reconnectDelay: 5000,
     heartbeat: 4000
   },

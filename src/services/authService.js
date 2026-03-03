@@ -12,24 +12,27 @@ const USER_KEY = 'auth_user'
 
 /**
  * Faz login com telefone e senha (Admin/Atendente)
- * Endpoint: POST /api/auth/jwt/login (username/password)
- * Conforme ALINHAMENTO_FRONTEND_BACKEND_RESUMO.md
- * 
- * @param {string} telefone - Telefone do atendente (ex: +244999999999)
- * @param {string} senha - Senha do atendente
+ * Endpoint: POST /api/auth/admin/login  ← único endpoint correcto para o Painel
+ * Confirmado pelo backend em RESPOSTA_RELATORIO_FRONTEND.txt §3.1
+ * NÃO usar /auth/jwt/login (autenticação técnica, não para o Painel)
+ *
+ * @param {string} telefone - Telefone do utilizador
+ * @param {string} senha - Palavra-passe
  * @returns {Promise<{token: string, expiresIn: number, atendente: object}>}
  */
 export const login = async (telefone, senha) => {
   try {
-    // Backend usa /api/auth/jwt/login com username/password
-    const response = await api.post('/auth/jwt/login', {
-      username: telefone.startsWith('+244') ? telefone : `+244${telefone}`,
-      password: senha
+    // Endpoint correcto para o Painel Administrativo: POST /auth/admin/login
+    // Confirmado pelo backend em RESPOSTA_RELATORIO_FRONTEND.txt §3.1
+    const response = await api.post('/auth/admin/login', {
+      telefone,
+      senha
     })
 
     // Estrutura de resposta: ApiResponse<AuthResponse>
     // { message, data: { token, tipo, expiresIn, usuario }, error }
     const data = response.data.data || response.data
+    // Resposta: { token, tipo: "Bearer", usuario: { id, username, nomeCompleto, telefone, roles } }
     const { token, expiresIn, usuario, atendente } = data
     const user = usuario || atendente
 
