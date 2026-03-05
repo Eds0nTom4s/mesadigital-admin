@@ -158,6 +158,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useCurrency } from '@/utils/currency'
 import { useNotificationStore } from '@/store/notifications'
 import fundoConsumoService from '@/services/fundoConsumoService'
+import { configuracaoFinanceiraService } from '@/services/configuracaoFinanceiraService'
 
 const props = defineProps({
   isOpen: {
@@ -166,7 +167,7 @@ const props = defineProps({
   },
   fundo: {
     type: Object,
-    required: true
+    default: null
   }
 })
 
@@ -205,9 +206,9 @@ const fundoAtivo = computed(() => {
 
 onMounted(async () => {
   try {
-    const config = await fundoConsumoService.consultarValorMinimo()
-    valorMinimo.value = config.valorMinimo // já vem em centavos
-    formulario.value.valorDecimal = (config.valorMinimo / 100) // converte para decimal
+    const config = await configuracaoFinanceiraService.buscarConfiguracao()
+    valorMinimo.value = config.data?.valorMinimoOperacao ?? 5000 // já vem em centavos
+    formulario.value.valorDecimal = ((config.data?.valorMinimoOperacao ?? 5000) / 100) // converte para decimal
   } catch (error) {
     console.error('Erro ao carregar valor mínimo:', error)
   }
@@ -232,11 +233,9 @@ const confirmarRecarga = async () => {
   loading.value = true
   try {
     const pagamento = await fundoConsumoService.recarregarFundo(
-      props.fundo.id,
-      {
-        valor: valorRecargaCentavos.value, // envia em centavos
-        metodoPagamento: formulario.value.metodoPagamento
-      }
+      props.fundo.tokenPortador,
+      valorRecargaCentavos.value,
+      `Recarga balc\u00e3o - ${formulario.value.metodoPagamento}`
     )
 
     pagamentoCriado.value = pagamento

@@ -7,6 +7,7 @@ import TransacaoTable from '@/components/shared/TransacaoTable.vue'
 import ModalRecarregarFundo from '@/components/fundos/ModalRecarregarFundo.vue'
 import { useCurrency } from '@/utils/currency'
 import fundoConsumoService from '@/services/fundoConsumoService'
+import { configuracaoFinanceiraService } from '@/services/configuracaoFinanceiraService'
 
 /**
  * FundoDetalheView - Detalhes completos de um fundo
@@ -34,19 +35,18 @@ const modalRecarregarAberto = ref(false)
 // Carrega dados via API
 onMounted(async () => {
   try {
-    const fundoId = parseInt(route.params.id)
+    const fundoToken = route.params.id
     
     // Carrega valor mínimo
-    const configResp = await fundoConsumoService.consultarValorMinimo()
-    valorMinimo.value = configResp.valorMinimo
+    const configResp = await configuracaoFinanceiraService.buscarConfiguracao()
+    valorMinimo.value = configResp.data?.valorMinimoOperacao ?? 5000
     
-    // Busca fundo por ID (usa clienteId temporariamente)
-    const fundoResp = await fundoConsumoService.buscarFundoPorCliente(fundoId)
-    fundo.value = fundoResp.data
+    // Busca fundo pelo token portador
+    fundo.value = await fundoConsumoService.consultarFundo(fundoToken)
     
     // Carrega transações
-    const transacoesResp = await fundoConsumoService.listarTransacoes(fundoId)
-    transacoes.value = transacoesResp.data
+    const historico = await fundoConsumoService.buscarHistorico(fundoToken)
+    transacoes.value = historico?.content ?? historico ?? []
     
   } catch (err) {
     console.error('Erro ao carregar fundo:', err)
@@ -86,6 +86,12 @@ const totalEstornos = computed(() => {
 const tipoFundoDerivado = computed(() => {
   if (!fundo.value) return 'ANONIMO'
   return fundo.value.clienteId != null ? 'IDENTIFICADO' : 'ANONIMO'
+})
+
+// FundoConsumoResponse usa `ativo: boolean`, não `status: string`
+const statusFundo = computed(() => {
+  if (!fundo.value) return 'ATIVO'
+  return fundo.value.ativo !== false ? 'ATIVO' : 'ENCERRADO'
 })
 
 const tipoLabels = {
@@ -133,12 +139,10 @@ const recargaRealizada = async () => {
   
   // Recarregar dados
   try {
-    const fundoId = parseInt(route.params.id)
-    const fundoResp = await fundoConsumoService.buscarFundoPorCliente(fundoId)
-    fundo.value = fundoResp.data
-    
-    const transacoesResp = await fundoConsumoService.listarTransacoes(fundoId)
-    transacoes.value = transacoesResp.data
+    const fundoToken = route.params.id
+    fundo.value = await fundoConsumoService.consultarFundo(fundoToken)
+    const historico = await fundoConsumoService.buscarHistorico(fundoToken)
+    transacoes.value = historico?.content ?? historico ?? []
   } catch (err) {
     console.error('Erro ao recarregar dados:', err)
   }
@@ -181,7 +185,7 @@ const exportarExtrato = () => {
         </div>
         <div class="flex items-center space-x-3">
           <button 
-            v-if="fundo.status === 'ATIVO'"
+            v-if="fundo.ativo"
             @click="abrirModalRecarregar" 
             class="btn-success font-semibold shadow-lg"
           >
@@ -197,7 +201,7 @@ const exportarExtrato = () => {
             Exportar
           </button>
           <button 
-            v-if="fundo.status === 'ATIVO'" 
+            v-if="fundo.ativo" 
             @click="encerrarFundo" 
             class="btn-primary bg-error hover:bg-error/90"
           >
@@ -212,7 +216,7 @@ const exportarExtrato = () => {
           <p class="text-text-secondary text-sm mb-2">Saldo Atual</p>
           <SaldoBadge 
             :saldo="fundo.saldoAtual" 
-            :status="fundo.status" 
+            :status="statusFundo" 
             :fundoMinimo="configuracoes?.fundoMinimo || 5000"
             tamanho="lg" 
           />
@@ -236,8 +240,8 @@ const exportarExtrato = () => {
 
         <div class="card">
           <p class="text-text-secondary text-sm mb-2">Status</p>
-          <span :class="statusConfig[fundo.status].class" class="inline-block">
-            {{ statusConfig[fundo.status].label }}
+          <span :class="statusConfig[statusFundo].class" class="inline-block">
+            {{ statusConfig[statusFundo].label }}
           </span>
           <p class="text-xs text-text-secondary mt-1">
             Criado {{ formatarData(fundo.dataCriacao) }}

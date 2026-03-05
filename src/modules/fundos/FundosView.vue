@@ -130,7 +130,7 @@ const estatisticas = computed(() => {
 
 // Navega para detalhes
 const verDetalhes = (fundo) => {
-  router.push({ name: 'fundo-detalhe', params: { id: fundo.id } })
+  router.push({ name: 'fundo-detalhe', params: { id: fundo.tokenPortador } })
 }
 
 // Modal de criação de fundo
