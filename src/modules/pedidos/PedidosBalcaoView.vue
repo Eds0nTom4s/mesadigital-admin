@@ -94,8 +94,9 @@
 
         <!-- Estado Vazio -->
         <div v-if="unidadesFiltradas.length === 0 && !loading" class="empty-state">
-          <p>📭 Nenhuma unidade encontrada</p>
-          <small v-if="busca">Tente ajustar o termo de busca</small>
+          <p>🪑 Nenhuma mesa ocupada de momento</p>
+          <small v-if="busca">Nenhuma mesa ocupada corresponde a "{{ busca }}"</small>
+          <small v-else>Aguarde a abertura de uma sessão para criar pedidos</small>
         </div>
       </div>
     </div>
@@ -143,7 +144,8 @@
     <Teleport to="body">
       <ModalHistoricoPedidos
         v-if="mostrarModalHistorico"
-        :unidade-id="unidadeSelecionada?.id"
+        :sessao-consumo-id="unidadeSelecionada?.sessaoConsumoId"
+        :referencia="unidadeSelecionada?.referencia"
         @fechar="fecharModalHistorico"
       />
     </Teleport>
@@ -171,358 +173,64 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
-import { useCurrency } from '@/utils/currency'
-import { useNotificationStore } from '@/store/notifications'
-import { useAuthStore } from '@/store/auth'
-import mesasService from '@/services/mesasService'
-import sessoesConsumoService from '@/services/sessoesConsumoService'
-import produtosService from '@/services/produtosService'
-import pedidosBalcaoService from '@/services/pedidosBalcaoService'
+import { defineAsyncComponent } from 'vue'
 import PainelUnidadeConsumo from '@/components/pedidos/PainelUnidadeConsumo.vue'
-import { usePedidoWebSocket } from '@/composables/usePedidoWebSocket'
+import { usePedidosBalcao } from '@/composables/usePedidosBalcao'
 
 // Lazy load modals (code splitting)
-const ModalNovoPedido = defineAsyncComponent(() => 
+const ModalNovoPedido = defineAsyncComponent(() =>
   import('@/components/pedidos/ModalNovoPedido.vue')
 )
-const ModalAdicionarProdutos = defineAsyncComponent(() => 
+const ModalAdicionarProdutos = defineAsyncComponent(() =>
   import('@/components/pedidos/ModalAdicionarProdutos.vue')
 )
-const ModalHistoricoPedidos = defineAsyncComponent(() => 
+const ModalHistoricoPedidos = defineAsyncComponent(() =>
   import('@/components/pedidos/ModalHistoricoPedidos.vue')
 )
-const ModalCriarFundo = defineAsyncComponent(() => 
+const ModalCriarFundo = defineAsyncComponent(() =>
   import('@/components/fundos/ModalCriarFundo.vue')
 )
-const ModalRecarregarFundo = defineAsyncComponent(() => 
+const ModalRecarregarFundo = defineAsyncComponent(() =>
   import('@/components/fundos/ModalRecarregarFundo.vue')
 )
 
-const { formatCurrency } = useCurrency()
-const notificationStore = useNotificationStore()
-const authStore = useAuthStore()
-
-// WebSocket integration
 const {
-  inscreverPedido,
-  inscreverUnidade,
-  statusConexao
-} = usePedidoWebSocket({
-  onPedidoAtualizado: (notificacao) => {
-    console.log('[PedidosBalcao] Pedido atualizado via WebSocket:', notificacao)
-    recarregarPedido()
-  },
-  onSubPedidoPronto: (notificacao) => {
-    console.log('[PedidosBalcao] 🔔 SubPedido PRONTO:', notificacao)
-    notificationStore.sucesso(`🍽️ SubPedido pronto! ${notificacao.cozinhaNome || 'Cozinha'}`)
-    recarregarPedido()
-  }
-})
-
-// Estado dos modais
-const mostrarModalCriarFundo = ref(false)
-const mostrarModalRecarregar = ref(false)
-const clienteSelecionadoFundo = ref(null)
-const fundoSelecionado = ref(null)
-const unidadeSelecionada = ref(null)
-const pedidoAtivo = ref(null)
-const mostrarModalNovoPedido = ref(false)
-const mostrarModalAdicionarProdutos = ref(false)
-const mostrarModalHistorico = ref(false)
-const busca = ref('')
-const loading = ref(false)
-const loadingProdutos = ref(false)
-
-// Dados do backend
-const unidadesConsumo = ref([])
-const produtosDisponiveis = ref([])
-
-// WebSocket cleanup functions
-let cleanupPedidoWS = null
-let cleanupUnidadeWS = null
-
-// Título dinâmico baseado em role
-const tituloContexto = computed(() => {
-  if (authStore.isAdmin) {
-    return {
-      titulo: 'Gestão de Pedidos - Visão Global',
-      subtitulo: 'Todas as unidades de atendimento'
-    }
-  } else {
-    return {
-      titulo: 'Gestão de Pedidos - Balcão',
-      subtitulo: `${unidadesFiltradas.value.length} unidades abertas`
-    }
-  }
-})
-
-// Computed
-const unidadesFiltradas = computed(() => {
-  if (!busca.value) return unidadesConsumo.value
-  return unidadesConsumo.value.filter(u => 
-    u.referencia?.toLowerCase().includes(busca.value.toLowerCase())
-  )
-})
-
-// Funções de carregamento
-const carregarUnidades = async () => {
-  loading.value = true
-  try {
-    const unidadeId = authStore.user?.unidadeAtendimentoId ?? null
-    let rawMesas
-    if (unidadeId) {
-      rawMesas = await mesasService.getPorUnidadeAtendimento(unidadeId)
-    } else {
-      rawMesas = await mesasService.getTodas()
-    }
-    rawMesas = Array.isArray(rawMesas) ? rawMesas : rawMesas.data || []
-
-    // Enriquecer com dados de sessão
-    let sessoesMap = new Map()
-    try {
-      const sessoes = await sessoesConsumoService.getAbertas()
-      const rawSessoes = Array.isArray(sessoes) ? sessoes : sessoes.data || []
-      rawSessoes.forEach(s => sessoesMap.set(s.mesaId, s))
-    } catch (err) {
-      console.warn('[PedidosBalcao] Aviso ao carregar sessões:', err)
-    }
-
-    unidadesConsumo.value = rawMesas.map(mesa => ({
-      ...mesa,
-      sessaoAtiva: sessoesMap.get(mesa.id) || null,
-      sessaoConsumoId: sessoesMap.get(mesa.id)?.id || null,
-      cliente: sessoesMap.get(mesa.id) ? {
-        id: sessoesMap.get(mesa.id).clienteId,
-        nome: sessoesMap.get(mesa.id).nomeCliente,
-        telefone: sessoesMap.get(mesa.id).telefoneCliente
-      } : null,
-      totalConsumido: sessoesMap.get(mesa.id)?.totalConsumo || 0
-    }))
-
-    console.log('[PedidosBalcao] Mesas carregadas:', unidadesConsumo.value.length)
-  } catch (error) {
-    console.error('[PedidosBalcao] Erro ao carregar mesas:', error)
-    notificationStore.erro('Erro ao carregar mesas')
-    unidadesConsumo.value = []
-  } finally {
-    loading.value = false
-  }
-}
-
-const carregarProdutos = async () => {
-  loadingProdutos.value = true
-  try {
-    const response = await produtosService.getAll()
-    const produtos = response.data || []
-    produtosDisponiveis.value = produtos.filter(p => p.ativo === true)
-    console.log('[PedidosBalcao] Produtos ativos carregados:', produtosDisponiveis.value.length)
-  } catch (error) {
-    console.error('[PedidosBalcao] Erro ao carregar produtos:', error)
-    notificationStore.erro('Erro ao carregar produtos')
-    produtosDisponiveis.value = []
-  } finally {
-    loadingProdutos.value = false
-  }
-}
-
-const carregarPedidoAtivo = async (sessaoConsumoId) => {
-  try {
-    if (!sessaoConsumoId) { pedidoAtivo.value = null; return }
-    console.log('[PedidosBalcao] Carregando pedido ativo da sessão:', sessaoConsumoId)
-    // TODO: Descomentar quando backend implementar GET /pedidos/sessao-consumo/{id}/ativo
-    // const response = await pedidosBalcaoService.getPedidoAtivoSessao(sessaoConsumoId)
-    // pedidoAtivo.value = response.data
-    pedidoAtivo.value = null
-  } catch (error) {
-    if (error.response?.status === 404) {
-      pedidoAtivo.value = null
-    } else {
-      console.error('[PedidosBalcao] Erro ao carregar pedido ativo:', error)
-    }
-  }
-}
-
-const recarregarPedido = async () => {
-  if (!unidadeSelecionada.value?.id) return
-
-  try {
-    await carregarPedidoAtivo(unidadeSelecionada.value.sessaoConsumoId)
-
-    // Recarregar sessão ativa para atualizar saldo e dados
-    if (unidadeSelecionada.value.sessaoConsumoId) {
-      const sessao = await sessoesConsumoService.getById(unidadeSelecionada.value.sessaoConsumoId)
-      const sessaoData = sessao.data || sessao
-      unidadeSelecionada.value = {
-        ...unidadeSelecionada.value,
-        sessaoAtiva: sessaoData,
-        totalConsumido: sessaoData.totalConsumo || 0,
-        cliente: sessaoData.clienteId ? {
-          id: sessaoData.clienteId,
-          nome: sessaoData.nomeCliente,
-          telefone: sessaoData.telefoneCliente
-        } : null
-      }
-    }
-  } catch (error) {
-    console.error('[PedidosBalcao] Erro ao recarregar pedido:', error)
-  }
-}
-
-// Ações de navegação
-const selecionarUnidade = async (unidade) => {
-  unidadeSelecionada.value = unidade
-  
-  // Carregar pedido ativo da sessão de consumo
-  await carregarPedidoAtivo(unidade.sessaoConsumoId)
-  
-  // Inscrever no tópico da unidade
-  cleanupUnidadeWS = inscreverUnidade(unidade.id)
-  
-  // Carregar produtos se ainda não carregou
-  if (produtosDisponiveis.value.length === 0) {
-    await carregarProdutos()
-  }
-}
-
-const voltarListaUnidades = () => {
-  // Cleanup WebSocket subscriptions
-  if (cleanupPedidoWS) {
-    cleanupPedidoWS()
-    cleanupPedidoWS = null
-  }
-  if (cleanupUnidadeWS) {
-    cleanupUnidadeWS()
-    cleanupUnidadeWS = null
-  }
-  
-  unidadeSelecionada.value = null
-  pedidoAtivo.value = null
-  
-  // Recarregar lista de unidades
-  carregarUnidades()
-}
-
-// Modals
-const abrirModalNovoPedido = () => {
-  mostrarModalNovoPedido.value = true
-}
-
-const fecharModalNovoPedido = () => {
-  mostrarModalNovoPedido.value = false
-}
-
-const handlePedidoCriado = (pedidoCriado) => {
-  console.log('[PedidosBalcao] Pedido criado:', pedidoCriado)
-  notificationStore.sucesso(`Pedido ${pedidoCriado.numero || pedidoCriado.id} criado com sucesso`)
-  fecharModalNovoPedido()
-  recarregarPedido()
-}
-
-const handleCriarFundo = (cliente) => {
-  console.log('[PedidosBalcao] Abrindo modal para criar fundo para cliente:', cliente)
-  clienteSelecionadoFundo.value = cliente
-  mostrarModalCriarFundo.value = true
-}
-
-const fecharModalCriarFundo = () => {
-  mostrarModalCriarFundo.value = false
-  clienteSelecionadoFundo.value = null
-}
-
-const handleFundoCriado = async (fundo) => {
-  console.log('[PedidosBalcao] Fundo criado:', fundo)
-  notificationStore.sucesso('Fundo criado com sucesso!')
-  fecharModalCriarFundo()
-  
-  // Recarregar unidade selecionada para atualizar dados do fundo
-  if (unidadeSelecionada.value) {
-    await selecionarUnidade(unidadeSelecionada.value)
-  }
-}
-
-const handleRecarregarFundo = (fundo) => {
-  console.log('[PedidosBalcao] Abrindo modal para recarregar fundo:', fundo)
-  fundoSelecionado.value = fundo
-  mostrarModalRecarregar.value = true
-}
-
-const fecharModalRecarregar = () => {
-  mostrarModalRecarregar.value = false
-  fundoSelecionado.value = null
-}
-
-const handleRecargaCriada = async (pagamento) => {
-  console.log('[PedidosBalcao] Pagamento criado:', pagamento)
-  
-  // Não fecha o modal automaticamente - usuário pode precisar ver informações de pagamento
-  // Modal será fechado quando usuário clicar em "Fechar"
-  
-  // Recarregar unidade selecionada para atualizar saldo (quando pagamento for confirmado)
-  if (unidadeSelecionada.value) {
-    setTimeout(async () => {
-      await selecionarUnidade(unidadeSelecionada.value)
-    }, 2000)
-  }
-}
-
-const abrirModalAdicionarProdutos = () => {
-  mostrarModalAdicionarProdutos.value = true
-}
-
-const fecharModalAdicionarProdutos = () => {
-  mostrarModalAdicionarProdutos.value = false
-}
-
-const handleProdutosAdicionados = () => {
-  notificationStore.sucesso('Produtos adicionados ao pedido')
-  fecharModalAdicionarProdutos()
-  recarregarPedido()
-}
-
-const abrirModalHistorico = () => {
-  mostrarModalHistorico.value = true
-}
-
-const fecharModalHistorico = () => {
-  mostrarModalHistorico.value = false
-}
-
-// Helpers
-const iconeTipoUnidade = (tipo) => {
-  const icones = {
-    MESA_FISICA: '🪑',
-    QUARTO: '🛏️',
-    CAMARIM: '🎭',
-    BARRACA_EVENTO: '🎪',
-    STAND_FEIRA: '🏢',
-    ESPACO_COWORKING: '💼'
-  }
-  return icones[tipo] || '📍'
-}
-
-const labelStatusUnidade = (status) => {
-  const labels = {
-    DISPONIVEL: 'Disponível',
-    OCUPADA: 'Ocupada',
-    AGUARDANDO_PAGAMENTO: 'Aguardando Pagamento',
-    ENCERRADA: 'Encerrada',
-    FINALIZADA: 'Encerrada' // legacy alias
-  }
-  return labels[status] || status
-}
-
-// Lifecycle
-onMounted(async () => {
-  console.log('[PedidosBalcao] Componente montado')
-  await carregarUnidades()
-})
-
-onUnmounted(() => {
-  // Cleanup WebSocket subscriptions
-  if (cleanupPedidoWS) cleanupPedidoWS()
-  if (cleanupUnidadeWS) cleanupUnidadeWS()
-})
+  formatCurrency,
+  statusConexao,
+  busca,
+  loading,
+  unidadeSelecionada,
+  pedidoAtivo,
+  produtosDisponiveis,
+  mostrarModalNovoPedido,
+  mostrarModalAdicionarProdutos,
+  mostrarModalHistorico,
+  mostrarModalCriarFundo,
+  mostrarModalRecarregar,
+  clienteSelecionadoFundo,
+  fundoSelecionado,
+  tituloContexto,
+  unidadesFiltradas,
+  selecionarUnidade,
+  voltarListaUnidades,
+  recarregarPedido,
+  abrirModalNovoPedido,
+  fecharModalNovoPedido,
+  handlePedidoCriado,
+  handleCriarFundo,
+  fecharModalCriarFundo,
+  handleFundoCriado,
+  handleRecarregarFundo,
+  fecharModalRecarregar,
+  handleRecargaCriada,
+  abrirModalAdicionarProdutos,
+  fecharModalAdicionarProdutos,
+  handleProdutosAdicionados,
+  abrirModalHistorico,
+  fecharModalHistorico,
+  iconeTipoUnidade,
+  labelStatusUnidade
+} = usePedidosBalcao()
 </script>
 
 <style scoped>

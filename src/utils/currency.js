@@ -4,8 +4,8 @@
  * Centraliza todas as configurações relacionadas a moeda
  * para evitar hardcoding e facilitar internacionalização
  * 
- * IMPORTANTE: Backend armazena valores em CENTAVOS
- * 10000 centavos = 100,00 AOA
+ * IMPORTANTE: Backend envia valores em AOA (não em centavos)
+ * 5000 = 5.000,00 Kz
  */
 
 export const CURRENCY_CONFIG = {
@@ -15,7 +15,7 @@ export const CURRENCY_CONFIG = {
   locale: 'pt-AO',
   decimals: 2,
   symbolPosition: 'after', // 'before' ou 'after'
-  centavos: true // Backend usa centavos
+  centavos: false // Backend envia valores já em AOA
 }
 
 /**

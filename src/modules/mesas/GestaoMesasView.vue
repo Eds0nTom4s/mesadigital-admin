@@ -137,72 +137,11 @@
     </div>
 
     <!-- Modal: Nova Mesa -->
-    <div v-if="modalNovaAberto" class="modal-overlay" @click.self="fecharModalNova">
-      <div class="modal-content max-w-md">
-        <div class="modal-header">
-          <h2>Nova Mesa</h2>
-          <button @click="fecharModalNova" class="btn-close">✕</button>
-        </div>
-        <form @submit.prevent="criarMesa" class="modal-body space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-text-primary mb-1">Referência *</label>
-            <input v-model="formNovaMesa.referencia" 
-                   type="text" 
-                   placeholder="Ex: Mesa 10"
-                   class="input-field w-full"
-                   required />
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-text-primary mb-1">Tipo *</label>
-            <select v-model="formNovaMesa.tipo" class="input-field w-full" required>
-              <option value="MESA_FISICA">Mesa Física</option>
-              <option value="QUARTO">Quarto (Room Service)</option>
-              <option value="AREA_EVENTO">Área de Evento</option>
-              <option value="ESPACO_LOUNGE">Espaço Lounge</option>
-              <option value="VIRTUAL">Virtual/Delivery</option>
-            </select>
-          </div>
-
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-medium text-text-primary mb-1">Número</label>
-              <input v-model.number="formNovaMesa.numero" 
-                     type="number" 
-                     placeholder="10"
-                     class="input-field w-full" />
-            </div>
-
-            <div>
-              <label class="block text-sm font-medium text-text-primary mb-1">Capacidade</label>
-              <input v-model.number="formNovaMesa.capacidade" 
-                     type="number" 
-                     placeholder="4"
-                     class="input-field w-full"
-                     min="1" />
-            </div>
-          </div>
-
-          <div>
-            <label class="flex items-center space-x-2">
-              <input type="checkbox" v-model="formNovaMesa.gerarQrCode" class="rounded" />
-              <span class="text-sm text-text-primary">Gerar QR Code automaticamente (válido por 1 ano)</span>
-            </label>
-          </div>
-
-          <div class="flex space-x-2 pt-4">
-            <button type="button" @click="fecharModalNova" 
-                    class="btn-secondary flex-1">
-              Cancelar
-            </button>
-            <button type="submit" :disabled="criandoMesa" 
-                    class="btn-primary flex-1">
-              {{ criandoMesa ? 'Criando...' : 'Criar Mesa' }}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <ModalNovaMesa
+      :show="modalNovaAberto"
+      @close="modalNovaAberto = false"
+      @mesa-criada="handleMesaCriada"
+    />
 
     <!-- Modal: Detalhes da Mesa -->
     <ModalDetalhesMesa
@@ -213,6 +152,7 @@
       :qr-code="qrCodeSelecionado"
       @close="fecharDetalhesMesa"
       @fechar-mesa="fecharMesa"
+      @aguardar-pagamento="aguardarPagamento"
       @novo-pedido="novoPedido"
       @imprimir-conta="imprimirConta"
       @recarregar="recarregarFundo"
@@ -220,43 +160,12 @@
     />
 
     <!-- Modal: Abrir Sessão -->
-    <div v-if="modalSessaoAberto" class="modal-overlay" @click.self="fecharModalSessao">
-      <div class="modal-content max-w-md">
-        <div class="modal-header">
-          <h2>🟢 Abrir Sessão — {{ mesaSelecionada?.referencia }}</h2>
-          <button @click="fecharModalSessao" class="btn-close">✕</button>
-        </div>
-        <form @submit.prevent="confirmarAbrirSessao" class="modal-body space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-text-primary mb-1">Telefone do Cliente (opcional)</label>
-            <input
-              v-model="formNovaSessao.telefoneCliente"
-              type="tel"
-              placeholder="+351 912 345 678"
-              class="input-field w-full"
-              :disabled="formNovaSessao.modoAnonimo"
-            />
-            <p class="text-xs text-text-secondary mt-1">Vincula a sessão a um cliente cadastrado</p>
-          </div>
-
-          <div>
-            <label class="flex items-center space-x-2 cursor-pointer">
-              <input type="checkbox" v-model="formNovaSessao.modoAnonimo" class="rounded" />
-              <span class="text-sm text-text-primary">Modo anônimo (sem cliente vinculado)</span>
-            </label>
-          </div>
-
-          <div class="flex space-x-2 pt-4">
-            <button type="button" @click="fecharModalSessao" class="btn-secondary flex-1">
-              Cancelar
-            </button>
-            <button type="submit" :disabled="abrindoSessao" class="btn-primary flex-1">
-              {{ abrindoSessao ? 'Abrindo...' : 'Abrir Sessão' }}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <ModalAbrirSessao
+      :show="modalSessaoAberto"
+      :mesa="mesaSelecionada"
+      @close="fecharModalSessao"
+      @sessao-aberta="handleSessaoAberta"
+    />
 
     <!-- Modal: Novo Pedido -->
     <ModalNovoPedido
@@ -281,6 +190,8 @@ import qrcodeService from '@/services/qrcodeService'
 import CardMesa from '@/components/shared/CardMesa.vue'
 import ModalDetalhesMesa from '@/components/mesas/ModalDetalhesMesa.vue'
 import ModalNovoPedido from '@/components/pedidos/ModalNovoPedido.vue'
+import ModalNovaMesa from './components/ModalNovaMesa.vue'
+import ModalAbrirSessao from './components/ModalAbrirSessao.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -294,24 +205,9 @@ const busca = ref('')
 
 // ── Modal Nova Mesa ────────────────────────────────────────────────────────
 const modalNovaAberto = ref(false)
-const criandoMesa = ref(false)
-const formNovaMesa = ref({
-  referencia: '',
-  tipo: 'MESA_FISICA',
-  numero: null,
-  capacidade: 4,
-  unidadeAtendimentoId: null,
-  gerarQrCode: true
-})
 
 // ── Modal Abrir Sessão ─────────────────────────────────────────────────────
 const modalSessaoAberto = ref(false)
-const abrindoSessao = ref(false)
-const formNovaSessao = ref({
-  mesaId: null,
-  telefoneCliente: '',
-  modoAnonimo: false
-})
 
 // ── Modal Detalhes ─────────────────────────────────────────────────────────
 const modalDetalhesAberto = ref(false)
@@ -393,110 +289,21 @@ const carregarMesas = async () => {
 }
 
 // ── Modal Nova Mesa ────────────────────────────────────────────────────────
-const abrirModalNova = () => {
-  formNovaMesa.value = {
-    referencia: '',
-    tipo: 'MESA_FISICA',
-    numero: null,
-    capacidade: 4,
-    unidadeAtendimentoId: authStore.user?.unidadeAtendimentoId || null,
-    gerarQrCode: true
-  }
-  modalNovaAberto.value = true
-}
+const abrirModalNova = () => { modalNovaAberto.value = true }
 
-const fecharModalNova = () => {
-  modalNovaAberto.value = false
-}
-
-const criarMesa = async () => {
-  try {
-    criandoMesa.value = true
-
-    // Remover flag UI (gerarQrCode não vai no payload da API)
-    const { gerarQrCode: _flag, ...dadosMesa } = formNovaMesa.value
-    const novaMesa = await mesasService.criar(dadosMesa)
-    const mesaData = novaMesa.data || novaMesa
-
-    console.log('[GestaoMesasView] Mesa criada:', mesaData)
-
-    // Gerar QR Code se solicitado
-    if (formNovaMesa.value.gerarQrCode) {
-      try {
-        await qrcodeService.gerarQrCode({
-          tipo: 'MESA',
-          mesaId: mesaData.id,
-          validadeMinutos: 525600 // 1 ano
-        })
-        notificationStore.sucesso('Mesa criada com QR Code!')
-      } catch (qrError) {
-        console.error('[GestaoMesasView] Erro ao gerar QR Code:', qrError)
-        notificationStore.aviso('Mesa criada, mas erro ao gerar QR Code')
-      }
-    } else {
-      notificationStore.sucesso('Mesa criada com sucesso!')
-    }
-
-    modalNovaAberto.value = false
-    await carregarMesas()
-  } catch (error) {
-    console.error('[GestaoMesasView] Erro ao criar mesa:', error)
-    if (error.response?.status === 400) {
-      notificationStore.erro('Erro: ' + (error.response.data?.message || 'Dados inválidos'))
-    } else {
-      notificationStore.erro('Erro ao criar mesa')
-    }
-  } finally {
-    criandoMesa.value = false
-  }
-}
+const handleMesaCriada = async () => { await carregarMesas() }
 
 // ── Modal Abrir Sessão ─────────────────────────────────────────────────────
 const abrirModalSessao = (mesa) => {
-  formNovaSessao.value = {
-    mesaId: mesa.id,
-    telefoneCliente: '',
-    modoAnonimo: false
-  }
   mesaSelecionada.value = mesa
   modalSessaoAberto.value = true
 }
 
-const fecharModalSessao = () => {
-  modalSessaoAberto.value = false
+const fecharModalSessao = () => { modalSessaoAberto.value = false }
+
+const handleSessaoAberta = async () => {
   mesaSelecionada.value = null
-}
-
-const confirmarAbrirSessao = async () => {
-  try {
-    abrindoSessao.value = true
-
-    const payload = { ...formNovaSessao.value }
-    // Limpar telefone se modo anônimo
-    if (payload.modoAnonimo) delete payload.telefoneCliente
-
-    await sessoesConsumoService.abrir(payload)
-    notificationStore.sucesso('Sessão aberta! Mesa está ocupada.')
-    modalSessaoAberto.value = false
-    mesaSelecionada.value = null
-    await carregarMesas()
-  } catch (error) {
-    console.error('[GestaoMesasView] Erro ao abrir sessão:', error)
-    if (error.response?.status === 409) {
-      const msg = error.response.data?.message || ''
-      if (msg.toLowerCase().includes('cliente')) {
-        notificationStore.erro('Este cliente já possui uma sessão aberta em outra mesa')
-      } else {
-        notificationStore.erro('Esta mesa já possui uma sessão ativa')
-      }
-    } else if (error.response?.status === 422) {
-      notificationStore.erro('Mesa inativa — não é possível abrir uma sessão')
-    } else {
-      notificationStore.erro('Erro ao abrir sessão: ' + (error.response?.data?.message || error.message))
-    }
-  } finally {
-    abrindoSessao.value = false
-  }
+  await carregarMesas()
 }
 
 // ── Abrir Detalhes da Mesa ─────────────────────────────────────────────────
@@ -558,6 +365,31 @@ const fecharDetalhesMesa = () => {
   qrCodeSelecionado.value = null
 }
 
+// ── Aguardar Pagamento ─────────────────────────────────────────────────────
+const aguardarPagamento = async (mesa) => {
+  const sessaoId = sessaoAtiva.value?.id
+  if (!sessaoId) {
+    notificationStore.erro('Sessão não identificada')
+    return
+  }
+  try {
+    await sessoesConsumoService.aguardarPagamento(sessaoId)
+    notificationStore.sucesso('Mesa a aguardar pagamento.')
+    // Atualizar o estado da sessão localmente e recarregar o mapa
+    if (sessaoAtiva.value) {
+      sessaoAtiva.value = { ...sessaoAtiva.value, status: 'AGUARDANDO_PAGAMENTO' }
+    }
+    await carregarMesas()
+  } catch (error) {
+    console.error('[GestaoMesasView] Erro ao marcar aguardar pagamento:', error)
+    if (error.response?.status === 400) {
+      notificationStore.erro('Esta sessão já foi encerrada ou não está no estado correcto.')
+    } else {
+      notificationStore.erro('Erro ao marcar pagamento: ' + (error.response?.data?.message || error.message))
+    }
+  }
+}
+
 // ── Fechar Mesa (encerrar sessão) ──────────────────────────────────────────
 const fecharMesa = async (mesa) => {
   const sessaoId = sessaoAtiva.value?.id
@@ -587,6 +419,16 @@ const novoPedido = async (mesa) => {
 
   if (!sessao?.id) {
     notificationStore.erro('Não há sessão ativa nesta mesa. Abra uma sessão primeiro.')
+    return
+  }
+
+  if (sessao.status === 'AGUARDANDO_PAGAMENTO') {
+    notificationStore.erro('Não é possível adicionar pedidos. A conta já está em fecho.')
+    return
+  }
+
+  if (sessao.status === 'ENCERRADA') {
+    notificationStore.erro('Esta sessão já foi encerrada.')
     return
   }
 

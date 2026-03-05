@@ -34,6 +34,7 @@
             <!-- Botões de ação principais -->
             <div class="flex gap-2">
               <button 
+                v-if="podeNovoPedido"
                 @click="abrirModalNovoPedido" 
                 class="btn-primary flex-1 font-semibold shadow-lg hover:shadow-xl"
               >
@@ -41,6 +42,17 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
                 </svg>
                 Novo Pedido
+              </button>
+
+              <button 
+                v-if="podeAguardarPagamento"
+                @click="$emit('aguardarPagamento', mesa)"
+                class="flex-1 flex items-center justify-center px-4 py-2 bg-warning text-white rounded-lg hover:opacity-90 transition-opacity font-semibold shadow-lg"
+              >
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                Aguardar Pagamento
               </button>
               
               <button 
@@ -59,7 +71,7 @@
           <!-- Body -->
           <div class="p-6 space-y-6">
             <!-- Informações do Cliente -->
-            <div v-if="sessao?.clienteId || sessao?.nomeCliente || mesa.cliente" class="card">
+            <div v-if="sessao" class="card">
               <h3 class="text-lg font-semibold text-text-primary mb-4 flex items-center">
                 <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
@@ -69,11 +81,11 @@
               <div class="grid grid-cols-2 gap-4">
                 <div>
                   <p class="text-sm text-text-secondary">Nome:</p>
-                  <p class="font-medium text-text-primary">{{ sessao?.nomeCliente || mesa.cliente?.nome || '—' }}</p>
+                  <p class="font-medium text-text-primary">{{ sessao?.nomeCliente || mesa.cliente?.nome || 'Anónimo' }}</p>
                 </div>
-                <div>
+                <div v-if="sessao?.telefoneCliente || mesa.cliente?.telefone">
                   <p class="text-sm text-text-secondary">Telefone:</p>
-                  <p class="font-medium text-text-primary">{{ sessao?.telefoneCliente || mesa.cliente?.telefone || '—' }}</p>
+                  <p class="font-medium text-text-primary">{{ sessao?.telefoneCliente || mesa.cliente?.telefone }}</p>
                 </div>
               </div>
             </div>
@@ -169,7 +181,7 @@
                   <div class="flex justify-between items-start mb-2">
                     <div>
                       <p class="font-semibold text-text-primary">Pedido #{{ pedido.id }}</p>
-                      <p class="text-xs text-text-secondary">{{ formatarData(pedido.criadoEm) }}</p>
+                      <p class="text-xs text-text-secondary">{{ formatarData(pedido.createdAt) }}</p>
                     </div>
                     <div class="text-right">
                       <p class="font-bold text-text-primary">{{ formatCurrency(pedido.total) }}</p>
@@ -277,6 +289,7 @@ const emit = defineEmits([
   'close',
   'fecharMesa',
   'novoPedido',
+  'aguardarPagamento',
   'imprimirConta',
   'recarregar',
   'atualizarQrCode'
@@ -409,6 +422,9 @@ const tempoDecorrido = computed(() => {
 })
 
 // Permissões
+const podeNovoPedido = computed(() => props.sessao?.status === 'ABERTA')
+const podeAguardarPagamento = computed(() => props.sessao?.status === 'ABERTA')
+
 const podeFecharMesa = computed(() => {
   const temPermissao = authStore.isAdmin || authStore.isGerente
   const sessaoEncerrável = props.sessao?.status === 'ABERTA' || props.sessao?.status === 'AGUARDANDO_PAGAMENTO'

@@ -21,7 +21,7 @@
             Nome Completo *
           </label>
           <input
-            v-model="form.nome"
+            v-model="form.nomeCompleto"
             type="text"
             required
             class="input-field w-full"
@@ -164,7 +164,7 @@ const emit = defineEmits(['close', 'sucesso'])
 
 // Estado
 const form = ref({
-  nome: '',
+  nomeCompleto: '',
   telefone: '',
   email: '',
   senha: '',
@@ -187,12 +187,19 @@ const carregarUnidades = async () => {
 
 // Preencher form no modo edição
 if (props.usuario) {
+  // Backend retorna nomeCompleto e roles (array). Extrair role sem prefixo ROLE_.
+  const primaryRole = (() => {
+    const roles = props.usuario.roles
+    if (!roles || roles.length === 0) return props.usuario.role || ''
+    const raw = Array.isArray(roles) ? roles[0] : String(roles).split(',')[0].trim()
+    return raw.replace('ROLE_', '')
+  })()
   form.value = {
-    nome: props.usuario.nome || '',
+    nomeCompleto: props.usuario.nomeCompleto || props.usuario.nome || '',
     telefone: props.usuario.telefone || '',
     email: props.usuario.email || '',
     senha: '',
-    role: props.usuario.role || '',
+    role: primaryRole,
     unidadeId: props.usuario.unidadeId || ''
   }
 }
@@ -204,15 +211,15 @@ const salvar = async () => {
     erro.value = ''
 
     if (props.usuario) {
-      // Editar
+      // Editar — envia nomeCompleto e roles no formato do backend
       await usuariosService.atualizar(props.usuario.id, {
-        nome: form.value.nome,
+        nomeCompleto: form.value.nomeCompleto,
         email: form.value.email || null,
         role: form.value.role,
         unidadeId: form.value.unidadeId || null
       })
     } else {
-      // Criar
+      // Criar — service faz o mapeamento para username/nomeCompleto/roles
       await usuariosService.criar(form.value)
     }
 

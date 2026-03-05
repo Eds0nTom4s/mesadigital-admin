@@ -560,7 +560,7 @@ const abrirModalRecarregar = () => {
   if (fundoConsumo.value?.id) {
     console.log('[ModalNovoPedido] Redirecionando para detalhes do fundo:', fundoConsumo.value.id)
     emit('fechar')
-    router.push({ name: 'FundoDetalhe', params: { id: fundoConsumo.value.id } })
+    router.push({ name: 'fundo-detalhe', params: { id: fundoConsumo.value.id } })
   } else {
     notificationStore.erro('Fundo não encontrado')
   }

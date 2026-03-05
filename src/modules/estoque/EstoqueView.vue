@@ -1,95 +1,105 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import ProdutoCard from '@/components/shared/ProdutoCard.vue'
+import produtosService from '@/services/produtosService'
+import { useNotificationStore } from '@/store/notifications'
+import { useCurrency } from '@/utils/currency'
 
 /**
- * EstoqueView - Visualização de estoque de produtos
- * 
- * AGUARDANDO IMPLEMENTAÇÃO NO BACKEND
- * Backend não possui endpoints de produtos/estoque ainda
- * Esta view será implementada quando o backend disponibilizar:
- * - GET /api/produtos
- * - GET /api/estoque
+ * EstoqueView — Visualização de estoque de produtos
+ *
+ * Conectado ao backend via GET /api/produtos.
+ * Níveis de estoque (OK/BAIXO/ESGOTADO) são derivados de produto.ativo;
+ * o módulo de gestão de estoque completo será implementado quando o
+ * backend disponibilizar GET /api/estoque.
  */
 
+const notificationStore = useNotificationStore()
+const { formatCurrency } = useCurrency()
+
 const produtos = ref([])
-const estoque = ref([])
 const loading = ref(false)
-const error = ref('Funcionalidade de estoque ainda não disponível no backend')
 
 // Filtros
 const categoriaFiltro = ref('TODAS')
 const statusFiltro = ref('TODOS')
 const busca = ref('')
 
-// Carrega dados via API (quando backend disponibilizar)
 onMounted(async () => {
-  // TODO: Implementar quando backend tiver endpoints de produtos
-  console.warn('Backend precisa implementar GET /api/produtos e GET /api/estoque')
+  await carregarProdutos()
 })
 
-// Combina produtos com estoque
-const produtosComEstoque = computed(() => {
-  return produtos.value.map(produto => {
-    const estoqueItem = estoque.value.find(e => e.produtoId === produto.id)
-    return {
-      ...produto,
-      estoque: estoqueItem
-    }
-  })
-})
+const carregarProdutos = async () => {
+  try {
+    loading.value = true
+    const response = await produtosService.getAll()
+    produtos.value = response.data || response || []
+  } catch (error) {
+    console.error('[EstoqueView] Erro ao carregar produtos:', error)
+    notificationStore.erro('Erro ao carregar produtos')
+  } finally {
+    loading.value = false
+  }
+}
+
+// Derive stock status from product availability
+const getStatusEstoque = (produto) => {
+  if (!produto.ativo) return 'ESGOTADO'
+  if (produto.disponivel === false) return 'BAIXO'
+  return 'OK'
+}
 
 // Produtos filtrados
 const produtosFiltrados = computed(() => {
-  return produtosComEstoque.value.filter(produto => {
-    // Filtro de categoria
-    if (categoriaFiltro.value !== 'TODAS' && produto.categoria !== categoriaFiltro.value) {
-      return false
-    }
-    
-    // Filtro de status de estoque
-    if (statusFiltro.value !== 'TODOS' && produto.estoque?.status !== statusFiltro.value) {
-      return false
-    }
-    
-    // Busca por nome
-    if (busca.value && !produto.nome.toLowerCase().includes(busca.value.toLowerCase())) {
-      return false
-    }
-    
+  return produtos.value.filter(produto => {
+    if (categoriaFiltro.value !== 'TODAS' && produto.categoria !== categoriaFiltro.value) return false
+    const status = getStatusEstoque(produto)
+    if (statusFiltro.value !== 'TODOS' && status !== statusFiltro.value) return false
+    if (busca.value && !produto.nome.toLowerCase().includes(busca.value.toLowerCase())) return false
     return true
   })
 })
 
 // Categorias disponíveis
 const categorias = computed(() => {
-  const cats = new Set(produtos.value.map(p => p.categoria))
+  const cats = new Set(produtos.value.map(p => p.categoria).filter(Boolean))
   return ['TODAS', ...Array.from(cats)]
 })
 
 // Estatísticas
 const estatisticas = computed(() => {
   return {
-    total: produtosComEstoque.value.length,
-    ok: produtosComEstoque.value.filter(p => p.estoque?.status === 'OK').length,
-    baixo: produtosComEstoque.value.filter(p => p.estoque?.status === 'BAIXO').length,
-    esgotado: produtosComEstoque.value.filter(p => p.estoque?.status === 'ESGOTADO').length
+    total: produtos.value.length,
+    ok: produtos.value.filter(p => getStatusEstoque(p) === 'OK').length,
+    baixo: produtos.value.filter(p => getStatusEstoque(p) === 'BAIXO').length,
+    esgotado: produtos.value.filter(p => getStatusEstoque(p) === 'ESGOTADO').length
   }
 })
 
 // Labels
 const categoriaLabels = {
   TODAS: 'Todas as Categorias',
-  COMIDAS: 'Comidas',
-  BEBIDAS: 'Bebidas',
-  FAST_FOOD: 'Fast Food'
+  ENTRADA: 'Entrada',
+  PRATO_PRINCIPAL: 'Prato Principal',
+  ACOMPANHAMENTO: 'Acompanhamento',
+  SOBREMESA: 'Sobremesa',
+  BEBIDA_ALCOOLICA: 'Bebida Alcoólica',
+  BEBIDA_NAO_ALCOOLICA: 'Bebida Não Alcoólica',
+  LANCHE: 'Lanche',
+  PIZZA: 'Pizza',
+  OUTROS: 'Outros'
 }
 
 const statusLabels = {
   TODOS: 'Todos os Status',
   OK: 'Disponível',
-  BAIXO: 'Estoque Baixo',
-  ESGOTADO: 'Esgotado'
+  BAIXO: 'Indisponível',
+  ESGOTADO: 'Inativo'
+}
+
+const statusColors = {
+  OK: 'text-success',
+  BAIXO: 'text-warning',
+  ESGOTADO: 'text-error'
 }
 </script>
 
@@ -200,12 +210,28 @@ const statusLabels = {
 
     <!-- Grid de Produtos -->
     <div v-else-if="produtosFiltrados.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-      <ProdutoCard 
-        v-for="produto in produtosFiltrados" 
-        :key="produto.id"
-        :produto="produto"
-        :estoque="produto.estoque"
-      />
+      <div v-for="produto in produtosFiltrados" :key="produto.id" class="card">
+        <div class="flex items-start justify-between mb-4">
+          <div>
+            <h3 class="text-base font-semibold text-text-primary">{{ produto.nome }}</h3>
+            <p class="text-sm text-text-secondary mt-0.5">{{ categoriaLabels[produto.categoria] || produto.categoria }}</p>
+          </div>
+          <span v-if="produto.ativo" class="badge-success text-xs">Ativo</span>
+          <span v-else class="badge-secondary text-xs">Inativo</span>
+        </div>
+        <div class="space-y-2">
+          <div class="flex items-center justify-between p-2.5 bg-background rounded-lg">
+            <span class="text-sm text-text-secondary">Preço</span>
+            <span class="text-base font-bold text-primary">{{ formatCurrency(produto.preco) }}</span>
+          </div>
+          <div class="flex items-center justify-between p-2.5 bg-background rounded-lg">
+            <span class="text-sm text-text-secondary">Status</span>
+            <span class="text-sm font-medium" :class="statusColors[getStatusEstoque(produto)]">
+              {{ statusLabels[getStatusEstoque(produto)] }}
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Nenhum resultado -->
@@ -217,16 +243,17 @@ const statusLabels = {
       <p class="text-text-secondary">Ajuste os filtros ou tente uma busca diferente</p>
     </div>
 
-    <!-- Aviso de Somente Leitura -->
+    <!-- Nota informativa -->
     <div class="card bg-info/5 border border-info/20">
       <div class="flex items-start space-x-3">
         <svg class="w-6 h-6 text-info flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
         </svg>
         <div>
-          <h4 class="font-semibold text-info mb-1">Modo Visualização</h4>
+          <h4 class="font-semibold text-info mb-1">Disponibilidade Derivada</h4>
           <p class="text-sm text-text-secondary">
-            Esta tela exibe apenas dados de estoque. A gestão completa (adicionar, editar, remover) será implementada com integração ao backend.
+            Os status de estoque são derivados dos campos <strong>ativo</strong> e <strong>disponível</strong> do cadastro de produtos.
+            Um módulo de controle de estoque com quantidades e mínimos será adicionado futuramente.
           </p>
         </div>
       </div>

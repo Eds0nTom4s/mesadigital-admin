@@ -17,10 +17,10 @@
         <div class="bg-background rounded-lg p-4">
           <div class="flex items-center gap-3 mb-2">
             <div class="w-10 h-10 bg-primary rounded-full flex items-center justify-center">
-              <span class="text-white text-sm font-semibold">{{ getInitials(usuario.nome) }}</span>
+              <span class="text-white text-sm font-semibold">{{ getInitials(usuario.nomeCompleto || usuario.username) }}</span>
             </div>
             <div>
-              <p class="font-medium text-text-primary">{{ usuario.nome }}</p>
+              <p class="font-medium text-text-primary">{{ usuario.nomeCompleto || usuario.username }}</p>
               <p class="text-sm text-text-secondary">{{ usuario.telefone }}</p>
             </div>
           </div>

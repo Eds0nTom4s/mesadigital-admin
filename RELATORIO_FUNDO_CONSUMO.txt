@@ -1,0 +1,272 @@
+================================================================================
+  RELATÓRIO COMPLETO — MÓDULO FUNDO DE CONSUMO (PRÉ-PAGO)
+  Painel Administrativo — Frontend Vue 3
+  Data: 03/03/2026
+================================================================================
+
+Este documento descreve o estado actual da implementação do módulo Fundo de
+Consumo no Painel Administrativo, para conciliação com a equipa do backend.
+
+────────────────────────────────────────────────────────────────────────────────
+SECÇÃO 1 — VISÃO GERAL DO MÓDULO
+────────────────────────────────────────────────────────────────────────────────
+
+O Fundo de Consumo é uma carteira digital pré-paga associada a um cliente.
+O frontend suporta dois fluxos distintos:
+
+  FLUXO IDENTIFICADO
+    O cliente está registado no sistema com um ID numérico.
+    O fundo é criado/consultado via clienteId.
+    Usado pelo GERENTE para gerir carteiras de clientes frequentes.
+
+  FLUXO ANÓNIMO
+    O cliente não identificado escaneia um QR Code de mesa.
+    O fundo é criado/consultado via tokenPortador (UUID do QR da sessão).
+    Usado pelo ATENDENTE para sessões sem registo de cliente.
+
+O débito do fundo ocorre automaticamente no momento da criação do pedido
+quando tipoPagamento = "PRE_PAGO". O backend processa o débito sem intervenção
+adicional do frontend.
+
+────────────────────────────────────────────────────────────────────────────────
+SECÇÃO 2 — FICHEIROS IMPLEMENTADOS
+────────────────────────────────────────────────────────────────────────────────
+
+  src/services/fundoConsumoService.js     → Camada de API (service layer)
+  src/modules/fundos/FundosView.vue       → Página principal de gestão
+  src/views/FundoDetalheView.vue          → Página de detalhe de um fundo
+  src/components/shared/FundoCard.vue     → Card de fundo na listagem
+  src/components/fundos/ModalCriarFundo.vue    → Modal de criação
+  src/components/fundos/ModalRecarregarFundo.vue → Modal de recarga
+
+  Rota configurada em src/router/index.js:
+    /admin/fundos           → FundosView       (name: 'Fundos')
+    /admin/fundos/:id       → FundoDetalheView (name: 'fundo-detalhe')
+
+────────────────────────────────────────────────────────────────────────────────
+SECÇÃO 3 — ENDPOINTS IMPLEMENTADOS NO FRONTEND
+────────────────────────────────────────────────────────────────────────────────
+
+Todos os endpoints seguem o contrato do ALINHAMENTO_FRONTEND_GERAL.txt §8.10.
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Método  │  Endpoint                          │  Role  │  Função             │
+├──────────┼────────────────────────────────────┼────────┼─────────────────────┤
+│  POST    │  /fundos/cliente/{clienteId}        │  GER   │  criarFundoParaCliente │
+│  POST    │  /fundos/anonimo/{token}            │  ATD   │  criarFundoAnonimo  │
+│  GET     │  /fundos/{token}                   │  ATD   │  consultarFundo     │
+│  GET     │  /fundos/{token}/saldo             │  ATD   │  consultarSaldo     │
+│  GET     │  /fundos/cliente/{clienteId}       │  GER   │  buscarFundoPorCliente │
+│  POST    │  /fundos/{token}/recarregar        │  GER   │  recarregarFundo    │
+│  GET     │  /fundos/{token}/historico         │  GER   │  buscarHistorico    │
+│  DELETE  │  /fundos/{token}                   │  ADM   │  encerrarFundo      │
+└──────────┴────────────────────────────────────┴────────┴─────────────────────┘
+
+  NOTA: NÃO existe endpoint de listagem completa de fundos (GET /fundos).
+  A lista na UI começa vazia; os fundos são adicionados individualmente
+  via busca por clienteId.
+
+────────────────────────────────────────────────────────────────────────────────
+SECÇÃO 4 — DTOs UTILIZADOS
+────────────────────────────────────────────────────────────────────────────────
+
+4.1  FundoConsumoResponse (resposta de criação e consulta)
+──────────────────────────────────────────────────────────
+  Campos lidos pelo frontend:
+    id              → long,    identificador interno
+    saldoAtual      → decimal, saldo disponível em AOA
+    ativo           → boolean, true = activo, false = encerrado
+    clienteId       → long,    presente no fluxo identificado (pode ser null)
+    tokenPortador   → string,  UUID — presente no fluxo anónimo (pode ser null)
+    createdAt       → string,  ISO datetime
+    updatedAt       → string,  ISO datetime
+
+  IMPORTANTE:
+    O frontend usa 'ativo' (boolean) para distinguir fundos activos/encerrados.
+    O campo 'tokenPortador' é a chave usada para operações de recarga e histórico.
+    Se tokenPortador for null (fundo identificado), a recarga directa no balcão
+    não está disponível — o operador vê aviso na UI.
+
+4.2  Body de criação (POST /fundos/cliente/{clienteId})
+───────────────────────────────────────────────────────
+  { "saldoInicial": 0.00 }
+  O valor é enviado em AOA decimal (não em centavos).
+
+  NOTA INTERNA: O frontend faz o cálculo saldoInicialDecimal * 100 para
+  mostrar em "centavos" na UI (artefacto de UI), mas envia o valor decimal
+  ao backend. PEDIR CONFIRMAÇÃO AO BACKEND sobre a unidade esperada.
+
+4.3  Body de recarga (POST /fundos/{token}/recarregar)
+──────────────────────────────────────────────────────
+  { "valor": 5000.00, "observacoes": "Recarga balcão" }
+
+  O campo chama-se 'observacoes' (confirmado pela equipa do backend em
+  RESPOSTA_RELATORIO_FRONTEND.txt, Correcção 2).
+
+4.4  TransacaoFundoResponse (resposta de recarga e histórico)
+─────────────────────────────────────────────────────────────
+  O frontend ainda não tem clareza sobre os campos exactos deste DTO.
+  É usado no modal de detalhe do fundo para mostrar o histórico.
+  Campos usados tentativamente: id, tipo, valor, observacoes, createdAt.
+  → PEDIR AO BACKEND a estrutura completa de TransacaoFundoResponse.
+
+────────────────────────────────────────────────────────────────────────────────
+SECÇÃO 5 — FLUXOS IMPLEMENTADOS NA UI
+────────────────────────────────────────────────────────────────────────────────
+
+5.1  Buscar fundo de um cliente
+───────────────────────────────
+  1. Operador insere o ID numérico do cliente no campo de busca
+  2. Frontend chama GET /fundos/cliente/{clienteId}
+  3. Se 200: fundo adicionado à lista local; mensagem de sucesso
+  4. Se 404: aviso "Cliente não possui fundo de consumo cadastrado" (não é erro)
+  5. Se outro erro: mensagem amigável + stacktrace no console
+
+5.2  Criar fundo para cliente
+──────────────────────────────
+  1. Operador clica "Criar Fundo" → modal abre
+  2. Preenche clienteId e saldoInicial (≥ mínimo)
+  3. Clica "Criar Fundo" → diálogo de confirmação aparece
+  4. Confirma → POST /fundos/cliente/{clienteId} com { saldoInicial }
+  5. Se 200: fundo adicionado à lista; modal fecha
+  6. Se erro: mensagem amigável; modal permanece aberto
+
+5.3  Recarregar fundo (recarga directa de balcão)
+──────────────────────────────────────────────────
+  Precondição: o fundo deve ter tokenPortador (não null).
+  Fundos identificados sem token não suportam recarga directa nesta UI.
+
+  1. Operador clica "Recarregar" num FundoCard → modal de recarga abre
+  2. Preenche valor e método de pagamento (GPO ou REF)
+  3. Clica "Confirmar Recarga"
+  4. Frontend chama POST /fundos/{tokenPortador}/recarregar
+     Body: { valor, observacoes: "Recarga balcão — GPO" }
+  5. Se 200: saldo actualizado via GET /fundos/{token}; modal fecha
+  6. Se erro: mensagem amigável
+
+  NOTA: O campo "Método de Pagamento" (GPO/REF) na UI é apenas informativo
+  para a nota de observacoes. A recarga directa de balcão não chama
+  POST /pagamentos/recarregar (AppyPay). Ver §8.11 para fluxo AppyPay.
+
+5.4  Encerrar fundo
+───────────────────
+  Implementado em FundoDetalheView.vue via DELETE /fundos/{token}.
+  Requer role ADMIN.
+
+5.5  Ver histórico de transações
+─────────────────────────────────
+  Implementado em FundoDetalheView.vue via GET /fundos/{token}/historico.
+  Paginação 0-based (page=0,1,2...).
+
+────────────────────────────────────────────────────────────────────────────────
+SECÇÃO 6 — FLUXO DE PEDIDO PRÉ-PAGO (INTEGRAÇÃO COM PEDIDOS)
+────────────────────────────────────────────────────────────────────────────────
+
+O débito do fundo está integrado no fluxo de criação de pedidos:
+
+  1. Atendente cria pedido com tipoPagamento = "PRE_PAGO"
+  2. Backend verifica se o cliente/sessão tem fundo activo com saldo suficiente
+  3. Se sim: pedido criado + débito automático
+  4. Se não: backend retorna 422 com mensagem de erro
+
+  O frontend (pedidosBalcaoService.js) envia:
+    POST /pedidos
+    Body: {
+      sessaoConsumoId: ...,
+      itens: [...],
+      tipoPagamento: "PRE_PAGO",
+      observacoes: ...
+    }
+
+  NOTA: O frontend NÃO verifica saldo antes de criar o pedido.
+  Confia no backend para rejeitar se saldo insuficiente.
+  O operador pode verificar saldo previamente via GET /fundos/{token}/saldo
+  se quiser informar o cliente antes de tentar.
+
+────────────────────────────────────────────────────────────────────────────────
+SECÇÃO 7 — FLUXO APPYPAY (RECARGA VIA GATEWAY DE PAGAMENTO)
+────────────────────────────────────────────────────────────────────────────────
+
+O frontend TEM UI para seleccionar o método AppyPay (GPO/REF) no modal de
+recarga, mas NÃO está ainda a chamar POST /pagamentos/recarregar.
+
+Estado actual: o modal envia a recarga directa via POST /fundos/{token}/recarregar
+independentemente do método seleccionado.
+
+Endpoints do módulo de pagamentos (§8.11) ainda NÃO integrados:
+  POST  /pagamentos/recarregar   → iniciar cobrança AppyPay
+  GET   /pagamentos/{id}         → consultar estado do pagamento
+  GET   /pagamentos/fundo/{id}   → histórico de pagamentos do fundo
+
+Body do POST /pagamentos/recarregar esperado pelo backend:
+  { "fundoToken": "...", "valor": 5000.00, "telefone": "+244..." }
+
+PONTO ABERTO: O frontend precisa de saber como o fluxo funciona:
+  a) Após POST /pagamentos/recarregar, o backend redireciona o utilizador?
+  b) O frontend deve fazer polling para confirmar o estado?
+  c) Existe WebSocket para notificação de pagamento confirmado?
+
+────────────────────────────────────────────────────────────────────────────────
+SECÇÃO 8 — LIMITAÇÕES E PONTOS ABERTOS
+────────────────────────────────────────────────────────────────────────────────
+
+8.1  Sem listagem completa de fundos
+  Não existe GET /fundos (listagem de todos os fundos).
+  A UI mostra apenas os fundos buscados manualmente pelo operador.
+  Os cards de estatísticas (Total em Fundos, Média por Fundo) calculam
+  apenas sobre os fundos que estão em memória local na sessão actual.
+  → PEDIR AO BACKEND: existe algum endpoint de listagem paginada de fundos?
+    Sugestão: GET /fundos?page=0&size=20&ativo=true
+
+8.2  Unidade de saldo (centavos vs decimal)
+  A documentação do backend mostra: "saldoAtual": 5000.00 (decimal, AOA).
+  O UI tem lógica interna de conversão centavos↔decimal que não é necessária
+  se o backend usa decimal directamente.
+  → CONFIRMAR: o backend espera e retorna valores em AOA decimal (ex: 5000.00)?
+    Ou em centavos inteiros (ex: 500000)?
+
+8.3  Recarrega de fundo identificado (sem tokenPortador)
+  Se um fundo foi criado via POST /fundos/cliente/{clienteId} e não tem
+  tokenPortador, a UI não consegue recarregar directamente.
+  → PERGUNTAR: é possível recarregar um fundo identificado sem tokenPortador?
+    Se sim, qual o endpoint — continua a ser POST /fundos/{token}/recarregar
+    ou existe POST /fundos/cliente/{clienteId}/recarregar?
+
+8.4  TransacaoFundoResponse — campos desconhecidos
+  O DTO de resposta da recarga e do histórico usa campos ainda não confirmados.
+  → PEDIR AO BACKEND a estrutura completa:
+    { id, tipo, valor, fundoId, fundoToken, observacoes, createdAt, ... }
+
+8.5  Fluxo AppyPay não integrado
+  Ver §7 acima. O frontend tem a UI mas o serviço ainda aponta para o
+  endpoint de recarga directa. Aguarda clarificação do fluxo AppyPay.
+
+8.6  Campo 'tipo' do fundo não documentado
+  No filtro da UI existe: UNIDADE_CONSUMO, QR_CONSUMO, EVENTO.
+  O FundoConsumoResponse do backend não documenta um campo 'tipo'.
+  → CONFIRMAR: existe campo 'tipo' no FundoConsumoResponse? Quais os valores?
+
+────────────────────────────────────────────────────────────────────────────────
+SECÇÃO 9 — PERGUNTAS DIRECTAS AO BACKEND
+────────────────────────────────────────────────────────────────────────────────
+
+  [P1] O campo 'saldoAtual' e 'saldoInicial' são em AOA decimal (5000.00)
+       ou em centavos inteiros (500000)?
+
+  [P2] Existe campo 'tipo' no FundoConsumoResponse? Se sim, quais os valores?
+
+  [P3] Como recarregar um fundo identificado (clienteId) que não tem tokenPortador?
+
+  [P4] Estrutura completa do TransacaoFundoResponse (campos do histórico)?
+
+  [P5] Existe endpoint de listagem paginada de fundos? Ex: GET /fundos?ativo=true
+
+  [P6] Fluxo AppyPay: após POST /pagamentos/recarregar, como o frontend sabe
+       que o pagamento foi confirmado? Polling, WebSocket ou redirect?
+
+  [P7] O campo 'telefone' no body de POST /pagamentos/recarregar é o telefone
+       do cliente (para o AppyPay contactar) ou do operador?
+
+================================================================================
+FIM DO RELATÓRIO
+================================================================================

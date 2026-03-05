@@ -1,8 +1,9 @@
 <template>
   <div 
-    @click="$emit('click')"
+    @click="mesa.ativa !== false && $emit('click')"
     :class="[
-      'border-2 rounded-lg p-4 cursor-pointer hover:shadow-md transition-all',
+      'border-2 rounded-lg p-4 transition-all',
+      mesa.ativa !== false ? 'cursor-pointer hover:shadow-md' : 'cursor-default opacity-60',
       borderClass,
       'relative overflow-hidden'
     ]"
@@ -27,12 +28,12 @@
 
     <!-- Cliente (se ocupada) -->
     <div v-if="mesa.status === 'OCUPADA' || mesa.status === 'AGUARDANDO_PAGAMENTO'" class="space-y-2">
-      <div v-if="clienteNome" class="text-xs text-text-secondary truncate">
+      <div class="text-xs text-text-secondary truncate">
         <div class="flex items-center">
           <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
           </svg>
-          {{ clienteNome }}
+          {{ clienteNome || 'Anónimo' }}
         </div>
         <div v-if="clienteTelefone" class="flex items-center mt-1">
           <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -107,9 +108,10 @@ defineEmits(['click'])
 
 // Classes de borda baseadas no status
 const borderClass = computed(() => {
+  if (props.mesa.ativa === false) return 'border-gray-300 bg-gray-100'
   const classes = {
-    'DISPONIVEL': 'border-info bg-info/5',
-    'OCUPADA': 'border-success bg-success/5',
+    'DISPONIVEL': 'border-success bg-success/5',
+    'OCUPADA': 'border-error bg-error/5',
     'AGUARDANDO_PAGAMENTO': 'border-warning bg-warning/5',
     'ENCERRADA': 'border-border bg-background',
     'FINALIZADA': 'border-border bg-background'  // legacy alias
@@ -119,9 +121,10 @@ const borderClass = computed(() => {
 
 // Badge de status
 const statusBadge = computed(() => {
+  if (props.mesa.ativa === false) return 'bg-gray-400 text-white'
   const badges = {
-    'DISPONIVEL': 'bg-info text-white',
-    'OCUPADA': 'bg-success text-white',
+    'DISPONIVEL': 'bg-success text-white',
+    'OCUPADA': 'bg-error text-white',
     'AGUARDANDO_PAGAMENTO': 'bg-warning text-white',
     'ENCERRADA': 'bg-gray-500 text-white',
     'FINALIZADA': 'bg-gray-500 text-white'  // legacy alias
@@ -131,6 +134,7 @@ const statusBadge = computed(() => {
 
 // Label do status
 const statusLabel = computed(() => {
+  if (props.mesa.ativa === false) return 'Inactiva'
   const labels = {
     'DISPONIVEL': 'Disponível',
     'OCUPADA': 'Ocupada',

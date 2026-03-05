@@ -2,7 +2,7 @@
   <div class="modal-overlay" @click.self="$emit('fechar')">
     <div class="modal-dialog">
       <div class="modal-header">
-        <h3>Histórico de Pedidos</h3>
+        <h3>Histórico de Pedidos{{ referencia ? ' — ' + referencia : '' }}</h3>
         <button @click="$emit('fechar')" class="btn-close">✕</button>
       </div>
 
@@ -42,7 +42,7 @@
             <div class="pedido-header">
               <div>
                 <h4>Pedido #{{ pedido.numero || pedido.id }}</h4>
-                <p class="data">{{ formatData(pedido.criadoEm) }}</p>
+                <p class="data">{{ formatData(pedido.createdAt) }}</p>
               </div>
               <div class="badges">
                 <span :class="['badge', 'badge-status', getBadgeStatusClasse(pedido.status)]">
@@ -60,8 +60,8 @@
                 <span class="value">{{ formatCurrency(pedido.total) }}</span>
               </div>
               <div class="info-item">
-                <span class="label">SubPedidos:</span>
-                <span class="value">{{ pedido.subPedidos?.length || 0 }}</span>
+                <span class="label">Itens:</span>
+                <span class="value">{{ pedido.itens?.length || 0 }}</span>
               </div>
             </div>
 
@@ -75,7 +75,7 @@
                   class="subpedido-item"
                 >
                   <div class="subpedido-header">
-                    <span>{{ iconeCozinha(subPedido.cozinha?.tipo) }} {{ subPedido.cozinha?.nome }}</span>
+                    <span>{{ iconeCozinha(subPedido.nomeCozinha) }} {{ subPedido.nomeCozinha }}</span>
                     <span :class="['badge-subpedido', getBadgeSubPedidoClasse(subPedido.status)]">
                       {{ subPedido.status }}
                     </span>
@@ -113,11 +113,12 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useCurrency } from '@/utils/currency'
-import pedidosBalcaoService from '@/services/pedidosBalcaoService'
+import { pedidoApi } from '@/api/pedido.api'
 import { useNotificationStore } from '@/store/notifications'
 
 const props = defineProps({
-  unidadeId: [String, Number]
+  sessaoConsumoId: [String, Number],
+  referencia: String
 })
 
 const emit = defineEmits(['fechar'])
@@ -146,13 +147,17 @@ const pedidosFiltrados = computed(() => {
 })
 
 const carregarHistorico = async () => {
+  if (!props.sessaoConsumoId) {
+    pedidos.value = []
+    return
+  }
   loading.value = true
   try {
-    // Endpoint fictício - adaptar quando backend implementar
-    const response = await pedidosBalcaoService.getHistorico(props.unidadeId)
-    pedidos.value = response.data || []
+    const response = await pedidoApi.getBySessaoConsumo(props.sessaoConsumoId)
+    const raw = response.data || response
+    pedidos.value = Array.isArray(raw) ? raw : raw.data || []
   } catch (error) {
-    console.error('[ModalHistorico] Erro:', error)
+    console.error('[ModalHistorico] Erro ao carregar histórico:', error)
     notificationStore.erro('Erro ao carregar histórico de pedidos')
     pedidos.value = []
   } finally {

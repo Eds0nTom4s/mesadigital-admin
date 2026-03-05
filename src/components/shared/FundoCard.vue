@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from 'vue'
 import { useCurrency } from '@/utils/currency'
 import SaldoBadge from '@/components/shared/SaldoBadge.vue'
 
@@ -20,11 +21,27 @@ const props = defineProps({
 
 const emit = defineEmits(['verDetalhes', 'recarregar'])
 
-// Mapeia tipos de fundo para labels
+/**
+ * FundoConsumoResponse não tem campo 'tipo'.
+ * Derivar: clienteId != null → IDENTIFICADO | clienteId == null → ANONIMO
+ */
+const tipoDerivado = computed(() => {
+  return props.fundo.clienteId != null ? 'IDENTIFICADO' : 'ANONIMO'
+})
+
+// Labels de tipo baseados no tipo derivado
 const tipoLabels = {
-  UNIDADE_CONSUMO: 'Unidade de Consumo',
-  QR_CONSUMO: 'QR Code',
-  EVENTO: 'Evento'
+  IDENTIFICADO: 'Cliente Identificado',
+  ANONIMO: 'Anônimo (QR Code)'
+}
+
+// Ícone baseado no tipo derivado
+const getTipoIcon = (tipo) => {
+  const icons = {
+    IDENTIFICADO: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z',
+    ANONIMO: 'M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z'
+  }
+  return icons[tipo] || icons.ANONIMO
 }
 
 // Retorna configuração do status baseado no campo 'ativo' (API)
@@ -46,16 +63,6 @@ const formatarData = (dataISO) => {
     minute: '2-digit'
   })
 }
-
-// Ícone baseado no tipo
-const getTipoIcon = (tipo) => {
-  const icons = {
-    MESA: 'M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z',
-    QR_CONSUMO: 'M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z',
-    EVENTO: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z'
-  }
-  return icons[tipo] || icons.MESA
-}
 </script>
 
 <template>
@@ -64,12 +71,12 @@ const getTipoIcon = (tipo) => {
       <div class="flex items-center space-x-3">
         <div class="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
           <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="getTipoIcon(fundo.tipo)"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="getTipoIcon(tipoDerivado)"/>
           </svg>
         </div>
         <div>
           <h3 class="text-lg font-semibold text-text-primary">{{ fundo.identificador }}</h3>
-          <p class="text-sm text-text-secondary">{{ tipoLabels[fundo.tipo] }} • #{{ fundo.id }}</p>
+          <p class="text-sm text-text-secondary">{{ tipoLabels[tipoDerivado] }} • #{{ fundo.id }}</p>
         </div>
       </div>
       <span :class="getStatusConfig(fundo.ativo).class">

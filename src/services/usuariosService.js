@@ -68,7 +68,7 @@ const usuariosService = {
       
       const usuario = response.data?.data || response.data
       
-      console.log('[UsuariosService] Usuário encontrado:', usuario.nome)
+      console.log('[UsuariosService] Usuário encontrado:', usuario.nomeCompleto || usuario.username)
       return usuario
     } catch (error) {
       console.error('[UsuariosService] Erro ao buscar usuário:', error)
@@ -79,24 +79,38 @@ const usuariosService = {
   /**
    * Cria novo usuário
    * @param {Object} dados - Dados do usuário
-   * @param {string} dados.nome - Nome completo
-   * @param {string} dados.email - Email (opcional)
-   * @param {string} dados.telefone - Telefone (obrigatório para login)
+   * @param {string} dados.username - Login ID (usa telefone se omitido)
+   * @param {string} dados.nomeCompleto - Nome de exibição (também aceita dados.nome por compatibilidade)
+   * @param {string} dados.email - Email (OBRIGATÓRIO pelo backend)
+   * @param {string} dados.telefone - Telefone
    * @param {string} dados.senha - Senha inicial
-   * @param {string} dados.role - ADMIN | GERENTE | ATENDENTE | COZINHA
+   * @param {string} dados.role - ADMIN | GERENTE | ATENDENTE | COZINHA (mapeado para roles: ['ROLE_...'])
    * @param {number} dados.unidadeId - ID da unidade (opcional para ADMIN)
    * @returns {Promise<Object>} Usuário criado
    */
   async criar(dados) {
     try {
-      console.log('[UsuariosService] Criando usuário:', dados.nome)
+      console.log('[UsuariosService] Criando usuário:', dados.nomeCompleto || dados.nome || dados.username)
       
       // Validações básicas
-      if (!dados.nome || !dados.telefone || !dados.senha || !dados.role) {
-        throw new Error('Campos obrigatórios: nome, telefone, senha e role')
+      if ((!dados.nome && !dados.nomeCompleto && !dados.username) || !dados.senha || (!dados.role && !dados.roles)) {
+        throw new Error('Campos obrigatórios: nome, senha e perfil de acesso')
       }
-      
-      const response = await api.post('/usuarios', dados)
+
+      // Mapear payload para o formato esperado pelo backend (CriarUsuarioRequest)
+      // username = login credential (usa telefone se não fornecido)
+      // nomeCompleto = nome de exibição (opcional)
+      // roles = array com prefixo ROLE_ (obrigatório)
+      const payload = {
+        username: dados.username || dados.telefone || '',
+        senha: dados.senha,
+        email: dados.email || null,
+        nomeCompleto: dados.nomeCompleto || dados.nome || null,
+        telefone: dados.telefone || null,
+        roles: dados.roles || (dados.role ? [`ROLE_${dados.role.toUpperCase()}`] : [])
+      }
+
+      const response = await api.post('/usuarios', payload)
       
       const usuario = response.data?.data || response.data
       
@@ -126,8 +140,18 @@ const usuariosService = {
   async atualizar(id, dados) {
     try {
       console.log('[UsuariosService] Atualizando usuário:', id)
-      
-      const response = await api.put(`/usuarios/${id}`, dados)
+
+      // Mapear para o formato do backend (atualização não aceita username nem senha)
+      const payload = {
+        email: dados.email || null,
+        nomeCompleto: dados.nomeCompleto || dados.nome || null,
+        telefone: dados.telefone || null,
+        roles: dados.roles || (dados.role ? [`ROLE_${dados.role.toUpperCase()}`] : undefined)
+      }
+      // Remover chaves undefined para não sobrescrever valores no backend
+      Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k])
+
+      const response = await api.put(`/usuarios/${id}`, payload)
       
       const usuario = response.data?.data || response.data
       

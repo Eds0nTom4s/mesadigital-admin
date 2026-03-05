@@ -38,7 +38,7 @@ export const subpedidosService = {
    * PUT /api/subpedidos/{id}/assumir
    */
   async assumir(id) {
-    const response = await api.put(`/subpedidos/${id}/assumir`)
+    const response = await api.post(`/subpedidos/${id}/assumir`)
     return response.data
   },
 
@@ -47,7 +47,7 @@ export const subpedidosService = {
    * PUT /api/subpedidos/{id}/marcar-pronto
    */
   async marcarPronto(id) {
-    const response = await api.put(`/subpedidos/${id}/marcar-pronto`)
+    const response = await api.post(`/subpedidos/${id}/marcar-pronto`)
     return response.data
   },
 
@@ -56,7 +56,7 @@ export const subpedidosService = {
    * PUT /api/subpedidos/{id}/marcar-entregue
    */
   async marcarEntregue(id) {
-    const response = await api.put(`/subpedidos/${id}/marcar-entregue`)
+    const response = await api.post(`/subpedidos/${id}/marcar-entregue`)
     return response.data
   },
 
@@ -65,7 +65,7 @@ export const subpedidosService = {
    * PUT /api/subpedidos/{id}/cancelar?motivo={motivo}
    */
   async cancelar(id, motivo) {
-    const response = await api.put(`/subpedidos/${id}/cancelar`, null, {
+    const response = await api.post(`/subpedidos/${id}/cancelar`, null, {
       params: { motivo }
     })
     return response.data

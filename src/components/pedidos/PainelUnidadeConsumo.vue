@@ -119,9 +119,9 @@
            class="card">
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center space-x-3">
-            <span class="text-2xl">{{ iconeCozinha(subPedido.cozinha?.tipo) }}</span>
+            <span class="text-2xl">{{ iconeCozinha(subPedido.nomeCozinha) }}</span>
             <div>
-              <h5 class="font-bold text-text-primary">{{ subPedido.cozinha?.nome || 'Cozinha' }}</h5>
+              <h5 class="font-bold text-text-primary">{{ subPedido.nomeCozinha || 'Cozinha' }}</h5>
               <p class="text-sm text-text-secondary">{{ subPedido.numero }}</p>
             </div>
           </div>
@@ -243,17 +243,16 @@ const iconeTipoUnidade = computed(() => {
   return icones[props.unidade.tipo] || '🍽️'
 })
 
-// Ícones por tipo de cozinha
-const iconeCozinha = (tipoCozinha) => {
-  const icones = {
-    'PRINCIPAL': '🍳',
-    'GRILL': '🔥',
-    'SUSHI': '🍣',
-    'BAR': '🍹',
-    'CONFEITARIA': '🍰',
-    'PIZZARIA': '🍕'
-  }
-  return icones[tipoCozinha] || '🍳'
+// Ícones por nome de cozinha (nomeCozinha é String no SubPedidoResponse, sem cozinha.tipo)
+const iconeCozinha = (nome) => {
+  if (!nome) return '🍳'
+  const upper = nome.toUpperCase()
+  if (upper.includes('BAR')) return '🍹'
+  if (upper.includes('SUSHI')) return '🍣'
+  if (upper.includes('GRILL') || upper.includes('CHURRASQ')) return '🔥'
+  if (upper.includes('PIZZA')) return '🍕'
+  if (upper.includes('CONFEIT') || upper.includes('DOCE')) return '🍰'
+  return '🍳'
 }
 
 // Badges de status

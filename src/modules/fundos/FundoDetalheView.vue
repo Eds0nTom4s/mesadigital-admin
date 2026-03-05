@@ -79,10 +79,18 @@ const totalEstornos = computed(() => {
 })
 
 // Mapas de labels
+/**
+ * FundoConsumoResponse não tem campo 'tipo'.
+ * Derivar: clienteId != null → IDENTIFICADO | null → ANONIMO
+ */
+const tipoFundoDerivado = computed(() => {
+  if (!fundo.value) return 'ANONIMO'
+  return fundo.value.clienteId != null ? 'IDENTIFICADO' : 'ANONIMO'
+})
+
 const tipoLabels = {
-  UNIDADE_CONSUMO: 'Unidade de Consumo',
-  QR_CONSUMO: 'QR Code',
-  EVENTO: 'Evento'
+  IDENTIFICADO: 'Cliente Identificado',
+  ANONIMO: 'Anônimo (QR Code)'
 }
 
 const statusConfig = {
@@ -168,7 +176,7 @@ const exportarExtrato = () => {
           </button>
           <div>
             <h2 class="text-2xl font-bold text-text-primary">{{ fundo.identificador }}</h2>
-            <p class="text-text-secondary mt-1">{{ tipoLabels[fundo.tipo] }} • Fundo #{{ fundo.id }}</p>
+            <p class="text-text-secondary mt-1">{{ tipoLabels[tipoFundoDerivado] }} • Fundo #{{ fundo.id }}</p>
           </div>
         </div>
         <div class="flex items-center space-x-3">
@@ -247,7 +255,7 @@ const exportarExtrato = () => {
           </div>
           <div class="p-4 bg-background rounded-lg">
             <p class="text-sm text-text-secondary mb-1">Tipo</p>
-            <p class="text-base font-medium text-text-primary">{{ tipoLabels[fundo.tipo] }}</p>
+            <p class="text-base font-medium text-text-primary">{{ tipoLabels[tipoFundoDerivado] }}</p>
           </div>
           <div class="p-4 bg-background rounded-lg">
             <p class="text-sm text-text-secondary mb-1">Data de Criação</p>

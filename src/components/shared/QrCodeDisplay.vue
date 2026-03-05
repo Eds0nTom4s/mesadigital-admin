@@ -17,15 +17,29 @@
     <div v-if="qrCode" class="space-y-4">
       <!-- QR Code Image (destaque visual) -->
       <div class="flex flex-col items-center bg-gradient-to-br from-gray-50 to-gray-100 p-8 rounded-xl border-2 border-dashed border-gray-300">
-        <img 
-          :src="imagemUrl" 
+        <!-- A carregar -->
+        <div v-if="imagemCarregando" class="w-[350px] h-[350px] flex items-center justify-center">
+          <svg class="animate-spin w-10 h-10 text-gray-400" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+          </svg>
+        </div>
+        <!-- Imagem carregada via Blob URL (inclui JWT no pedido) -->
+        <img
+          v-else-if="imagemBlobUrl"
+          :src="imagemBlobUrl"
           :alt="`QR Code ${qrCode.unidadeDeConsumoNome || ''}`"
-          loading="lazy"
           width="350"
           height="350"
           class="rounded-lg shadow-xl border-4 border-white"
-          @error="handleImageError"
         />
+        <!-- Erro ao carregar -->
+        <div v-else class="w-[350px] h-[350px] flex flex-col items-center justify-center bg-gray-100 rounded-lg border-2 border-dashed border-gray-300">
+          <svg class="w-12 h-12 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+          </svg>
+          <p class="text-sm text-gray-500">Imagem indisponível</p>
+        </div>
         <p class="text-center text-sm text-text-secondary mt-4 font-medium">
           📱 Escaneie com o celular para acessar o cardápio
         </p>
@@ -121,9 +135,9 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import { useAuthStore } from '@/store/auth'
-import qrcodeService from '@/services/qrcodeService'
+import api from '@/services/api'
 
 const props = defineProps({
   qrCode: {
@@ -140,9 +154,39 @@ const emit = defineEmits(['renovar', 'cancelar', 'gerar'])
 
 const authStore = useAuthStore()
 
-// URL da imagem (lazy loading)
-const imagemUrl = computed(() => {
-  return props.qrCode ? qrcodeService.getImagemUrl(props.qrCode.token) : ''
+// Blob URL da imagem (fetched via Axios para enviar o JWT no header)
+const imagemBlobUrl = ref(null)
+const imagemCarregando = ref(false)
+
+const carregarImagem = async (token) => {
+  // Revogar URL anterior para libertar memória
+  if (imagemBlobUrl.value) {
+    URL.revokeObjectURL(imagemBlobUrl.value)
+    imagemBlobUrl.value = null
+  }
+  if (!token) return
+
+  imagemCarregando.value = true
+  try {
+    const response = await api.get(`/qrcode/imagem/${token}`, { responseType: 'blob' })
+    imagemBlobUrl.value = URL.createObjectURL(response.data)
+  } catch (error) {
+    console.error('[QrCodeDisplay] Erro ao carregar imagem do QR Code:', error)
+    if (error?.stack) console.error(error.stack)
+    imagemBlobUrl.value = null
+  } finally {
+    imagemCarregando.value = false
+  }
+}
+
+watch(
+  () => props.qrCode?.token,
+  (token) => carregarImagem(token),
+  { immediate: true }
+)
+
+onUnmounted(() => {
+  if (imagemBlobUrl.value) URL.revokeObjectURL(imagemBlobUrl.value)
 })
 
 // Classe do status
@@ -180,12 +224,22 @@ const podeGerenciar = computed(() => {
   return authStore.isAdmin || authStore.isGerente
 })
 
-// Baixar para impressão
-const baixarParaImpressao = () => {
+// Baixar para impressão (usa Axios para enviar JWT no header)
+const baixarParaImpressao = async () => {
   if (!props.qrCode) return
-  
-  const filename = `qrcode-${props.qrCode.unidadeDeConsumoNome || props.qrCode.token}.png`
-  qrcodeService.baixarQrCode(props.qrCode.token, filename)
+  try {
+    const response = await api.get(`/qrcode/imagem/${props.qrCode.token}/print`, { responseType: 'blob' })
+    const url = URL.createObjectURL(response.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `qrcode-${props.qrCode.unidadeDeConsumoNome || props.qrCode.token}.png`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('[QrCodeDisplay] Erro ao baixar QR Code:', error)
+  }
 }
 
 // Confirmar cancelamento
@@ -193,11 +247,5 @@ const confirmarCancelar = () => {
   if (confirm('Deseja realmente cancelar este QR Code? Esta ação não pode ser desfeita.')) {
     emit('cancelar')
   }
-}
-
-// Tratar erro de imagem
-const handleImageError = (event) => {
-  console.error('[QrCodeDisplay] Erro ao carregar imagem do QR Code')
-  event.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="300"%3E%3Crect fill="%23f3f4f6" width="300" height="300"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" fill="%239ca3af" font-size="14"%3EErro ao carregar%3C/text%3E%3C/svg%3E'
 }
 </script>

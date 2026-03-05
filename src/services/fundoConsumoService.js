@@ -36,12 +36,12 @@ const fundoConsumoService = {
   /**
    * Criar fundo anónimo vinculado ao QR portador de uma SessaoConsumo
    * POST /api/fundos/anonimo/{token}  [ATD]
-   * Body: { saldoInicial: 0.00 }
+   * Sem body — cria fundo com saldo zero. Para adicionar saldo, usar recarregarFundo().
    * @param {string} tokenPortador - QR code da sessão anónima
    * @returns {Promise<FundoConsumoResponse>}
    */
-  async criarFundoAnonimo(tokenPortador, saldoInicial = 0) {
-    const response = await api.post(`/fundos/anonimo/${tokenPortador}`, { saldoInicial })
+  async criarFundoAnonimo(tokenPortador) {
+    const response = await api.post(`/fundos/anonimo/${tokenPortador}`)
     return response.data.data
   },
 

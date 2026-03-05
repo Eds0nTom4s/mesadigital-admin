@@ -88,9 +88,9 @@
               <td class="py-4 px-4">
                 <div class="flex items-center space-x-3">
                   <div class="w-10 h-10 bg-primary rounded-full flex items-center justify-center">
-                    <span class="text-white text-sm font-semibold">{{ getInitials(usuario.nome) }}</span>
+                    <span class="text-white text-sm font-semibold">{{ getInitials(usuario.nomeCompleto || usuario.username) }}</span>
                   </div>
-                  <span class="text-sm font-medium text-text-primary">{{ usuario.nome }}</span>
+                  <span class="text-sm font-medium text-text-primary">{{ usuario.nomeCompleto || usuario.username }}</span>
                 </div>
               </td>
               <td class="py-4 px-4">
@@ -100,8 +100,8 @@
                 </div>
               </td>
               <td class="py-4 px-4">
-                <span :class="getRoleBadge(usuario.role)" class="text-xs px-3 py-1 rounded-full font-medium">
-                  {{ getRoleLabel(usuario.role) }}
+                <span :class="getRoleBadge(getPrimaryRole(usuario.roles))" class="text-xs px-3 py-1 rounded-full font-medium">
+                  {{ getRoleLabel(getPrimaryRole(usuario.roles)) }}
                 </span>
               </td>
               <td class="py-4 px-4 text-sm text-text-secondary">{{ usuario.unidadeNome || '-' }}</td>
@@ -181,7 +181,7 @@
     <ConfirmDialog
       v-if="dialogConfirmacao"
       :titulo="'Desativar Usuário'"
-      :mensagem="`Tem certeza que deseja desativar ${usuarioSelecionado?.nome}? O usuário não poderá mais acessar o sistema.`"
+      :mensagem="`Tem certeza que deseja desativar ${usuarioSelecionado?.nomeCompleto || usuarioSelecionado?.username}? O usuário não poderá mais acessar o sistema.`"
       @confirmar="desativarUsuario"
       @cancelar="dialogConfirmacao = false"
     />
@@ -310,6 +310,16 @@ const getInitials = (nome) => {
     return `${partes[0][0]}${partes[1][0]}`.toUpperCase()
   }
   return partes[0][0].toUpperCase()
+}
+
+/**
+ * Extrai a role principal do array de roles do backend.
+ * Backend retorna Set<Role> ex: ["ROLE_ATENDENTE"] — remove o prefixo ROLE_.
+ */
+const getPrimaryRole = (roles) => {
+  if (!roles || roles.length === 0) return ''
+  const raw = Array.isArray(roles) ? roles[0] : String(roles).split(',')[0].trim()
+  return raw.replace('ROLE_', '')
 }
 
 const getRoleLabel = (role) => {

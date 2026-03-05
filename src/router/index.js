@@ -76,7 +76,7 @@ const routes = [
       {
         path: 'fundos/:id',
         name: 'fundo-detalhe',
-        component: () => import('@/views/FundoDetalheView.vue'),
+        component: () => import('@/modules/fundos/FundoDetalheView.vue'),
         meta: {
           title: 'Detalhes do Fundo',
           requiresAuth: true
@@ -85,7 +85,7 @@ const routes = [
       {
         path: 'estoque',
         name: 'Estoque',
-        component: () => import('@/views/EstoqueView.vue'),
+        component: () => import('@/modules/estoque/EstoqueView.vue'),
         meta: {
           title: 'Gestão de Estoque',
           requiresAuth: true
@@ -94,7 +94,7 @@ const routes = [
       {
         path: 'configuracoes-financeiras',
         name: 'ConfiguracoesFinanceiras',
-        component: () => import('@/views/ConfiguracoesFinanceirasView.vue'),
+        component: () => import('@/modules/configuracoes/ConfiguracoesFinanceirasView.vue'),
         meta: {
           title: 'Configurações Financeiras',
           requiresAuth: true

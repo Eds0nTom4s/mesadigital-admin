@@ -84,9 +84,10 @@ onMounted(async () => {
 // Fundos filtrados
 const fundosFiltrados = computed(() => {
   return fundos.value.filter(fundo => {
-    // Filtro de tipo
-    if (tipoFiltro.value !== 'TODOS' && fundo.tipo !== tipoFiltro.value) {
-      return false
+    // Filtro de tipo — derivar de clienteId pois FundoConsumoResponse não tem campo 'tipo'
+    if (tipoFiltro.value !== 'TODOS') {
+      const tipoDerivado = fundo.clienteId != null ? 'IDENTIFICADO' : 'ANONIMO'
+      if (tipoDerivado !== tipoFiltro.value) return false
     }
     
     // Filtro de status (API usa 'ativo' booleano)
@@ -368,9 +369,8 @@ const fecharModalRecarga = () => {
         <div class="flex flex-wrap items-center gap-3">
           <select v-model="tipoFiltro" class="input-field w-48">
             <option value="TODOS">Todos os Tipos</option>
-            <option value="UNIDADE_CONSUMO">Unidades de Consumo</option>
-            <option value="QR_CONSUMO">QR Code</option>
-            <option value="EVENTO">Eventos</option>
+            <option value="IDENTIFICADO">Cliente Identificado</option>
+            <option value="ANONIMO">Anônimo (QR Code)</option>
           </select>
           
           <select v-model="statusFiltro" class="input-field w-48">
