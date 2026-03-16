@@ -1,251 +1,146 @@
 /**
  * Composable para WebSocket de Pedidos
- * Conforme PROMPT_ALINHAMENTO_FRONTEND_CORRIGIDO.txt
- * 
- * Gerencia inscrições em tópicos STOMP para atualizações em tempo real
+ *
+ * Camada de semântica de domínio sobre useWebSocketStore.
+ * Cada inscrição retorna um cleanup que remove APENAS o callback registado,
+ * sem afectar outros consumidores do mesmo tópico.
  */
 
-import { onMounted, onUnmounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useWebSocketStore } from '@/store/websocket'
 
 export function usePedidoWebSocket(callbacks = {}) {
   const wsStore = useWebSocketStore()
 
+  // ── Helpers de notificação ────────────────────────────────────────────────
+  const _notificarBrowser = (titulo, body, tag) => {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(titulo, { body, icon: '/favicon.ico', tag })
+    }
+  }
+
+  const _tocarSom = (src) => {
+    try { new Audio(src).play().catch(() => {}) } catch (_) {}
+  }
+
+  // ── Inscrições ────────────────────────────────────────────────────────────
+
   /**
-   * Inscrever em tópico de Pedido específico
    * /topic/pedido/{pedidoId}
-   * 
-   * Recebe atualizações do Pedido:
-   * - StatusPedido
-   * - StatusFinanceiroPedido
-   * - Total atualizado
+   * Retorna função de cleanup que remove apenas este callback.
    */
   const inscreverPedido = (pedidoId, callback) => {
-    if (!pedidoId) return
-
+    if (!pedidoId) return () => {}
     const topico = `/topic/pedido/${pedidoId}`
-    console.log('[usePedidoWebSocket] Inscrevendo em:', topico)
-
-    wsStore.inscrever(topico, (notificacao) => {
-      console.log('[usePedidoWebSocket] Notificação recebida:', notificacao)
-      if (callback) callback(notificacao)
-      if (callbacks.onPedidoAtualizado) callbacks.onPedidoAtualizado(notificacao)
-    })
-
-    return () => wsStore.desinscrever(topico)
+    const handler = (notificacao) => {
+      console.log('[usePedidoWebSocket] Pedido atualizado:', notificacao)
+      callback?.(notificacao)
+      callbacks.onPedidoAtualizado?.(notificacao)
+    }
+    return wsStore.inscrever(topico, handler)
   }
 
   /**
-   * Inscrever em tópico de SubPedido específico
    * /topic/subpedido/{subPedidoId}
-   * 
-   * Recebe atualizações do SubPedido:
-   * - StatusSubPedido
-   * - Timestamps
    */
   const inscreverSubPedido = (subPedidoId, callback) => {
-    if (!subPedidoId) return
-
+    if (!subPedidoId) return () => {}
     const topico = `/topic/subpedido/${subPedidoId}`
-    console.log('[usePedidoWebSocket] Inscrevendo em:', topico)
-
-    wsStore.inscrever(topico, (notificacao) => {
+    const handler = (notificacao) => {
       console.log('[usePedidoWebSocket] SubPedido atualizado:', notificacao)
-      if (callback) callback(notificacao)
-      if (callbacks.onSubPedidoAtualizado) callbacks.onSubPedidoAtualizado(notificacao)
-    })
-
-    return () => wsStore.desinscrever(topico)
+      callback?.(notificacao)
+      callbacks.onSubPedidoAtualizado?.(notificacao)
+    }
+    return wsStore.inscrever(topico, handler)
   }
 
   /**
-   * Inscrever em tópico de Atendente/Unidade
    * /topic/atendente/unidade/{unidadeId}
-   * 
-   * Recebe notificações quando:
-   * - SubPedido fica PRONTO (alert visual/sonoro)
-   * - Novos pedidos criados
+   * Notifica quando SubPedido fica PRONTO.
    */
   const inscreverUnidade = (unidadeId, callback) => {
-    if (!unidadeId) return
-
+    if (!unidadeId) return () => {}
     const topico = `/topic/atendente/unidade/${unidadeId}`
-    console.log('[usePedidoWebSocket] Inscrevendo em:', topico)
-
-    wsStore.inscrever(topico, (notificacao) => {
+    const handler = (notificacao) => {
       console.log('[usePedidoWebSocket] Notificação da unidade:', notificacao)
-      
-      // Se SubPedido ficou PRONTO, mostrar alerta
-      if (notificacao.statusSubPedido === 'PRONTO' || notificacao.tipo === 'SUBPEDIDO_PRONTO') {
-        if (callbacks.onSubPedidoPronto) {
-          callbacks.onSubPedidoPronto(notificacao)
-        }
-        
-        // Alert visual/sonoro
-        mostrarAlertaSubPedidoPronto(notificacao)
-      }
-      
-      if (callback) callback(notificacao)
-    })
 
-    return () => wsStore.desinscrever(topico)
+      if (notificacao.statusSubPedido === 'PRONTO' || notificacao.tipo === 'SUBPEDIDO_PRONTO') {
+        callbacks.onSubPedidoPronto?.(notificacao)
+        _notificarBrowser(
+          '🍽️ SubPedido Pronto!',
+          `${notificacao.subPedidoNumero || 'SubPedido'} pronto para retirada`,
+          `subpedido-${notificacao.subPedidoId}`
+        )
+        _tocarSom('/sounds/notification.mp3')
+      }
+      callback?.(notificacao)
+    }
+    return wsStore.inscrever(topico, handler)
   }
 
   /**
-   * Inscrever em tópico de Cozinha (para tela de cozinha)
    * /topic/cozinha/{cozinhaId}
-   * 
-   * Recebe:
-   * - Novos SubPedidos chegando (PEDIDO_LIBERADO_AUTOMATICAMENTE)
-   * - Cancelamentos
    */
   const inscreverCozinha = (cozinhaId, callback) => {
-    if (!cozinhaId) return
-
+    if (!cozinhaId) return () => {}
     const topico = `/topic/cozinha/${cozinhaId}`
-    console.log('[usePedidoWebSocket] Inscrevendo em:', topico)
-
-    wsStore.inscrever(topico, (notificacao) => {
+    const handler = (notificacao) => {
       console.log('[usePedidoWebSocket] Notificação da cozinha:', notificacao)
-      
-      // Pedido liberado automaticamente (confirmação automática pelo backend)
-      if (notificacao.tipo === 'PEDIDO_LIBERADO_AUTOMATICAMENTE') {
-        console.log('✅ [CONFIRMAÇÃO AUTOMÁTICA] SubPedido liberado:', notificacao.subPedidoNumero)
-        if (callbacks.onPedidoLiberado) callbacks.onPedidoLiberado(notificacao)
-        mostrarNotificacaoPedidoLiberado(notificacao)
-      }
-      
-      if (callback) callback(notificacao)
-      if (callbacks.onNovoSubPedido) callbacks.onNovoSubPedido(notificacao)
-    })
 
-    return () => wsStore.desinscrever(topico)
+      if (notificacao.tipo === 'PEDIDO_LIBERADO_AUTOMATICAMENTE') {
+        callbacks.onPedidoLiberado?.(notificacao)
+        _notificarBrowser(
+          '✅ Pedido Confirmado Automaticamente',
+          `${notificacao.pedidoNumero} liberado para produção`,
+          `pedido-liberado-${notificacao.pedidoId}`
+        )
+      }
+      callback?.(notificacao)
+      callbacks.onNovoSubPedido?.(notificacao)
+    }
+    return wsStore.inscrever(topico, handler)
   }
 
   /**
-   * Inscrever em tópico de Gerente (alertas e notificações)
-   * /topic/gerente/pedidos
-   * /topic/gerente/alertas
-   * 
-   * Recebe:
-   * - PEDIDO_LIBERADO_AUTOMATICAMENTE (informativo)
-   * - PEDIDO_BLOQUEADO_POR_LIMITE (alerta crítico)
+   * /topic/gerente/pedidos  +  /topic/gerente/alertas
+   * Retorna cleanup que remove ambas as subscrições.
    */
   const inscreverGerente = (callback) => {
-    const topicoPedidos = '/topic/gerente/pedidos'
-    const topicoAlertas = '/topic/gerente/alertas'
-    
-    console.log('[usePedidoWebSocket] Inscrevendo gerente em pedidos e alertas')
-
-    // Notificações de pedidos liberados
-    wsStore.inscrever(topicoPedidos, (notificacao) => {
-      console.log('[usePedidoWebSocket] Notificação gerente (pedidos):', notificacao)
-      
+    const handlerPedidos = (notificacao) => {
       if (notificacao.tipo === 'PEDIDO_LIBERADO_AUTOMATICAMENTE') {
-        if (callbacks.onPedidoLiberado) callbacks.onPedidoLiberado(notificacao)
+        callbacks.onPedidoLiberado?.(notificacao)
       }
-      
-      if (callback) callback(notificacao)
-    })
-
-    // Alertas críticos (limite excedido)
-    wsStore.inscrever(topicoAlertas, (notificacao) => {
-      console.log('[usePedidoWebSocket] Alerta gerente:', notificacao)
-      
+      callback?.(notificacao)
+    }
+    const handlerAlertas = (notificacao) => {
       if (notificacao.tipo === 'PEDIDO_BLOQUEADO_POR_LIMITE') {
-        console.warn('⚠️ [LIMITE EXCEDIDO] Pedido bloqueado:', notificacao.pedidoNumero)
-        if (callbacks.onPedidoBloqueado) callbacks.onPedidoBloqueado(notificacao)
-        mostrarAlertaLimiteExcedido(notificacao)
+        console.warn('⚠️ [LIMITE EXCEDIDO]', notificacao.pedidoNumero)
+        callbacks.onPedidoBloqueado?.(notificacao)
+        _notificarBrowser(
+          '⚠️ Pedido Bloqueado — Limite Excedido',
+          `${notificacao.pedidoNumero} — aguarda confirmação`,
+          `pedido-bloqueado-${notificacao.pedidoId}`
+        )
+        _tocarSom('/sounds/alert.mp3')
       }
-      
-      if (callback) callback(notificacao)
-    })
-
-    return () => {
-      wsStore.desinscrever(topicoPedidos)
-      wsStore.desinscrever(topicoAlertas)
+      callback?.(notificacao)
     }
+
+    const cleanupP = wsStore.inscrever('/topic/gerente/pedidos', handlerPedidos)
+    const cleanupA = wsStore.inscrever('/topic/gerente/alertas',  handlerAlertas)
+    return () => { cleanupP(); cleanupA() }
   }
 
-  /**
-   * Mostrar alerta quando SubPedido fica pronto
-   */
-  const mostrarAlertaSubPedidoPronto = (notificacao) => {
-    // Notificação visual
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('🍽️ SubPedido Pronto!', {
-        body: `${notificacao.subPedidoNumero || 'SubPedido'} pronto para retirada na ${notificacao.cozinhaNome || 'cozinha'}`,
-        icon: '/favicon.ico',
-        tag: `subpedido-${notificacao.subPedidoId}`
-      })
-    }
-
-    // Som de alerta (opcional)
-    try {
-      const audio = new Audio('/sounds/notification.mp3')
-      audio.play().catch(() => {})
-    } catch (error) {
-      // Ignorar erros de som
-    }
-
-    console.log('🔔 [ALERTA] SubPedido pronto:', notificacao)
-  }
-
-  /**
-   * Notificação: Pedido liberado automaticamente
-   * Sistema confirmou pedido dentro do limite de risco
-   */
-  const mostrarNotificacaoPedidoLiberado = (notificacao) => {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('✅ Pedido Confirmado Automaticamente', {
-        body: `${notificacao.pedidoNumero} liberado para produção`,
-        icon: '/favicon.ico',
-        tag: `pedido-liberado-${notificacao.pedidoId}`
-      })
-    }
-
-    console.log('✅ [CONFIRMAÇÃO] Pedido liberado:', notificacao)
-  }
-
-  /**
-   * Alerta: Pedido bloqueado por limite excedido
-   * Requer ação do gerente para confirmar pagamento
-   */
-  const mostrarAlertaLimiteExcedido = (notificacao) => {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('⚠️ Pedido Bloqueado - Limite Excedido', {
-        body: `${notificacao.pedidoNumero} - Total: ${notificacao.total}. Aguarda confirmação de pagamento.`,
-        icon: '/favicon.ico',
-        tag: `pedido-bloqueado-${notificacao.pedidoId}`,
-        requireInteraction: true  // Não desaparece automaticamente
-      })
-    }
-
-    // Som de alerta mais alto (crítico)
-    try {
-      const audio = new Audio('/sounds/alert.mp3')
-      audio.play().catch(() => {})
-    } catch (error) {
-      // Ignorar
-    }
-
-    console.warn('⚠️ [LIMITE EXCEDIDO] Pedido bloqueado:', notificacao)
-  }
-
-  /**
-   * Solicitar permissão de notificações
-   */
+  // ── Permissão de notificações do browser ──────────────────────────────────
   const solicitarPermissaoNotificacoes = () => {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission()
     }
   }
 
-  // Solicitar permissão ao montar
-  onMounted(() => {
-    solicitarPermissaoNotificacoes()
-  })
+  onMounted(() => solicitarPermissaoNotificacoes())
 
+  // ── Exposição ──────────────────────────────────────────────────────────────
   return {
     inscreverPedido,
     inscreverSubPedido,
@@ -253,7 +148,9 @@ export function usePedidoWebSocket(callbacks = {}) {
     inscreverCozinha,
     inscreverGerente,
     solicitarPermissaoNotificacoes,
-    conectado: wsStore.conectado,
-    statusConexao: wsStore.statusConexao
+
+    // computed reactivo — não perde reatividade ao desestruturar
+    statusConexao: computed(() => wsStore.statusConexao),
+    conectado:     computed(() => wsStore.conectado)
   }
 }

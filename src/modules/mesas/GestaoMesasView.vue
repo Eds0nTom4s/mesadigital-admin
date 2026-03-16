@@ -183,10 +183,10 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
-import mesasService from '@/services/mesasService'
-import sessoesConsumoService from '@/services/sessoesConsumoService'
-import fundoConsumoService from '@/services/fundoConsumoService'
-import qrcodeService from '@/services/qrcodeService'
+import mesasService from '@/api/mesasService'
+import sessoesConsumoService from '@/api/sessoesConsumoService'
+import fundoConsumoService from '@/api/fundoConsumoService'
+import qrcodeService from '@/api/qrcodeService'
 import CardMesa from '@/components/shared/CardMesa.vue'
 import ModalDetalhesMesa from '@/components/mesas/ModalDetalhesMesa.vue'
 import ModalNovoPedido from '@/components/pedidos/ModalNovoPedido.vue'
@@ -333,10 +333,10 @@ const abrirDetalhesMesa = async (mesa) => {
     // Buscar dados adicionais em paralelo
     const promises = []
 
-    // Fundo do cliente (se sessão tem cliente vinculado)
-    if (sessaoAtiva.value?.clienteId) {
+    // Fundo vinculado à sessão (consultado pelo sessaoId — backend: GET /fundos/sessao/{sessaoId})
+    if (sessaoAtiva.value?.id) {
       promises.push(
-        fundoConsumoService.buscarFundoPorCliente(sessaoAtiva.value.clienteId)
+        fundoConsumoService.buscarPorSessao(sessaoAtiva.value.id)
           .then(fundo => { fundoSelecionado.value = fundo })
           .catch(() => { fundoSelecionado.value = null })
       )
@@ -486,7 +486,7 @@ onMounted(() => { carregarMesas() })
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 50;
+  z-index: 9999;
 }
 
 .modal-content {

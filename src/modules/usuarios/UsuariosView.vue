@@ -191,7 +191,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useNotificationStore } from '@/store/notifications'
-import usuariosService from '@/services/usuariosService'
+import usuariosService from '@/api/usuariosService'
 import ModalUsuario from '@/components/usuarios/ModalUsuario.vue'
 import ModalAlterarSenha from '@/components/usuarios/ModalAlterarSenha.vue'
 import ConfirmDialog from '@/components/shared/ConfirmDialog.vue'

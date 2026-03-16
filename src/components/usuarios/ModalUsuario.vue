@@ -150,8 +150,8 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import usuariosService from '@/services/usuariosService'
-import unidadesConsumoService from '@/services/unidadesConsumoService'
+import usuariosService from '@/api/usuariosService'
+import unidadesConsumoService from '@/api/unidadesConsumoService'
 
 const props = defineProps({
   usuario: {

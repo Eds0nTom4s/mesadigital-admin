@@ -14,14 +14,6 @@ export default defineConfig({
     host: true,
     hmr: {
       clientPort: 3000
-    },
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-        secure: false,
-        ws: true
-      }
     }
   },
   define: {

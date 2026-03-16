@@ -29,7 +29,7 @@ import { ref, computed, watch, onUnmounted } from 'vue'
 import { usePedidoStore } from '@/store/pedido.store'
 import { useNotificationStore } from '@/store/notifications'
 import { PedidoConflictError } from '@/api/pedido.api'
-import { ValidationError, BusinessRuleError } from '@/services/pedido.service'
+import { ValidationError, BusinessRuleError } from '@/api/pedido.service'
 
 /**
  * Composable principal para pedidos

@@ -95,7 +95,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useCurrency } from '@/utils/currency'
-import pedidosBalcaoService from '@/services/pedidosBalcaoService'
+import pedidosBalcaoService from '@/api/pedidosBalcaoService'
 import { useNotificationStore } from '@/store/notifications'
 
 const props = defineProps({
@@ -178,18 +178,15 @@ const adicionarProdutos = async () => {
 
   loading.value = true
   try {
-    // Backend espera mesmo payload de criar pedido
-    // mas com unidadeConsumoId que já tem pedido ativo
-    // Backend identifica automaticamente e adiciona ao pedido existente
+    // Mesmo payload usado em ModalNovoPedido.criarPedido
+    const tipoPagamento = props.unidade?.cliente?.fundoConsumo ? 'PRE_PAGO' : 'POS_PAGO'
     const dados = {
-      unidadeConsumoId: props.unidade.id,
+      sessaoConsumoId: props.unidade.sessaoConsumoId,
+      tipoPagamento,
       itens: carrinho.value.map(item => ({
         produtoId: item.produtoId,
-        quantidade: item.quantidade,
-        precoUnitario: item.preco
-      })),
-      valorDebito: totalCarrinho.value,
-      observacao: ''
+        quantidade: item.quantidade
+      }))
     }
 
     console.log('[ModalAdicionarProdutos] Adicionando produtos:', dados)

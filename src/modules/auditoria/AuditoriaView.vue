@@ -230,7 +230,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useNotificationStore } from '@/store/notifications'
-import auditoriaService from '@/services/auditoriaService'
+import auditoriaService from '@/api/auditoriaService'
 import ModalDetalhesLog from '@/components/auditoria/ModalDetalhesLog.vue'
 
 const notificationStore = useNotificationStore()

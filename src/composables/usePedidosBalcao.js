@@ -7,9 +7,11 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useCurrency } from '@/utils/currency'
 import { useNotificationStore } from '@/store/notifications'
 import { useAuthStore } from '@/store/auth'
-import mesasService from '@/services/mesasService'
-import sessoesConsumoService from '@/services/sessoesConsumoService'
-import produtosService from '@/services/produtosService'
+import mesasService from '@/api/mesasService'
+import sessoesConsumoService from '@/api/sessoesConsumoService'
+import fundoConsumoService from '@/api/fundoConsumoService'
+import produtosService from '@/api/produtosService'
+import pedidosBalcaoService from '@/api/pedidosBalcaoService'
 import { usePedidoWebSocket } from '@/composables/usePedidoWebSocket'
 
 export function usePedidosBalcao() {
@@ -32,6 +34,8 @@ export function usePedidosBalcao() {
   const mostrarModalNovoPedido = ref(false)
   const mostrarModalAdicionarProdutos = ref(false)
   const mostrarModalHistorico = ref(false)
+  const mostrarModalAbrirSessao = ref(false)
+  const mesaParaAbrirSessao = ref(null)
 
   const clienteSelecionadoFundo = ref(null)
   const fundoSelecionado = ref(null)
@@ -39,6 +43,8 @@ export function usePedidosBalcao() {
   // ── Estado principal ──────────────────────────────────────────────────────
   const unidadeSelecionada = ref(null)
   const pedidoAtivo = ref(null)
+  const fundoAtivo = ref(null)
+  const loadingFundo = ref(false)
   const busca = ref('')
   const loading = ref(false)
   const loadingProdutos = ref(false)
@@ -57,18 +63,26 @@ export function usePedidosBalcao() {
         subtitulo: 'Todas as unidades de atendimento'
       }
     }
+    const ocupadas = unidadesConsumo.value.filter(u => u.sessaoAtiva !== null).length
+    const total = unidadesConsumo.value.length
     return {
       titulo: 'Gestão de Pedidos - Balcão',
-      subtitulo: `${unidadesFiltradas.value.length} unidades abertas`
+      subtitulo: `${ocupadas} ocupada(s) · ${total - ocupadas} disponível(is)`
     }
   })
 
   const unidadesFiltradas = computed(() => {
-    const comSessao = unidadesConsumo.value.filter(u => u.sessaoAtiva !== null)
-    if (!busca.value) return comSessao
-    return comSessao.filter(u =>
-      u.referencia?.toLowerCase().includes(busca.value.toLowerCase())
-    )
+    // Mostra TODAS as mesas — ocupadas primeiro, depois disponíveis
+    let lista = busca.value
+      ? unidadesConsumo.value.filter(u =>
+          u.referencia?.toLowerCase().includes(busca.value.toLowerCase())
+        )
+      : [...unidadesConsumo.value]
+    return lista.sort((a, b) => {
+      if (a.sessaoAtiva && !b.sessaoAtiva) return -1
+      if (!a.sessaoAtiva && b.sessaoAtiva) return 1
+      return 0
+    })
   })
 
   // ── Carregamento ──────────────────────────────────────────────────────────
@@ -80,14 +94,16 @@ export function usePedidosBalcao() {
         ? await mesasService.getPorUnidadeAtendimento(unidadeId)
         : await mesasService.getTodas()
       rawMesas = Array.isArray(rawMesas) ? rawMesas : rawMesas.data || []
+      console.log('[usePedidosBalcao] Mesas carregadas:', rawMesas.length, rawMesas.map(m => ({ id: m.id, ref: m.referencia, status: m.status })))
 
       let sessoesMap = new Map()
       try {
         const sessoes = await sessoesConsumoService.getAbertas()
         const rawSessoes = Array.isArray(sessoes) ? sessoes : sessoes.data || []
         rawSessoes.forEach(s => sessoesMap.set(s.mesaId, s))
+        console.log('[usePedidosBalcao] Sessões abertas:', rawSessoes.length, rawSessoes.map(s => ({ id: s.id, mesaId: s.mesaId, status: s.status })))
       } catch (err) {
-        console.warn('[usePedidosBalcao] Aviso ao carregar sessões:', err)
+        console.error('[usePedidosBalcao] ERRO ao carregar sessões:', err.response?.status, err.message)
       }
 
       unidadesConsumo.value = rawMesas.map(mesa => ({
@@ -101,6 +117,7 @@ export function usePedidosBalcao() {
         } : null,
         totalConsumido: sessoesMap.get(mesa.id)?.totalConsumo || 0
       }))
+      console.log('[usePedidosBalcao] Com sessão ativa:', unidadesConsumo.value.filter(u => u.sessaoAtiva).length)
     } catch (error) {
       console.error('[usePedidosBalcao] Erro ao carregar mesas:', error)
       notificationStore.erro('Erro ao carregar mesas')
@@ -114,8 +131,12 @@ export function usePedidosBalcao() {
     loadingProdutos.value = true
     try {
       const response = await produtosService.getAll()
-      const produtos = response.data || []
-      produtosDisponiveis.value = produtos.filter(p => p.ativo === true)
+      // response.data é a Page object (se for ApiResponse<Page>)
+      // ou response pode ser a Page object directamente dependendo de como o service retorna
+      const inner = response.data ?? response
+      const lista = Array.isArray(inner.content) ? inner.content : (Array.isArray(inner) ? inner : [])
+      
+      produtosDisponiveis.value = lista.filter(p => p.ativo === true)
     } catch (error) {
       console.error('[usePedidosBalcao] Erro ao carregar produtos:', error)
       notificationStore.erro('Erro ao carregar produtos')
@@ -127,8 +148,33 @@ export function usePedidosBalcao() {
 
   const carregarPedidoAtivo = async (sessaoConsumoId) => {
     if (!sessaoConsumoId) { pedidoAtivo.value = null; return }
-    // TODO: Descomentar quando backend implementar GET /pedidos/sessao-consumo/{id}/ativo
-    pedidoAtivo.value = null
+    try {
+      const response = await pedidosBalcaoService.getPedidoAtivoSessao(sessaoConsumoId)
+      pedidoAtivo.value = response?.data ?? response ?? null
+    } catch (error) {
+      // 404 = sem pedido ativo — comportamento normal
+      if (error.response?.status === 404) {
+        pedidoAtivo.value = null
+      } else {
+        console.error('[usePedidosBalcao] Erro ao carregar pedido ativo:', error)
+        pedidoAtivo.value = null
+      }
+    }
+  }
+
+  const carregarFundoSessao = async (sessaoId, clienteId = null) => {
+    if (!sessaoId) { fundoAtivo.value = null; return }
+    loadingFundo.value = true
+    try {
+      // Usar endpoint administrativo verificado: GET /api/fundos/sessao/{sessaoId}
+      const fundo = await fundoConsumoService.buscarPorSessao(sessaoId)
+      fundoAtivo.value = fundo || null
+    } catch (err) {
+      console.warn('[usePedidosBalcao] Fundo não encontrado para a sessão:', err.message)
+      fundoAtivo.value = null
+    } finally {
+      loadingFundo.value = false
+    }
   }
 
   const recarregarPedido = async () => {
@@ -148,6 +194,7 @@ export function usePedidosBalcao() {
             telefone: sessaoData.telefoneCliente
           } : null
         }
+        await carregarFundoSessao(unidadeSelecionada.value.sessaoConsumoId, unidadeSelecionada.value.cliente?.id)
       }
     } catch (error) {
       console.error('[usePedidosBalcao] Erro ao recarregar pedido:', error)
@@ -156,8 +203,16 @@ export function usePedidosBalcao() {
 
   // ── Navegação ─────────────────────────────────────────────────────────────
   const selecionarUnidade = async (unidade) => {
+    // Mesa sem sessão → abrir modal para criar sessão
+    if (!unidade.sessaoAtiva) {
+      mesaParaAbrirSessao.value = unidade
+      mostrarModalAbrirSessao.value = true
+      return
+    }
     unidadeSelecionada.value = unidade
+    fundoAtivo.value = null
     await carregarPedidoAtivo(unidade.sessaoConsumoId)
+    await carregarFundoSessao(unidade.sessaoConsumoId, unidade.cliente?.id)
     cleanupUnidadeWS = inscreverUnidade(unidade.id)
     if (produtosDisponiveis.value.length === 0) {
       await carregarProdutos()
@@ -168,12 +223,36 @@ export function usePedidosBalcao() {
     if (cleanupUnidadeWS) { cleanupUnidadeWS(); cleanupUnidadeWS = null }
     unidadeSelecionada.value = null
     pedidoAtivo.value = null
+    fundoAtivo.value = null
     carregarUnidades()
   }
 
   // ── Handlers de modais ────────────────────────────────────────────────────
   const abrirModalNovoPedido = () => { mostrarModalNovoPedido.value = true }
   const fecharModalNovoPedido = () => { mostrarModalNovoPedido.value = false }
+
+  // Handler: Abrir/fechar modal de criação de sessão
+  const abrirModalAbrirSessao = (unidade) => {
+    mesaParaAbrirSessao.value = unidade
+    mostrarModalAbrirSessao.value = true
+  }
+
+  const fecharModalAbrirSessao = () => {
+    mostrarModalAbrirSessao.value = false
+    mesaParaAbrirSessao.value = null
+  }
+
+  const handleSessaoAberta = async (sessaoData) => {
+    fecharModalAbrirSessao()
+    await carregarUnidades()
+    const sessaoId = sessaoData?.data?.id ?? sessaoData?.id
+    const mesa = unidadesConsumo.value.find(u => u.sessaoConsumoId === sessaoId)
+    if (mesa) {
+      await selecionarUnidade(mesa)
+    } else {
+      notificationStore.sucesso('Sessão aberta! Selecione a mesa para gerir.')
+    }
+  }
 
   const handlePedidoCriado = (pedidoCriado) => {
     notificationStore.sucesso(`Pedido ${pedidoCriado.numero || pedidoCriado.id} criado com sucesso`)
@@ -198,7 +277,7 @@ export function usePedidosBalcao() {
   }
 
   const handleRecarregarFundo = (fundo) => {
-    fundoSelecionado.value = fundo
+    fundoSelecionado.value = fundo ?? fundoAtivo.value
     mostrarModalRecarregar.value = true
   }
 
@@ -210,6 +289,10 @@ export function usePedidosBalcao() {
   const handleRecargaCriada = async () => {
     if (unidadeSelecionada.value) {
       setTimeout(async () => {
+        await carregarFundoSessao(
+          unidadeSelecionada.value.sessaoConsumoId,
+          unidadeSelecionada.value.cliente?.id
+        )
         await selecionarUnidade(unidadeSelecionada.value)
       }, 2000)
     }
@@ -225,6 +308,33 @@ export function usePedidosBalcao() {
 
   const abrirModalHistorico = () => { mostrarModalHistorico.value = true }
   const fecharModalHistorico = () => { mostrarModalHistorico.value = false }
+
+  // ── Ações de Sessão ───────────────────────────────────────────────────────
+  const fecharSessao = async () => {
+    const sessaoId = unidadeSelecionada.value?.sessaoConsumoId
+    if (!sessaoId) { notificationStore.erro('Sessão não identificada'); return }
+    try {
+      await sessoesConsumoService.fechar(sessaoId)
+      notificationStore.sucesso('Sessão encerrada com sucesso!')
+      voltarListaUnidades()
+    } catch (error) {
+      console.error('[usePedidosBalcao] Erro ao encerrar sessão:', error)
+      notificationStore.erro('Erro ao encerrar sessão: ' + (error.response?.data?.message || error.message))
+    }
+  }
+
+  const aguardarPagamento = async () => {
+    const sessaoId = unidadeSelecionada.value?.sessaoConsumoId
+    if (!sessaoId) { notificationStore.erro('Sessão não identificada'); return }
+    try {
+      await sessoesConsumoService.aguardarPagamento(sessaoId)
+      notificationStore.sucesso('Mesa a aguardar pagamento.')
+      await recarregarPedido()
+    } catch (error) {
+      console.error('[usePedidosBalcao] Erro ao marcar aguardar pagamento:', error)
+      notificationStore.erro('Erro: ' + (error.response?.data?.message || error.message))
+    }
+  }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const iconeTipoUnidade = (tipo) => {
@@ -254,6 +364,8 @@ export function usePedidosBalcao() {
     statusConexao,
     unidadeSelecionada,
     pedidoAtivo,
+    fundoAtivo,
+    loadingFundo,
     busca,
     loading,
     loadingProdutos,
@@ -264,6 +376,8 @@ export function usePedidosBalcao() {
     mostrarModalNovoPedido,
     mostrarModalAdicionarProdutos,
     mostrarModalHistorico,
+    mostrarModalAbrirSessao,
+    mesaParaAbrirSessao,
     clienteSelecionadoFundo,
     fundoSelecionado,
     // Computed
@@ -287,6 +401,11 @@ export function usePedidosBalcao() {
     handleProdutosAdicionados,
     abrirModalHistorico,
     fecharModalHistorico,
+    abrirModalAbrirSessao,
+    fecharModalAbrirSessao,
+    handleSessaoAberta,
+    fecharSessao,
+    aguardarPagamento,
     iconeTipoUnidade,
     labelStatusUnidade
   }

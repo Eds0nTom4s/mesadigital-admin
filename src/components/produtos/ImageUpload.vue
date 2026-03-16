@@ -134,7 +134,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import produtosService from '@/services/produtosService'
+import produtosService from '@/api/produtosService'
 
 const props = defineProps({
   modelValue: {

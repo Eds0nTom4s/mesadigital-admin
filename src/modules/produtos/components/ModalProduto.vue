@@ -157,7 +157,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { useNotificationStore } from '@/store/notifications'
-import api from '@/services/api'
+import api from '@/api/api'
 import ImageUpload from '@/components/produtos/ImageUpload.vue'
 
 const props = defineProps({

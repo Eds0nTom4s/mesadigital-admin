@@ -25,24 +25,44 @@
             <p class="text-text-secondary text-sm">{{ unidade.tipo }}</p>
           </div>
         </div>
-        <div class="text-right">
+        <div class="flex flex-col items-end gap-2">
           <span :class="badgeStatusUnidade" class="px-3 py-1 rounded-full text-sm font-semibold">
-            {{ unidade.status }}
+            {{ labelStatusUnidade(unidade.status) }}
+          </span>
+          <!-- Tipo de Sessão -->
+          <span :class="sessaoTipoBadgeClass" class="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide">
+            {{ sessaoTipoLabel }}
           </span>
         </div>
       </div>
 
-      <div v-if="unidade.cliente" class="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4 pt-4 border-t border-border">
+      <!-- Cronómetro da Sessão -->
+      <div class="mt-4 pt-4 border-t border-border flex items-center gap-6">
+        <div class="flex items-center gap-2">
+          <span class="text-xl">⏱️</span>
+          <div>
+            <p class="text-xs text-text-secondary">Duração da Sessão</p>
+            <p class="text-lg font-bold font-mono text-text-primary">{{ cronometro }}</p>
+          </div>
+        </div>
+        <div v-if="unidade.sessaoAtiva?.id">
+          <p class="text-xs text-text-secondary">ID Sessão</p>
+          <p class="text-sm font-mono text-text-secondary">#{{ unidade.sessaoAtiva.id }}</p>
+        </div>
+      </div>
+
+      <div class="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4 pt-4 border-t border-border">
+        <!-- Cliente (identificado ou anónimo) -->
         <div>
           <p class="text-text-secondary text-sm">Cliente</p>
-          <p class="font-semibold text-text-primary">{{ unidade.cliente.nome }}</p>
-          <p class="text-text-secondary text-sm">{{ unidade.cliente.telefone }}</p>
+          <p class="font-semibold text-text-primary">{{ unidade.cliente?.nome || 'Anónimo' }}</p>
+          <p v-if="unidade.cliente?.telefone" class="text-text-secondary text-sm">{{ unidade.cliente.telefone }}</p>
         </div>
-        
+
         <!-- Modo de Pagamento -->
         <div>
           <p class="text-text-secondary text-sm">Modo de Pagamento</p>
-          <div v-if="unidade.cliente.fundoConsumo" class="flex items-center gap-2">
+          <div v-if="fundo" class="flex items-center gap-2">
             <span class="text-2xl">💳</span>
             <div>
               <p class="font-bold text-primary">Pré-pago</p>
@@ -58,13 +78,19 @@
           </div>
         </div>
 
-        <!-- Saldo Pré-pago (se existir) -->
-        <div v-if="unidade.cliente.fundoConsumo">
-          <p class="text-text-secondary text-sm">Saldo Pré-pago</p>
+        <!-- Saldo Fundo de Consumo -->
+        <div v-if="fundo">
+          <p class="text-text-secondary text-sm">Saldo Fundo</p>
           <p class="text-2xl font-bold" :class="saldoBaixo ? 'text-error' : 'text-success'">
-            {{ formatCurrency(unidade.cliente.fundoConsumo.saldoAtual || 0) }}
+            {{ formatCurrency(fundo.saldoAtual || 0) }}
           </p>
           <p v-if="saldoBaixo" class="text-xs text-error mt-1">⚠️ Saldo baixo</p>
+          <button
+            @click="$emit('recarregar-fundo')"
+            class="mt-2 text-xs text-primary hover:underline cursor-pointer bg-transparent border-none p-0"
+          >
+            + Recarregar Fundo
+          </button>
         </div>
 
         <!-- Total Consumido -->
@@ -81,77 +107,78 @@
     <div v-if="pedidoAtivo" class="card">
       <div class="flex items-center justify-between mb-4">
         <div>
-          <h4 class="text-lg font-bold text-text-primary">📋 Pedido: {{ pedidoAtivo.numero }}</h4>
+          <h4 class="text-lg font-bold text-text-primary">📋 Pedido: #{{ pedidoAtivo.numero }}</h4>
+          <p class="text-xs text-text-secondary mt-1">Sessão #{{ unidade.sessaoAtiva?.id }}</p>
         </div>
-        <button @click="$emit('fechar')" class="text-text-secondary hover:text-text-primary">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-          </svg>
-        </button>
+        <span :class="['px-3 py-1 rounded-full text-sm font-semibold', corStatusPedido]">{{ iconStatusPedido }} {{ labelStatusPedido }}</span>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div>
-          <p class="text-text-secondary text-sm">Status Operacional</p>
-          <p class="font-semibold" :class="corStatusPedido">
-            {{ iconStatusPedido }} {{ pedidoAtivo.status }}
-          </p>
-        </div>
-        <div>
-          <p class="text-text-secondary text-sm">Status Financeiro</p>
-          <p class="font-semibold" :class="corStatusFinanceiro">
-            {{ iconStatusFinanceiro }} {{ pedidoAtivo.statusFinanceiro }}
-          </p>
-        </div>
-        <div>
-          <p class="text-text-secondary text-sm">Total Pedido</p>
-          <p class="text-2xl font-bold text-primary">{{ formatCurrency(pedidoAtivo.total || 0) }}</p>
-        </div>
+      <div class="mt-2">
+        <p class="text-text-secondary text-sm">Total Pedido</p>
+        <p class="text-2xl font-bold text-primary">{{ formatCurrency(pedidoAtivo.total || 0) }}</p>
       </div>
     </div>
 
-    <!-- C) SUBPEDIDOS AGRUPADOS POR COZINHA -->
-    <div v-if="pedidoAtivo && pedidoAtivo.subPedidos && pedidoAtivo.subPedidos.length > 0" class="space-y-4">
-      <h4 class="font-semibold text-text-primary">SubPedidos por Cozinha</h4>
-      
-      <div v-for="subPedido in pedidoAtivo.subPedidos" 
-           :key="subPedido.id"
-           class="card">
+    <!-- C) SUBPEDIDOS — agrupados por unidade de produção -->
+    <div v-if="pedidoAtivo && pedidoAtivo.subPedidos && pedidoAtivo.subPedidos.length > 0" class="space-y-3">
+      <div
+        v-for="sub in pedidoAtivo.subPedidos"
+        :key="sub.id"
+        class="card"
+      >
+        <!-- Header do SubPedido -->
         <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center space-x-3">
-            <span class="text-2xl">{{ iconeCozinha(subPedido.nomeCozinha) }}</span>
+          <div class="flex items-center gap-2">
+            <span class="text-xl">{{ iconeCozinha(sub.cozinhaNome || sub.unidadeProducaoNome) }}</span>
             <div>
-              <h5 class="font-bold text-text-primary">{{ subPedido.nomeCozinha || 'Cozinha' }}</h5>
-              <p class="text-sm text-text-secondary">{{ subPedido.numero }}</p>
+              <p class="font-semibold text-text-primary text-sm">{{ sub.cozinhaNome || sub.unidadeProducaoNome || 'Cozinha' }}</p>
+              <p class="text-xs text-text-secondary">SubPedido #{{ sub.numero || sub.id }}</p>
             </div>
           </div>
-          <span :class="badgeStatusSubPedido(subPedido.status)" 
-                class="px-3 py-1 rounded-full text-sm font-semibold">
-            {{ subPedido.status }}
+          <span :class="['px-3 py-1 rounded-full text-xs font-bold uppercase', badgeStatusSubPedido(sub.status)]">
+            {{ labelStatusSubPedido(sub.status) }}
           </span>
         </div>
 
         <!-- Itens do SubPedido -->
-        <div class="space-y-2">
-          <div v-for="item in subPedido.itens" 
-               :key="item.id"
-               class="flex justify-between items-center py-2 border-t border-border">
+        <div class="space-y-1 mb-3">
+          <div
+            v-for="item in (sub.itens || sub.itemPedidos || [])"
+            :key="item.id"
+            class="flex justify-between items-center py-1 border-b border-border last:border-0"
+          >
             <div class="flex-1">
-              <p class="font-medium text-text-primary">
-                {{ item.quantidade }}x {{ item.produto.nome }}
-              </p>
-              <p v-if="item.observacoes" class="text-sm text-text-secondary">{{ item.observacoes }}</p>
+              <p class="text-sm font-medium text-text-primary">{{ item.quantidade }}x {{ item.produtoNome }}</p>
+              <p v-if="item.observacoes" class="text-xs text-text-secondary italic">{{ item.observacoes }}</p>
             </div>
-            <p class="font-semibold text-text-primary">{{ formatCurrency(item.subtotal) }}</p>
+            <p class="text-sm font-semibold text-text-primary ml-4">{{ formatCurrency(item.subtotal || item.valorTotal) }}</p>
           </div>
         </div>
 
-        <!-- Ações do SubPedido -->
-        <div v-if="podeMarcarEntregue(subPedido)" class="mt-4 pt-4 border-t border-border">
-          <button @click="marcarEntregue(subPedido.id)"
-                  class="btn-primary w-full">
+        <!-- Ação: Marcar Entregue (apenas quando PRONTO) -->
+        <div v-if="podeMarcarEntregue(sub)" class="pt-2 border-t border-border">
+          <button
+            @click="marcarEntregue(sub.id)"
+            class="btn-success text-sm"
+          >
             ✅ Marcar como Entregue
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- C-alt) ITENS DO PEDIDO (fallback sem subpedidos agrupados) -->
+    <div v-else-if="pedidoAtivo && pedidoAtivo.itens && pedidoAtivo.itens.length > 0" class="card">
+      <h4 class="font-semibold text-text-primary mb-3">Itens do Pedido</h4>
+      <div class="space-y-2">
+        <div v-for="item in pedidoAtivo.itens"
+             :key="item.id"
+             class="flex justify-between items-center py-2 border-b border-border last:border-0">
+          <div class="flex-1">
+            <p class="font-medium text-text-primary">{{ item.quantidade }}x {{ item.produtoNome }}</p>
+            <p v-if="item.observacoes" class="text-sm text-text-secondary">{{ item.observacoes }}</p>
+          </div>
+          <p class="font-semibold text-text-primary ml-4">{{ formatCurrency(item.subtotal) }}</p>
         </div>
       </div>
     </div>
@@ -169,24 +196,73 @@
           📊 Ver Histórico
         </button>
 
-        <button v-if="podeFinalizar"
-                @click="finalizarPedido" 
-                class="btn-success">
-          ✅ Finalizar Pedido
-        </button>
-
-        <button @click="cancelarPedido" 
-                class="btn-error">
+        <button
+          v-if="pedidoAtivo.status !== 'FINALIZADO' && pedidoAtivo.status !== 'CANCELADO' && !mostrarFormCancelamento"
+          @click="mostrarFormCancelamento = true"
+          class="btn-error"
+        >
           ❌ Cancelar Pedido
         </button>
       </div>
 
-      <!-- Mensagem de validação -->
-      <div v-if="!podeFinalizar && pedidoAtivo.status === 'EM_ANDAMENTO'" 
-           class="mt-4 p-3 bg-warning/10 border border-warning rounded-lg">
-        <p class="text-sm text-warning">
-          ⚠️ "Finalizar Pedido" desabilitado: Existem SubPedidos ainda não entregues
+      <!-- Nota: Finalização automática -->
+      <div class="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+        <p class="text-xs text-blue-600">
+          ℹ️ O pedido é finalizado automaticamente pelo sistema quando todos os SubPedidos forem marcados como <strong>Entregues</strong>.
         </p>
+      </div>
+
+      <!-- Formulário de cancelamento inline -->
+      <div v-if="mostrarFormCancelamento" class="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+        <p class="text-sm font-semibold text-red-700 mb-2">❌ Confirmar cancelamento do pedido</p>
+        <textarea
+          v-model="motivoCancelamento"
+          placeholder="Motivo do cancelamento (obrigatório)..."
+          class="w-full p-2 text-sm border border-red-300 rounded-md resize-none"
+          rows="2"
+          maxlength="500"
+        ></textarea>
+        <div class="flex gap-2 mt-2">
+          <button
+            @click="confirmarCancelamento"
+            :disabled="!motivoCancelamento.trim()"
+            class="btn-error text-sm"
+          >
+            Confirmar Cancelamento
+          </button>
+          <button
+            @click="mostrarFormCancelamento = false; motivoCancelamento = ''"
+            class="btn-secondary text-sm"
+          >
+            Voltar
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- E) AÇÕES DE SESSÃO -->
+    <div class="card">
+      <h4 class="text-sm font-semibold text-text-secondary mb-3">Gestão da Sessão</h4>
+      <div class="flex flex-wrap gap-3">
+        <!-- Aguardar Pagamento: apenas se sessao ABERTA -->
+        <button
+          v-if="unidade.sessaoAtiva?.status === 'ABERTA'"
+          @click="$emit('aguardar-pagamento')"
+          class="btn-secondary"
+          style="border-color:#f57c00; color:#f57c00;"
+        >
+          💰 Fechar Conta
+        </button>
+
+        <!-- Encerrar Sessão -->
+        <button
+          v-if="unidade.sessaoAtiva?.status !== 'ENCERRADA'"
+          @click="confirmarEncerramento"
+          class="btn-error"
+          style="background:#b71c1c;"
+        >
+          🔴 Encerrar Sessão
+        </button>
       </div>
     </div>
 
@@ -203,10 +279,10 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useCurrency } from '@/utils/currency'
-import subpedidosService from '@/services/subpedidos'
-import pedidosBalcaoService from '@/services/pedidosBalcaoService'
+import subpedidosService from '@/api/subpedidos'
+import pedidosBalcaoService from '@/api/pedidosBalcaoService'
 import { useNotificationStore } from '@/store/notifications'
 
 const { formatCurrency } = useCurrency()
@@ -220,14 +296,47 @@ const props = defineProps({
   pedidoAtivo: {
     type: Object,
     default: null
+  },
+  fundo: {
+    type: Object,
+    default: null
   }
 })
 
-const emit = defineEmits(['pedido-atualizado', 'fechar', 'adicionar-produtos', 'ver-historico', 'novo-pedido'])
+const emit = defineEmits(['pedido-atualizado', 'fechar', 'adicionar-produtos', 'ver-historico', 'novo-pedido', 'recarregar-fundo', 'fechar-sessao', 'aguardar-pagamento'])
+
+// ── Estado local ──────────────────────────────────────────────────────────────
+const mostrarFormCancelamento = ref(false)
+const motivoCancelamento = ref('')
+
+// ── Cronómetro de sessão ──────────────────────────────────────────────────────
+const cronometro = ref('--:--:--')
+let timerInterval = null
+
+const calcularCronometro = () => {
+  const dataAbertura = props.unidade.sessaoAtiva?.dataAbertura || props.unidade.sessaoAtiva?.createdAt
+  if (!dataAbertura) { cronometro.value = '--:--:--'; return }
+  const inicio = new Date(dataAbertura)
+  const agora = new Date()
+  const diff = Math.max(0, Math.floor((agora - inicio) / 1000))
+  const h = Math.floor(diff / 3600)
+  const m = Math.floor((diff % 3600) / 60)
+  const s = diff % 60
+  cronometro.value = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
+onMounted(() => {
+  calcularCronometro()
+  timerInterval = setInterval(calcularCronometro, 1000)
+})
+
+onBeforeUnmount(() => {
+  if (timerInterval) clearInterval(timerInterval)
+})
 
 // Saldo baixo - alerta se menor que 50
 const saldoBaixo = computed(() => {
-  const saldo = props.unidade.cliente?.fundoConsumo?.saldoAtual || 0
+  const saldo = props.fundo?.saldoAtual || 0
   return saldo < 50 && saldo > 0
 })
 
@@ -278,10 +387,41 @@ const badgeStatusSubPedido = (status) => {
   return classes[status] || 'bg-gray-400 text-white'
 }
 
-// Status do pedido
+// ── Tipo de sessão ────────────────────────────────────────────────────────────
+const sessaoTipoLabel = computed(() => {
+  const tipo = props.unidade.sessaoAtiva?.tipoPagamento || props.unidade.sessaoAtiva?.tipo
+  const labels = {
+    PRE_PAGO: '💳 Pré-Pago',
+    POS_PAGO: '💰 Pós-Pago',
+    IMEDIATO: '⚡ Imediato'
+  }
+  return labels[tipo] || (tipo ? tipo : '—')
+})
+
+const sessaoTipoBadgeClass = computed(() => {
+  const tipo = props.unidade.sessaoAtiva?.tipoPagamento || props.unidade.sessaoAtiva?.tipo
+  const classes = {
+    PRE_PAGO: 'bg-blue-100 text-blue-700',
+    POS_PAGO: 'bg-amber-100 text-amber-700',
+    IMEDIATO: 'bg-purple-100 text-purple-700'
+  }
+  return classes[tipo] || 'bg-gray-100 text-gray-600'
+})
+
+// ── Label de status de unidade ────────────────────────────────────────────────
+const labelStatusUnidade = (status) => {
+  const labels = {
+    DISPONIVEL: 'Disponível', OCUPADA: 'Ocupada',
+    AGUARDANDO_PAGAMENTO: 'Aguard. Pagamento',
+    ENCERRADA: 'Encerrada', FINALIZADA: 'Encerrada'
+  }
+  return labels[status] || status
+}
+
+// ── Status do pedido ──────────────────────────────────────────────────────────
 const iconStatusPedido = computed(() => {
   const icones = {
-    'CRIADO': '📝',
+    'CRIADO': '⏳',
     'EM_ANDAMENTO': '🔄',
     'FINALIZADO': '✅',
     'CANCELADO': '❌'
@@ -289,49 +429,48 @@ const iconStatusPedido = computed(() => {
   return icones[props.pedidoAtivo?.status] || '📋'
 })
 
+const labelStatusPedido = computed(() => {
+  const labels = {
+    'CRIADO': 'Criado',
+    'EM_ANDAMENTO': 'Em Andamento',
+    'FINALIZADO': 'Finalizado',
+    'CANCELADO': 'Cancelado'
+  }
+  return labels[props.pedidoAtivo?.status] || props.pedidoAtivo?.status || '—'
+})
+
 const corStatusPedido = computed(() => {
   const cores = {
-    'CRIADO': 'text-info',
-    'EM_ANDAMENTO': 'text-warning',
-    'FINALIZADO': 'text-success',
-    'CANCELADO': 'text-error'
+    'CRIADO': 'bg-yellow-100 text-yellow-800',
+    'EM_ANDAMENTO': 'bg-blue-100 text-blue-800',
+    'FINALIZADO': 'bg-green-100 text-green-800',
+    'CANCELADO': 'bg-red-100 text-red-800'
   }
-  return cores[props.pedidoAtivo?.status] || 'text-text-primary'
+  return cores[props.pedidoAtivo?.status] || 'bg-gray-100 text-gray-600'
 })
 
-// Status financeiro
-const iconStatusFinanceiro = computed(() => {
-  const icones = {
-    'NAO_PAGO': '💳',
-    'PAGO': '✅',
-    'ESTORNADO': '↩️'
+
+
+// ── Label SubPedido status ────────────────────────────────────────────────────
+const labelStatusSubPedido = (status) => {
+  const labels = {
+    CRIADO: 'Criado',
+    PENDENTE: 'Pendente',
+    EM_PREPARO: 'Em Preparo',
+    EM_PREPARACAO: 'Em Preparo',
+    PRONTO: 'Pronto',
+    ENTREGUE: 'Entregue',
+    CANCELADO: 'Cancelado'
   }
-  return icones[props.pedidoAtivo?.statusFinanceiro] || '💰'
-})
+  return labels[status] || status
+}
 
-const corStatusFinanceiro = computed(() => {
-  const cores = {
-    'NAO_PAGO': 'text-warning',
-    'PAGO': 'text-success',
-    'ESTORNADO': 'text-error'
-  }
-  return cores[props.pedidoAtivo?.statusFinanceiro] || 'text-text-primary'
-})
-
-// Validações
-const podeFinalizar = computed(() => {
-  if (!props.pedidoAtivo || props.pedidoAtivo.status !== 'EM_ANDAMENTO') return false
-  
-  // Todos SubPedidos devem estar ENTREGUE
-  const todosEntregues = props.pedidoAtivo.subPedidos?.every(sp => sp.status === 'ENTREGUE')
-  return todosEntregues
-})
-
+// ── Validações ────────────────────────────────────────────────────────────────
 const podeMarcarEntregue = (subPedido) => {
   return subPedido.status === 'PRONTO'
 }
 
-// Ações
+// ── Ações ──────────────────────────────────────────────────────────────────────
 const marcarEntregue = async (subPedidoId) => {
   try {
     await subpedidosService.marcarEntregue(subPedidoId)
@@ -343,27 +482,24 @@ const marcarEntregue = async (subPedidoId) => {
   }
 }
 
-const finalizarPedido = () => {
-  // [BACKEND] Não existe endpoint /finalizar.
-  // O pedido é finalizado AUTOMATICAMENTE quando o último SubPedido é marcado como ENTREGUE.
-  // Orientar o operador a marcar todos os itens como entregues.
-  notificationStore.aviso(
-    'O pedido será finalizado automaticamente quando todos os itens forem marcados como entregues.'
-  )
-}
-
-const cancelarPedido = async () => {
-  const motivo = prompt('Motivo do cancelamento:')
+const confirmarCancelamento = async () => {
+  const motivo = motivoCancelamento.value.trim()
   if (!motivo) return
-  
   try {
     await pedidosBalcaoService.cancelar(props.pedidoAtivo.id, motivo)
     notificationStore.sucesso('Pedido cancelado')
+    mostrarFormCancelamento.value = false
+    motivoCancelamento.value = ''
     emit('pedido-atualizado')
   } catch (error) {
     console.error('[PainelUnidade] Erro ao cancelar pedido:', error)
     notificationStore.erro(error.response?.data?.message || 'Erro ao cancelar pedido')
   }
+}
+
+const confirmarEncerramento = () => {
+  if (!confirm('Encerrar a sessão desta mesa? Esta acção não pode ser revertida.')) return
+  emit('fechar-sessao')
 }
 </script>
 <style scoped>

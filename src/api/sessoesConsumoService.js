@@ -104,6 +104,25 @@ const sessoesConsumoService = {
   async aguardarPagamento(id) {
     const response = await api.put(`/sessoes-consumo/${id}/aguardar-pagamento`)
     return response.data
+  },
+
+  /**
+   * Obter fundo de consumo vinculado a uma sessão
+   * GET /api/sessoes-consumo/{id}/fundo
+   *
+   * Retorna null se a sessão não tiver fundo associado (404).
+   *
+   * @param {number} sessaoId
+   * @returns {Promise<Object|null>}
+   */
+  async getFundo(sessaoId) {
+    try {
+      const response = await api.get(`/sessoes-consumo/${sessaoId}/fundo`)
+      return response.data?.data ?? response.data
+    } catch (err) {
+      if (err.response?.status === 404) return null
+      throw err
+    }
   }
 }
 

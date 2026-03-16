@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
-import authService from '@/services/authService'
 
 /**
  * Configuração de rotas do painel administrativo

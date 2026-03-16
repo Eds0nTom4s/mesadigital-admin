@@ -252,7 +252,7 @@ import { useCurrency } from '@/utils/currency'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
 import QrCodeDisplay from '@/components/shared/QrCodeDisplay.vue'
-import qrcodeService from '@/services/qrcodeService'
+import qrcodeService from '@/api/qrcodeService'
 
 const { formatCurrency } = useCurrency()
 const authStore = useAuthStore()

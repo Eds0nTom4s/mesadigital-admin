@@ -6,8 +6,8 @@ import SaldoBadge from '@/components/shared/SaldoBadge.vue'
 import TransacaoTable from '@/components/shared/TransacaoTable.vue'
 import ModalRecarregarFundo from '@/components/fundos/ModalRecarregarFundo.vue'
 import { useCurrency } from '@/utils/currency'
-import fundoConsumoService from '@/services/fundoConsumoService'
-import { configuracaoFinanceiraService } from '@/services/configuracaoFinanceiraService'
+import fundoConsumoService from '@/api/fundoConsumoService'
+import { configuracaoFinanceiraService } from '@/api/configuracaoFinanceiraService'
 
 /**
  * FundoDetalheView - Detalhes completos de um fundo

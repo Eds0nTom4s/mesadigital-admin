@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useCurrency } from '@/utils/currency'
-import fundoConsumoService from '@/services/fundoConsumoService'
+import fundoConsumoService from '@/api/fundoConsumoService'
 
 /**
  * ConfiguracoesFinanceirasView - Configurações do sistema financeiro

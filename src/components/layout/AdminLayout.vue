@@ -17,17 +17,25 @@
 </template>
 
 <script setup>
+import { onMounted, onUnmounted } from 'vue'
 import Sidebar from './Sidebar.vue'
 import Topbar from './Topbar.vue'
+import { useWebSocketStore } from '@/store/websocket'
+
+const wsStore = useWebSocketStore()
 
 /**
- * AdminLayout - Layout principal do painel administrativo
- * 
- * Estrutura:
- * - Sidebar fixa à esquerda (264px)
- * - Topbar no topo
- * - Área de conteúdo com padding
- * 
- * O conteúdo dinâmico é renderizado via <router-view />
+ * AdminLayout — Layout principal do painel.
+ * A conexão WebSocket é iniciada aqui porque:
+ *   - é o wrapper de todas as rotas autenticadas,
+ *   - garante que o WS existe antes de qualquer sub-componente se inscrever,
+ *   - e é encerrada quando o utilizador faz logout (componente desmonado).
  */
+onMounted(() => {
+  wsStore.conectar()
+})
+
+onUnmounted(() => {
+  wsStore.desconectar()
+})
 </script>

@@ -12,7 +12,7 @@
  */
 
 import { ref, readonly } from 'vue'
-import { configuracaoFinanceiraService } from '@/services/configuracaoFinanceiraService'
+import { configuracaoFinanceiraService } from '@/api/configuracaoFinanceiraService'
 
 export function useConfiguracaoFinanceira() {
   // ─── Estado de domínio ────────────────────────────────────────────────────

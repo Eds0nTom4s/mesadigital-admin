@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import produtosService from '@/services/produtosService'
+import produtosService from '@/api/produtosService'
 import { useNotificationStore } from '@/store/notifications'
 import { useCurrency } from '@/utils/currency'
 

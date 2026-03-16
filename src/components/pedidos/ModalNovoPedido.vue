@@ -301,9 +301,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCurrency } from '@/utils/currency'
-import pedidosBalcaoService from '@/services/pedidosBalcaoService'
-import fundoConsumoService from '@/services/fundoConsumoService'
-import { configuracaoFinanceiraService } from '@/services/configuracaoFinanceiraService'
+import pedidosBalcaoService from '@/api/pedidosBalcaoService'
+import fundoConsumoService from '@/api/fundoConsumoService'
+import { configuracaoFinanceiraService } from '@/api/configuracaoFinanceiraService'
 import { useNotificationStore } from '@/store/notifications'
 import { useAuthStore } from '@/store/auth'
 
@@ -652,10 +652,11 @@ const criarPedido = async () => {
     const mensagemBackend = error?.response?.data?.message || error?.message || 'Erro ao criar pedido'
 
     if (status === 422) {
-      // 422 = regra de negócio (saldo insuficiente, pós-pago bloqueado, etc.)
-      // Mostrar mensagem da API com CTA quando aplicável
+      // 422 = validação de dados (campo inválido, etc.)
       notificationStore.erro(mensagemBackend)
-      // Se for saldo insuficiente, oferecer CTA de recarga
+    } else if (status === 400) {
+      notificationStore.erro(mensagemBackend)
+      // 400 = regras de negócio: saldo insuficiente, pós-pago bloqueado, etc. (B5)
       if (mensagemBackend.toLowerCase().includes('saldo insuficiente') && fundoConsumo.value?.id) {
         setTimeout(() => abrirModalRecarregar(), 800)
       }

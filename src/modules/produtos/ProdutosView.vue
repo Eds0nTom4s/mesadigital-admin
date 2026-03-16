@@ -3,8 +3,8 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useCurrency } from '@/utils/currency'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
-import api from '@/services/api'
-import produtosService from '@/services/produtosService'
+import api from '@/api/api'
+import produtosService from '@/api/produtosService'
 import ModalProduto from './components/ModalProduto.vue'
 
 const { formatCurrency } = useCurrency()
@@ -103,19 +103,46 @@ const getStatusProduto = (produto) => {
   return { badge: 'Disponível', cor: '#4CAF50', mensagem: 'Disponível para pedidos' }
 }
 
+/**
+ * Extrai o array de produtos de uma resposta paginada ou lista simples
+ * Backend retorna ApiResponse<Page<ProdutoResponse>> ou ApiResponse<List<ProdutoResponse>>
+ */
+const extrairLista = (respData) => {
+  const inner = respData?.data ?? respData
+  // Resposta paginada: { content: [...], totalElements, ... }
+  if (inner && Array.isArray(inner.content)) return inner.content
+  // Lista simples
+  if (Array.isArray(inner)) return inner
+  return []
+}
+
 // Carregar produtos
 const carregarProdutos = async () => {
   try {
     loading.value = true
     let response
-    
-    if (categoriaFiltro.value === 'TODAS') {
-      response = await api.get('/produtos')
+
+    // GERENTE/ADMIN usam /produtos/admin para ver TODOS (incluindo inativos/indisponíveis)
+    // Clientes/Atendentes usam /produtos (apenas disponíveis e ativos)
+    if (isGerente.value) {
+      if (categoriaFiltro.value === 'TODAS') {
+        response = await api.get('/produtos/admin')
+      } else {
+        // Filtrar por categoria no cliente (não há endpoint admin por categoria)
+        const all = await api.get('/produtos/admin')
+        const lista = extrairLista(all.data)
+        produtos.value = lista.filter(p => p.categoria === categoriaFiltro.value)
+        return
+      }
     } else {
-      response = await api.get(`/produtos/categoria/${categoriaFiltro.value}`)
+      if (categoriaFiltro.value === 'TODAS') {
+        response = await api.get('/produtos')
+      } else {
+        response = await api.get(`/produtos/categoria/${categoriaFiltro.value}`)
+      }
     }
-    
-    produtos.value = response.data.data || response.data || []
+
+    produtos.value = extrairLista(response.data)
   } catch (error) {
     console.error('[ProdutosView] Erro ao carregar produtos:', error)
     notificationStore.erro('Erro ao carregar produtos')
@@ -130,11 +157,11 @@ const buscarProdutos = async (termo) => {
     carregarProdutos()
     return
   }
-  
+
   try {
     loading.value = true
-    const response = await api.get(`/produtos/buscar?nome=${encodeURIComponent(termo)}`)
-    produtos.value = response.data.data || response.data || []
+    const response = await api.get('/produtos/buscar', { params: { nome: termo } })
+    produtos.value = extrairLista(response.data)
   } catch (error) {
     console.error('[ProdutosView] Erro ao buscar produtos:', error)
     notificationStore.erro('Erro ao buscar produtos')
@@ -180,17 +207,18 @@ const fecharModal = () => {
   produtoEditando.value = null
 }
 
-// Alterar status ativo/inativo
+// Alterar disponibilidade (toggle: disponivel true/false)
+// [BACKEND] PATCH /produtos/{id}/disponibilidade?disponivel=true (query param, não body)
 const alterarStatus = async (produto) => {
   try {
     const novoStatus = !produto.ativo
-    // [BACKEND] PATCH /produtos/{id}/disponibilidade?disponivel=true  (query param, não body)
     await produtosService.atualizarStatus(produto.id, novoStatus)
     produto.ativo = novoStatus
-    notificationStore.sucesso(`Produto marcado como ${novoStatus ? 'ativo' : 'inativo'}`)
+    produto.disponivel = novoStatus
+    notificationStore.sucesso(`Produto ${novoStatus ? 'activado' : 'desactivado'} com sucesso`)
   } catch (error) {
     console.error('[ProdutosView] Erro ao alterar status:', error)
-    notificationStore.erro('Erro ao alterar status')
+    notificationStore.erro(error.mensagemAmigavel || 'Erro ao alterar estado do produto')
   }
 }
 
@@ -231,7 +259,7 @@ onMounted(() => {
           Role: {{ authStore.user.role }} | isGerente: {{ isGerente }}
         </div>
       </div>
-      <button @click="abrirModalCriar" 
+      <button v-if="isGerente" @click="abrirModalCriar" 
               class="btn-primary flex items-center space-x-2">
         <span class="text-xl">+</span>
         <span>Adicionar Produto</span>
@@ -357,7 +385,7 @@ onMounted(() => {
           </div>
 
           <!-- Ações -->
-          <div class="flex items-center space-x-2 pt-3 border-t border-border">
+          <div v-if="isGerente" class="flex items-center space-x-2 pt-3 border-t border-border">
             <!-- Toggle Status Ativo/Inativo -->
             <label class="flex items-center space-x-2 cursor-pointer flex-1">
               <div class="relative">

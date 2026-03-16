@@ -31,7 +31,7 @@ const fazerLogin = async () => {
     loading.value = true
     erro.value = ''
     
-    // Valida campos (erro inline é mostrado automaticamente)
+    // Valida campos
     if (!formulario.value.telefone) {
       erro.value = 'Informe o telefone'
       loading.value = false
@@ -43,14 +43,13 @@ const fazerLogin = async () => {
       return
     }
     
-    console.log('[LoginView] Tentando login...')
+    console.log('[LoginView] Tentando login para:', formulario.value.telefone)
     
     // Chama API de login através da store
     const result = await authStore.login(formulario.value.telefone, formulario.value.senha)
     
     if (result.success) {
       console.log('[LoginView] Login bem-sucedido, redirecionando...')
-      // Redireciona para dashboard
       router.push('/admin/dashboard')
     } else {
       erro.value = result.error || 'Credenciais inválidas. Tente novamente.'
@@ -58,7 +57,7 @@ const fazerLogin = async () => {
     
   } catch (err) {
     console.error('[LoginView] Erro no login:', err)
-    erro.value = err.response?.data?.message || 'Credenciais inválidas. Tente novamente.'
+    erro.value = err.message || 'Erro ao processar login.'
   } finally {
     loading.value = false
   }
@@ -96,9 +95,9 @@ const fazerLogin = async () => {
               id="telefone"
               data-cy="input-telefone"
               v-model="formulario.telefone"
-              type="tel"
+              type="text"
               class="input-field w-full"
-              placeholder="999999999"
+              placeholder="+244923000000"
               :disabled="loading"
               autocomplete="tel"
             />
@@ -169,9 +168,10 @@ const fazerLogin = async () => {
         <div class="mt-6 pt-6 border-t border-border">
           <p class="text-xs text-text-secondary text-center">
             <strong>Ambiente de Desenvolvimento</strong><br>
-            Telefone: <code class="bg-background px-1 py-0.5 rounded">999999999</code> • 
-            Senha: <code class="bg-background px-1 py-0.5 rounded">admin123</code><br>
-            <span class="text-[10px] mt-1 block">Role: GERENTE (acesso total)</span>
+            Admin: <code class="bg-background px-1 py-0.5 rounded">admin</code> /
+            <code class="bg-background px-1 py-0.5 rounded">admin123</code><br>
+            Gerente: <code class="bg-background px-1 py-0.5 rounded">gerente</code> /
+            <code class="bg-background px-1 py-0.5 rounded">gerente123</code>
           </p>
         </div>
       </div>

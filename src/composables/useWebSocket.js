@@ -1,18 +1,37 @@
-import { ref, onMounted, onUnmounted } from 'vue'
-import SockJS from 'sockjs-client'
-import { Client } from '@stomp/stompjs'
-
 /**
- * Composable para gerenciar conexões WebSocket
- * 
- * Baseado na documentação oficial do sistema
- * Suporta reconexão automática, heartbeat e múltiplas inscrições
- * 
- * @param {string[]} topicos - Lista de tópicos para inscrever
- * @param {function} onMensagem - Callback quando mensagem chegar
- * @param {object} options - Opções de configuração
+ * @deprecated Use `useWebSocketStore` de `@/store/websocket` directamente.
+ *
+ * Este composable criava o seu próprio cliente STOMP independente do store,
+ * causando duas conexões simultâneas ao mesmo broker.
+ *
+ * Mantido apenas para não quebrar chamadores legados — redirige para o store.
  */
-export function useWebSocket(topicos = [], onMensagem = null, options = {}) {
+import { useWebSocketStore } from '@/store/websocket'
+
+export function useWebSocket(_topicos = [], _onMensagem = null, _options = {}) {
+  const store = useWebSocketStore()
+
+  // Garantir que o store está ligado (caso seja chamado fora do AdminLayout)
+  if (!store.conectado && !store.reconectando) {
+    store.conectar()
+  }
+
+  return {
+    conectado:      store.conectado,
+    reconectando:   store.reconectando,
+    erro:           null,
+    ultimaMensagem: null,
+    mensagens:      store.notificacoes,
+    statusConexao:  store.statusConexao,
+
+    conectar:        () => store.conectar(),
+    desconectar:     () => store.desconectar(),
+    inscrever:       (topico, cb) => store.inscrever(topico, cb),
+    adicionarTopico: (topico) => console.warn('[useWebSocket] deprecated — use store.inscrever()', topico),
+    limparMensagens: () => store.limparNotificacoes()
+  }
+}
+
   const conectado = ref(false)
   const reconectando = ref(false)
   const erro = ref(null)

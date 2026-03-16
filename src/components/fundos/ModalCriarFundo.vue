@@ -91,7 +91,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useCurrency } from '@/utils/currency'
 import { useNotificationStore } from '@/store/notifications'
-import fundoConsumoService from '@/services/fundoConsumoService'
+import fundoConsumoService from '@/api/fundoConsumoService'
 
 const props = defineProps({
   cliente: {

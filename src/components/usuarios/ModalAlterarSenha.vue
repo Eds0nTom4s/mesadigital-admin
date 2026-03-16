@@ -127,7 +127,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import usuariosService from '@/services/usuariosService'
+import usuariosService from '@/api/usuariosService'
 
 const props = defineProps({
   usuario: {

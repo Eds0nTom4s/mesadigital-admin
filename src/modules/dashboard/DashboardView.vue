@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useCurrency } from '@/utils/currency'
 import { useNotificationStore } from '@/store/notifications'
-import dashboardService from '@/services/dashboardService'
+import dashboardService from '@/api/dashboardService'
 
 const { formatCurrency } = useCurrency()
 const notificationStore = useNotificationStore()
@@ -334,7 +334,7 @@ onUnmounted(() => {
                   {{ pedido.clienteNome }} • {{ pedido.unidadeConsumoReferencia }}
                 </p>
                 <p class="text-xs text-text-secondary">
-                  {{ formatarDataHora(pedido.criadoEm) }} • {{ pedido.quantidadeItens }} itens
+                  {{ formatarDataHora(pedido.createdAt || pedido.criadoEm) }} • {{ pedido.quantidadeItens }} itens
                 </p>
               </div>
             </div>

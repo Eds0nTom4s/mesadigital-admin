@@ -7,8 +7,25 @@ import api from './api'
 
 export const produtosService = {
   /**
-   * Listar todos os produtos
-   * GET /api/produtos
+   * [Admin/Gerente] Listar TODOS os produtos, incluindo inativos e indisponíveis
+   * GET /api/produtos/admin  [GER/ADM]
+   * Usar este método no painel de gestão para ter visibilidade completa do cardápio.
+   *
+   * @param {{ page?: number, size?: number }} [params]
+   * @returns {Promise<Object>} ApiResponse<Page<ProdutoResponse>>
+   */
+  async listarAdmin(params = {}) {
+    const response = await api.get('/produtos/admin', {
+      params: { page: params.page ?? 0, size: params.size ?? 50, ...params }
+    })
+    // Retorna Page<ProdutoResponse> — usar .content para o array
+    return response.data.data || response.data
+  },
+
+  /**
+   * Listar produtos disponíveis e ativos (endpoint público autenticado)
+   * GET /api/produtos  — retorna apenas disponíveis e ativos (paginado)
+   * Para uso em criação de pedidos; NÃO usar para gestão administrativa.
    */
   async getAll(params = {}) {
     const response = await api.get('/produtos', { params })

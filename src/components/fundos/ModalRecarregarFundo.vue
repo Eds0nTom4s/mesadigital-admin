@@ -157,8 +157,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useCurrency } from '@/utils/currency'
 import { useNotificationStore } from '@/store/notifications'
-import fundoConsumoService from '@/services/fundoConsumoService'
-import { configuracaoFinanceiraService } from '@/services/configuracaoFinanceiraService'
+import fundoConsumoService from '@/api/fundoConsumoService'
+import { configuracaoFinanceiraService } from '@/api/configuracaoFinanceiraService'
 
 const props = defineProps({
   isOpen: {

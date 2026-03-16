@@ -6,16 +6,28 @@
         <h1>{{ tituloContexto.titulo }}</h1>
         <p class="text-muted">{{ tituloContexto.subtitulo }}</p>
       </div>
-      
-      <!-- Status WebSocket -->
-      <div class="ws-status">
-        <span 
-          :class="['ws-badge', statusConexao]"
-          :title="`WebSocket: ${statusConexao}`"
+
+      <div style="display:flex; align-items:center; gap:12px;">
+        <!-- Botão Nova Sessão -->
+        <button
+          v-if="!unidadeSelecionada"
+          @click="abrirModalAbrirSessao(null)"
+          class="btn btn-primary"
+          style="display:flex;align-items:center;gap:6px;"
         >
-          {{ statusConexao === 'conectado' ? '🟢' : statusConexao === 'reconectando' ? '🟡' : '🔴' }}
-          {{ statusConexao }}
-        </span>
+          <span style="font-size:18px;">+</span> Nova Sessão
+        </button>
+
+        <!-- Status WebSocket -->
+        <div class="ws-status">
+          <span
+            :class="['ws-badge', statusConexao]"
+            :title="`WebSocket: ${statusConexao}`"
+          >
+            {{ statusConexao === 'conectado' ? '🟢' : statusConexao === 'reconectando' ? '🟡' : '🔴' }}
+            {{ statusConexao }}
+          </span>
+        </div>
       </div>
     </div>
 
@@ -43,41 +55,32 @@
           v-for="unidade in unidadesFiltradas"
           :key="unidade.id"
           class="unidade-card"
-          :class="['status-' + unidade.status]"
+          :class="['status-' + (unidade.sessaoAtiva ? unidade.status : 'DISPONIVEL')]"
           @click="selecionarUnidade(unidade)"
         >
           <!-- Header do Card -->
           <div class="card-header">
             <span class="icone-tipo">{{ iconeTipoUnidade(unidade.tipo) }}</span>
             <h3>{{ unidade.referencia }}</h3>
-            <span :class="['badge', 'badge-' + unidade.status]">
-              {{ labelStatusUnidade(unidade.status) }}
+            <span :class="['badge', 'badge-' + (unidade.sessaoAtiva ? unidade.status : 'DISPONIVEL')]">
+              {{ labelStatusUnidade(unidade.sessaoAtiva ? unidade.status : 'DISPONIVEL') }}
             </span>
           </div>
 
           <!-- Corpo do Card -->
           <div class="card-body">
-            <!-- Cliente -->
+            <div v-if="!unidade.sessaoAtiva" class="card-info" style="color:#1976d2">
+              <span class="label">🟢 Disponível</span>
+              <span class="value" style="font-size:12px;">clique para abrir sessão</span>
+            </div>
             <div v-if="unidade.cliente" class="card-info">
               <span class="label">Cliente:</span>
               <span class="value">{{ unidade.cliente.nome }}</span>
             </div>
-
-            <!-- Saldo Fundo -->
-            <div v-if="unidade.cliente?.fundoConsumo" class="card-info">
-              <span class="label">Fundo:</span>
-              <span class="value" :class="{'text-danger': unidade.cliente.fundoConsumo.saldoAtual < 10}">
-                {{ formatCurrency(unidade.cliente.fundoConsumo.saldoAtual) }}
-              </span>
-            </div>
-
-            <!-- Total Consumido -->
             <div v-if="unidade.totalConsumido > 0" class="card-info">
               <span class="label">Consumo:</span>
               <span class="value">{{ formatCurrency(unidade.totalConsumido) }}</span>
             </div>
-
-            <!-- Pedidos Ativos -->
             <div v-if="unidade.quantidadePedidosAtivos > 0" class="card-info">
               <span class="label">Pedidos Ativos:</span>
               <span class="value">{{ unidade.quantidadePedidosAtivos }}</span>
@@ -86,17 +89,17 @@
 
           <!-- Footer do Card -->
           <div class="card-footer">
-            <button class="btn btn-sm btn-primary">
-              Ver Detalhes →
+            <button class="btn btn-sm" :class="unidade.sessaoAtiva ? 'btn-primary' : 'btn-outline'">
+              {{ unidade.sessaoAtiva ? 'Gerir →' : '＋ Abrir Sessão' }}
             </button>
           </div>
         </div>
 
         <!-- Estado Vazio -->
         <div v-if="unidadesFiltradas.length === 0 && !loading" class="empty-state">
-          <p>🪑 Nenhuma mesa ocupada de momento</p>
-          <small v-if="busca">Nenhuma mesa ocupada corresponde a "{{ busca }}"</small>
-          <small v-else>Aguarde a abertura de uma sessão para criar pedidos</small>
+          <p>🪑 Nenhuma mesa registada</p>
+          <small v-if="busca">Nenhuma mesa corresponde a "{{ busca }}"</small>
+          <small v-else>Crie mesas em Gestão de Mesas para começar</small>
         </div>
       </div>
     </div>
@@ -106,11 +109,15 @@
       <PainelUnidadeConsumo
         :unidade="unidadeSelecionada"
         :pedido-ativo="pedidoAtivo"
+        :fundo="fundoAtivo"
         @pedido-atualizado="recarregarPedido"
         @fechar="voltarListaUnidades"
         @adicionar-produtos="abrirModalAdicionarProdutos"
         @ver-historico="abrirModalHistorico"
         @novo-pedido="abrirModalNovoPedido"
+        @recarregar-fundo="handleRecarregarFundo"
+        @fechar-sessao="fecharSessao"
+        @aguardar-pagamento="aguardarPagamento"
       />
     </div>
 
@@ -169,6 +176,18 @@
         @recarga-criada="handleRecargaCriada"
       />
     </Teleport>
+
+    <!-- Modal: Abrir Sessão (mesa disponível) -->
+    <Teleport to="body">
+      <ModalAbrirSessao
+        v-if="mostrarModalAbrirSessao"
+        :show="mostrarModalAbrirSessao"
+        :mesa="mesaParaAbrirSessao"
+        :mesas-disponiveis="unidadesConsumo.filter(u => !u.sessaoAtiva)"
+        @close="fecharModalAbrirSessao"
+        @sessao-aberta="handleSessaoAberta"
+      />
+    </Teleport>
   </div>
 </template>
 
@@ -193,6 +212,9 @@ const ModalCriarFundo = defineAsyncComponent(() =>
 const ModalRecarregarFundo = defineAsyncComponent(() =>
   import('@/components/fundos/ModalRecarregarFundo.vue')
 )
+const ModalAbrirSessao = defineAsyncComponent(() =>
+  import('@/modules/mesas/components/ModalAbrirSessao.vue')
+)
 
 const {
   formatCurrency,
@@ -201,12 +223,16 @@ const {
   loading,
   unidadeSelecionada,
   pedidoAtivo,
+  fundoAtivo,
   produtosDisponiveis,
+  unidadesConsumo,
   mostrarModalNovoPedido,
   mostrarModalAdicionarProdutos,
   mostrarModalHistorico,
   mostrarModalCriarFundo,
   mostrarModalRecarregar,
+  mostrarModalAbrirSessao,
+  mesaParaAbrirSessao,
   clienteSelecionadoFundo,
   fundoSelecionado,
   tituloContexto,
@@ -228,6 +254,11 @@ const {
   handleProdutosAdicionados,
   abrirModalHistorico,
   fecharModalHistorico,
+  abrirModalAbrirSessao,
+  fecharModalAbrirSessao,
+  handleSessaoAberta,
+  fecharSessao,
+  aguardarPagamento,
   iconeTipoUnidade,
   labelStatusUnidade
 } = usePedidosBalcao()
@@ -346,6 +377,21 @@ const {
   box-shadow: 0 4px 16px rgba(0,0,0,0.15);
 }
 
+.unidade-card.status-DISPONIVEL {
+  border-color: #1976d2;
+  border-style: dashed;
+  opacity: 0.85;
+}
+
+.unidade-card.status-DISPONIVEL:hover {
+  opacity: 1;
+  border-style: solid;
+}
+
+.disponivel-cta {
+  color: #1976d2;
+}
+
 .unidade-card.status-OCUPADA {
   border-color: #4caf50;
 }
@@ -458,6 +504,16 @@ const {
 .btn-sm {
   padding: 6px 12px;
   font-size: 13px;
+}
+
+.btn-outline {
+  background-color: transparent;
+  color: #1976d2;
+  border: 1px solid #1976d2;
+}
+
+.btn-outline:hover {
+  background-color: #e3f2fd;
 }
 
 .empty-state {

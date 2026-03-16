@@ -2,40 +2,45 @@
  * ════════════════════════════════════════════════════════════════════════════════
  * CAMADA API - PEDIDOS (HTTP Layer)
  * ════════════════════════════════════════════════════════════════════════════════
- * 
+ *
  * RESPONSABILIDADE:
  * - Comunicação HTTP pura com o backend
  * - Sem lógica de negócio
  * - Sem transformação de dados
  * - Sem gerenciamento de estado
  * - Retorna respostas brutas ou lança exceções
- * 
- * ARQUITETURA:
- * - Todas as chamadas retornam Promise<AxiosResponse>
- * - Erros HTTP são propagados para camadas superiores
- * - Conflitos 409 são tratados como exceções específicas
- * - Headers de versionamento (ETag/If-Match) são suportados
- * 
- * PRODUÇÃO:
- * - Preparado para concorrência otimista (versioning)
- * - Suporta conditional requests (304 Not Modified)
- * - Timeout configurável por operação crítica
- * - Idempotência explícita onde aplicável
+ *
+ * ENDPOINTS REAIS (PedidoController.java):
+ * ─────────────────────────────────────────
+ * POST   /pedidos                           → criar pedido (sessaoConsumoId + itens no body)
+ * GET    /pedidos/{id}                      → buscar por ID
+ * GET    /pedidos/numero/{numero}           → buscar por número
+ * GET    /pedidos/hoje                      → pedidos de hoje (paginado) [ADM/ATD]
+ * GET    /pedidos/ativos                    → pedidos activos paginados  [ADM/ATD]
+ * GET    /pedidos/status/{status}           → filtrar por status paginado [ADM/ATD]
+ * GET    /pedidos/sessao/{id}               → por sessão paginado         [ADM/ATD]
+ * GET    /pedidos/sessao/{id}/ativos        → activos de uma sessão       [ADM/ATD]
+ * GET    /pedidos                           → com filtros e paginação     [ADM/ATD]
+ * PUT    /pedidos/{id}/confirmar            → CRIADO → EM_ANDAMENTO       [ATD/GER/ADM]
+ * PUT    /pedidos/{id}/cancelar?motivo=     → cancelar                   [GER/ADM]
+ * PUT    /pedidos/{id}/confirmar-pagamento  → confirmar pagamento POS_PAGO [GER/ADM]
+ * PUT    /pedidos/{id}/fechar               → fechar conta                [ATD/GER/ADM]
+ *
+ * NOTA: Não existem endpoints granulares de itens (/pedidos/{id}/itens).
+ *       Os itens são enviados em bloco na criação do pedido.
  * ════════════════════════════════════════════════════════════════════════════════
  */
 
-import api from '@/services/api'
+import api from './api'
 
 /**
  * Exceção customizada para conflitos de concorrência (HTTP 409)
  */
 export class PedidoConflictError extends Error {
-  constructor(message, versaoServidor, versaoCliente, data) {
+  constructor(message, data) {
     super(message)
     this.name = 'PedidoConflictError'
     this.statusCode = 409
-    this.versaoServidor = versaoServidor
-    this.versaoCliente = versaoCliente
     this.data = data
   }
 }
@@ -49,71 +54,72 @@ const TIMEOUTS = {
   CRITICAL: 15000  // Operações críticas (fechar pedido): longo
 }
 
-/**
- * ════════════════════════════════════════════════════════════════════════════════
- * OPERAÇÕES CRUD
- * ════════════════════════════════════════════════════════════════════════════════
- */
-
 export const pedidoApi = {
   /**
    * [POST] Criar novo pedido
-   * 
-   * @param {Object} payload - Dados do pedido
-   * @param {number} payload.sessaoConsumoId - ID da sessão de consumo ativa da mesa
-   * @param {string} payload.tipoPagamento - 'PRE_PAGO' | 'POS_PAGO'
-   * @param {Array} payload.itens - Array de itens [{produtoId, quantidade, observacoes?}]
-   * @param {string} [payload.origem] - 'BALCAO' | 'QRCODE' | 'APP'
+   *
+   * @param {Object} payload
+   * @param {number} payload.sessaoConsumoId  - ID da sessão de consumo ativa da mesa (OBRIGATÓRIO)
+   * @param {string} payload.tipoPagamento    - 'PRE_PAGO' | 'POS_PAGO'
+   * @param {Array}  payload.itens            - [{produtoId, quantidade, observacoes?}]
    * @returns {Promise<Object>} Pedido criado com ID e número
-   * 
-   * Nota: Backend resolve automaticamente fundoConsumoId via cliente da sessão
-   * 
-   * @throws {Error} Validação de payload
-   * @throws {PedidoConflictError} Já existe pedido ativo para a sessão
    */
   async criar(payload) {
-    const response = await api.post('/pedidos', payload, {
-      timeout: TIMEOUTS.WRITE
+    try {
+      const response = await api.post('/pedidos', payload, { timeout: TIMEOUTS.WRITE })
+      return response.data
+    } catch (error) {
+      if (error.response?.status === 409) {
+        throw new PedidoConflictError(
+          'Conflito ao criar pedido — sessão já possui pedido activo',
+          error.response.data
+        )
+      }
+      throw error
+    }
+  },
+
+  /**
+   * [GET] Buscar pedido por ID
+   * @param {number} id
+   * @returns {Promise<Object>} ApiResponse<PedidoResponse>
+   */
+  async getById(id) {
+    const response = await api.get(`/pedidos/${id}`, { timeout: TIMEOUTS.READ })
+    return response.data
+  },
+
+  /**
+   * [GET] Buscar pedido por número
+   * @param {string} numero - Ex: "000123"
+   * @returns {Promise<Object>}
+   */
+  async getByNumero(numero) {
+    const response = await api.get(`/pedidos/numero/${numero}`, { timeout: TIMEOUTS.READ })
+    return response.data
+  },
+
+  /**
+   * [GET] Listar pedidos de hoje (paginado)
+   * @param {{ page?: number, size?: number }} params
+   * @returns {Promise<Object>} ApiResponse<Page<PedidoResponse>>
+   */
+  async getHoje(params = {}) {
+    const response = await api.get('/pedidos/hoje', {
+      params: { page: params.page ?? 0, size: params.size ?? 20 },
+      timeout: TIMEOUTS.READ
     })
     return response.data
   },
 
   /**
-   * [GET] Buscar pedido por ID
-   * 
-   * @param {number} id - ID do pedido
-   * @param {Object} options - Opções de requisição
-   * @param {string} [options.etag] - ETag para validação de cache (304)
-   * @returns {Promise<Object>} Pedido completo
-   * 
-   * @throws {Error} Pedido não encontrado (404)
+   * [GET] Listar pedidos ativos (CRIADO ou EM_ANDAMENTO) paginado
+   * @param {{ page?: number, size?: number }} params
+   * @returns {Promise<Object>} ApiResponse<Page<PedidoResponse>>
    */
-  async getById(id, options = {}) {
-    const headers = {}
-    if (options.etag) {
-      headers['If-None-Match'] = options.etag
-    }
-
-    const response = await api.get(`/pedidos/${id}`, {
-      headers,
-      timeout: TIMEOUTS.READ
-    })
-    
-    return {
-      data: response.data,
-      etag: response.headers['etag'],
-      versao: response.data.versao
-    }
-  },
-
-  /**
-   * [GET] Buscar pedido por número
-   * 
-   * @param {string} numero - Número sequencial do pedido (ex: "000123")
-   * @returns {Promise<Object>} Pedido completo
-   */
-  async getByNumero(numero) {
-    const response = await api.get(`/pedidos/numero/${numero}`, {
+  async getAtivos(params = {}) {
+    const response = await api.get('/pedidos/ativos', {
+      params: { page: params.page ?? 0, size: params.size ?? 20 },
       timeout: TIMEOUTS.READ
     })
     return response.data
@@ -121,18 +127,66 @@ export const pedidoApi = {
 
   /**
    * [GET] Listar pedidos por status
-   * 
-   * @param {string} status - CRIADO | EM_ANDAMENTO | PRONTO | FINALIZADO | CANCELADO
-   * @param {Object} params - Parâmetros de query
-   * @param {number} [params.page=0] - Página
-   * @param {number} [params.size=20] - Itens por página
-   * @returns {Promise<Object>} Lista paginada
+   * @param {string} status - CRIADO | EM_ANDAMENTO | FINALIZADO | CANCELADO
+   * @param {{ page?: number, size?: number }} params
+   * @returns {Promise<Object>} ApiResponse<Page<PedidoResponse>>
    */
   async getByStatus(status, params = {}) {
     const response = await api.get(`/pedidos/status/${status}`, {
+      params: { page: params.page ?? 0, size: params.size ?? 20 },
+      timeout: TIMEOUTS.READ
+    })
+    return response.data
+  },
+
+  /**
+   * [GET] Listar pedidos de uma sessão de consumo (paginado)
+   * Endpoint: GET /pedidos/sessao/{id}
+   *
+   * @param {number} sessaoConsumoId - ID da SessaoConsumo
+   * @param {{ page?: number, size?: number }} params
+   * @returns {Promise<Object>} ApiResponse<Page<PedidoResponse>>
+   */
+  async getBySessaoConsumo(sessaoConsumoId, params = {}) {
+    const response = await api.get(`/pedidos/sessao/${sessaoConsumoId}`, {
+      params: { page: params.page ?? 0, size: params.size ?? 20 },
+      timeout: TIMEOUTS.READ
+    })
+    return response.data
+  },
+
+  /**
+   * [GET] Listar pedidos activos de uma sessão (paginado)
+   * Endpoint: GET /pedidos/sessao/{id}/ativos
+   *
+   * @param {number} sessaoConsumoId
+   * @param {{ page?: number, size?: number }} params
+   * @returns {Promise<Object>}
+   */
+  async getAtivosBySessaoConsumo(sessaoConsumoId, params = {}) {
+    const response = await api.get(`/pedidos/sessao/${sessaoConsumoId}/ativos`, {
+      params: { page: params.page ?? 0, size: params.size ?? 20 },
+      timeout: TIMEOUTS.READ
+    })
+    return response.data
+  },
+
+  /**
+   * [GET] Listar pedidos com filtros e paginação
+   * Endpoint: GET /pedidos?status=&sessaoId=&dataInicio=&dataFim=&page=&size=
+   *
+   * @param {{ status?, sessaoId?, dataInicio?, dataFim?, page?, size? }} params
+   * @returns {Promise<Object>} ApiResponse<Page<PedidoResponse>>
+   */
+  async listarComFiltros(params = {}) {
+    const response = await api.get('/pedidos', {
       params: {
-        page: params.page || 0,
-        size: params.size || 20
+        ...(params.status && { status: params.status }),
+        ...(params.sessaoId && { sessaoId: params.sessaoId }),
+        ...(params.dataInicio && { dataInicio: params.dataInicio }),
+        ...(params.dataFim && { dataFim: params.dataFim }),
+        page: params.page ?? 0,
+        size: params.size ?? 20
       },
       timeout: TIMEOUTS.READ
     })
@@ -140,180 +194,64 @@ export const pedidoApi = {
   },
 
   /**
-   * [GET] Listar pedidos ativos (CRIADO ou EM_ANDAMENTO)
-   * 
-   * @returns {Promise<Array>} Lista de pedidos ativos
+   * [PUT] Confirmar pedido (CRIADO → EM_ANDAMENTO)
+   * Envia o pedido para a cozinha.
+   * PERMISSÃO: ATENDENTE, GERENTE, ADMIN
+   *
+   * @param {number} pedidoId
+   * @returns {Promise<Object>}
    */
-  async getAtivos() {
-    const response = await api.get('/pedidos/ativos', {
-      timeout: TIMEOUTS.READ
+  async confirmar(pedidoId) {
+    const response = await api.put(`/pedidos/${pedidoId}/confirmar`, null, {
+      timeout: TIMEOUTS.WRITE
     })
     return response.data
   },
 
   /**
-   * [GET] Listar pedidos por sessão de consumo
-   * 
-   * @param {number} sessaoConsumoId - ID da sessão de consumo
-   * @returns {Promise<Array>} Lista de pedidos da sessão
+   * [PUT] Cancelar pedido
+   * PERMISSÃO: GERENTE, ADMIN
+   *
+   * @param {number} pedidoId
+   * @param {string} motivo - Motivo obrigatório
+   * @returns {Promise<Object>}
    */
-  async getBySessaoConsumo(sessaoConsumoId) {
-    const response = await api.get(`/pedidos/sessao-consumo/${sessaoConsumoId}`, {
-      timeout: TIMEOUTS.READ
+  async cancelar(pedidoId, motivo) {
+    const response = await api.put(`/pedidos/${pedidoId}/cancelar`, null, {
+      params: { motivo },
+      timeout: TIMEOUTS.WRITE
     })
     return response.data
   },
 
   /**
-   * @deprecated Use getBySessaoConsumo(sessaoConsumoId)
+   * [PUT] Confirmar pagamento pós-pago
+   * Marca pedido POS_PAGO como PAGO. Usar quando cliente paga em dinheiro ou outro meio.
+   * PERMISSÃO: GERENTE, ADMIN
+   *
+   * @param {number} pedidoId
+   * @returns {Promise<Object>}
    */
-  async getByUnidadeConsumo(sessaoConsumoId) {
-    console.warn('[pedidoApi] getByUnidadeConsumo() deprecated. Use getBySessaoConsumo().')
-    return this.getBySessaoConsumo(sessaoConsumoId)
+  async confirmarPagamento(pedidoId) {
+    const response = await api.put(`/pedidos/${pedidoId}/confirmar-pagamento`, null, {
+      timeout: TIMEOUTS.WRITE
+    })
+    return response.data
   },
 
   /**
-   * ════════════════════════════════════════════════════════════════════════════════
-   * OPERAÇÕES DE ITENS (Subpedidos)
-   * ════════════════════════════════════════════════════════════════════════════════
+   * [PUT] Fechar conta (checkout)
+   * Para POS_PAGO não pago: confirma o pagamento automaticamente.
+   * Para PRE_PAGO: o débito já foi efectuado na criação.
+   * Sem body — o backend não aceita parâmetros neste endpoint.
+   * PERMISSÃO: ATENDENTE, GERENTE, ADMIN
+   *
+   * @param {number} pedidoId
+   * @returns {Promise<Object>}
    */
-
-  /**
-   * [POST] Adicionar item ao pedido
-   * 
-   * @param {number} pedidoId - ID do pedido
-   * @param {Object} item - Dados do item
-   * @param {number} item.produtoId - ID do produto
-   * @param {number} item.quantidade - Quantidade
-   * @param {string} [item.observacao] - Observações do item
-   * @param {Object} options - Opções de concorrência
-   * @param {number} [options.versao] - Versão esperada (concorrência otimista)
-   * @returns {Promise<Object>} Pedido atualizado
-   * 
-   * @throws {PedidoConflictError} Versão desatualizada (409)
-   */
-  async adicionarItem(pedidoId, item, options = {}) {
-    const headers = {}
-    if (options.versao !== undefined) {
-      headers['If-Match'] = `"${options.versao}"`
-    }
-
+  async fechar(pedidoId) {
     try {
-      const response = await api.post(`/pedidos/${pedidoId}/itens`, item, {
-        headers,
-        timeout: TIMEOUTS.WRITE
-      })
-      return response.data
-    } catch (error) {
-      if (error.response?.status === 409) {
-        throw new PedidoConflictError(
-          'Conflito de versão: pedido foi modificado por outro usuário',
-          error.response.data?.versaoAtual,
-          options.versao,
-          error.response.data
-        )
-      }
-      throw error
-    }
-  },
-
-  /**
-   * [PUT] Atualizar quantidade de item
-   * 
-   * @param {number} pedidoId - ID do pedido
-   * @param {number} itemId - ID do item (subpedido)
-   * @param {number} quantidade - Nova quantidade
-   * @param {Object} options - Opções de concorrência
-   * @returns {Promise<Object>} Pedido atualizado
-   * 
-   * @throws {PedidoConflictError} Conflito de versão
-   */
-  async atualizarQuantidadeItem(pedidoId, itemId, quantidade, options = {}) {
-    const headers = {}
-    if (options.versao !== undefined) {
-      headers['If-Match'] = `"${options.versao}"`
-    }
-
-    try {
-      const response = await api.put(
-        `/pedidos/${pedidoId}/itens/${itemId}/quantidade`,
-        { quantidade },
-        { headers, timeout: TIMEOUTS.WRITE }
-      )
-      return response.data
-    } catch (error) {
-      if (error.response?.status === 409) {
-        throw new PedidoConflictError(
-          'Conflito ao atualizar quantidade',
-          error.response.data?.versaoAtual,
-          options.versao,
-          error.response.data
-        )
-      }
-      throw error
-    }
-  },
-
-  /**
-   * [DELETE] Remover item do pedido
-   * 
-   * @param {number} pedidoId - ID do pedido
-   * @param {number} itemId - ID do item
-   * @param {Object} options - Opções de concorrência
-   * @returns {Promise<Object>} Pedido atualizado
-   */
-  async removerItem(pedidoId, itemId, options = {}) {
-    const headers = {}
-    if (options.versao !== undefined) {
-      headers['If-Match'] = `"${options.versao}"`
-    }
-
-    try {
-      const response = await api.delete(`/pedidos/${pedidoId}/itens/${itemId}`, {
-        headers,
-        timeout: TIMEOUTS.WRITE
-      })
-      return response.data
-    } catch (error) {
-      if (error.response?.status === 409) {
-        throw new PedidoConflictError(
-          'Conflito ao remover item',
-          error.response.data?.versaoAtual,
-          options.versao,
-          error.response.data
-        )
-      }
-      throw error
-    }
-  },
-
-  /**
-   * ════════════════════════════════════════════════════════════════════════════════
-   * OPERAÇÕES DE ESTADO
-   * ════════════════════════════════════════════════════════════════════════════════
-   */
-
-  /**
-   * [PUT] Fechar pedido (marcar como FINALIZADO)
-   * 
-   * CRÍTICO: Operação transacional - envolve:
-   * - Validação de saldo (se com fundo)
-   * - Debito do fundo
-   * - Geração de comprovante
-   * - Atualização de status
-   * 
-   * @param {number} pedidoId - ID do pedido
-   * @param {Object} payload - Dados de fechamento
-   * @param {string} payload.formaPagamento - 'PRE_PAGO' | 'POS_PAGO' | 'DINHEIRO' | 'CARTAO' | 'PIX'
-   * @param {string} [payload.observacao] - Observações
-   * @returns {Promise<Object>} Pedido fechado + comprovante
-   * 
-   * @throws {Error} Saldo insuficiente (400)
-   * @throws {PedidoConflictError} Versão desatualizada (409)
-   */
-  async fechar(pedidoId, payload) {
-    try {
-      const response = await api.put(`/pedidos/${pedidoId}/fechar`, payload, {
+      const response = await api.put(`/pedidos/${pedidoId}/fechar`, null, {
         timeout: TIMEOUTS.CRITICAL
       })
       return response.data
@@ -321,85 +259,11 @@ export const pedidoApi = {
       if (error.response?.status === 409) {
         throw new PedidoConflictError(
           'Conflito ao fechar pedido',
-          error.response.data?.versaoAtual,
-          null,
           error.response.data
         )
       }
       throw error
     }
-  },
-
-  /**
-   * [PUT] Cancelar pedido
-   * 
-   * PERMISSÃO: Apenas GERENTE
-   * 
-   * @param {number} pedidoId - ID do pedido
-   * @param {string} motivo - Motivo obrigatório do cancelamento
-   * @returns {Promise<Object>} Pedido cancelado
-   */
-  async cancelar(pedidoId, motivo) {
-    const response = await api.put(
-      `/pedidos/${pedidoId}/cancelar`,
-      null,
-      {
-        params: { motivo },
-        timeout: TIMEOUTS.WRITE
-      }
-    )
-    return response.data
-  },
-
-  /**
-   * [PUT] Alterar status do pedido
-   * 
-   * @param {number} pedidoId - ID do pedido
-   * @param {string} novoStatus - Novo status
-   * @returns {Promise<Object>} Pedido atualizado
-   */
-  async alterarStatus(pedidoId, novoStatus) {
-    const response = await api.put(`/pedidos/${pedidoId}/status`, {
-      status: novoStatus
-    }, {
-      timeout: TIMEOUTS.WRITE
-    })
-    return response.data
-  },
-
-  /**
-   * ════════════════════════════════════════════════════════════════════════════════
-   * OPERAÇÕES DE SINCRONIZAÇÃO (preparado para WebSocket)
-   * ════════════════════════════════════════════════════════════════════════════════
-   */
-
-  /**
-   * [GET] Buscar alterações desde uma versão específica
-   * 
-   * Usado para sincronização incremental após reconexão
-   * 
-   * @param {number} pedidoId - ID do pedido
-   * @param {number} versaoBase - Última versão conhecida
-   * @returns {Promise<Object>} Delta de alterações
-   */
-  async getDelta(pedidoId, versaoBase) {
-    const response = await api.get(`/pedidos/${pedidoId}/delta`, {
-      params: { versao: versaoBase },
-      timeout: TIMEOUTS.READ
-    })
-    return response.data
-  },
-
-  /**
-   * [POST] Ping de keep-alive para operações longas
-   * 
-   * Evita timeout em operações que mantém lock otimista
-   */
-  async ping(pedidoId) {
-    const response = await api.post(`/pedidos/${pedidoId}/ping`, null, {
-      timeout: 2000
-    })
-    return response.data
   }
 }
 

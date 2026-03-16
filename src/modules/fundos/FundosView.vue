@@ -6,7 +6,7 @@ import SkeletonCard from '@/components/shared/SkeletonCard.vue'
 import ConfirmDialog from '@/components/shared/ConfirmDialog.vue'
 import { useCurrency } from '@/utils/currency'
 import { useNotificationStore } from '@/store/notifications'
-import fundoConsumoService from '@/services/fundoConsumoService'
+import fundoConsumoService from '@/api/fundoConsumoService'
 
 /**
  * FundosView - Módulo de gestão de fundos de consumo

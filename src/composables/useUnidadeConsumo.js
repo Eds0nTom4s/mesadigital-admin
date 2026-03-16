@@ -11,8 +11,8 @@
  */
 
 import { ref, computed, readonly } from 'vue'
-import mesasService from '@/services/mesasService'
-import sessoesConsumoService from '@/services/sessoesConsumoService'
+import mesasService from '@/api/mesasService'
+import sessoesConsumoService from '@/api/sessoesConsumoService'
 import { useAuthStore } from '@/store/auth'
 
 export function useUnidadeConsumo() {

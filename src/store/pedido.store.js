@@ -28,7 +28,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import pedidoService from '@/services/pedido.service'
+import pedidoService from '@/api/pedido.service'
 import { PedidoConflictError } from '@/api/pedido.api'
 import { PEDIDO_STATUS } from '@/utils/pedido.types'
 

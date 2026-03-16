@@ -1,109 +1,85 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import * as authService from '@/api/authService'
 
 /**
  * Store de Autenticação
  * 
  * Gerencia o estado de autenticação do usuário no painel administrativo.
- * Usa dados reais do backend após login.
+ * Baseado EXCLUSIVAMENTE na documentação em integration-docs/admin_panel_integration.md
  */
 
 export const useAuthStore = defineStore('auth', () => {
-  // Estado - SEM DADOS MOCK
+  // Estado
   const user = ref(null)
   const isAuthenticated = ref(false)
   const token = ref(null)
 
   // Getters
   const userInitials = computed(() => {
-    if (!user.value?.name) return ''
-    const names = user.value.name.split(' ')
+    if (!user.value?.nome) return ''
+    const names = user.value.nome.split(' ')
     return names.length > 1 ? `${names[0][0]}${names[1][0]}` : names[0][0]
   })
 
   const isAdmin = computed(() => {
-    return user.value?.roles?.includes('ROLE_ADMIN') || user.value?.role === 'ADMIN'
+    return user.value?.tipoUsuario === 'ADMIN' || user.value?.roles?.includes('ROLE_ADMIN')
   })
 
   const isGerente = computed(() => {
-    return user.value?.roles?.includes('ROLE_GERENTE') || user.value?.role === 'GERENTE'
+    return user.value?.tipoUsuario === 'GERENTE' || user.value?.roles?.includes('ROLE_GERENTE')
+  })
+
+  const isAtendente = computed(() => {
+    return user.value?.tipoUsuario === 'ATENDENTE' || user.value?.roles?.includes('ROLE_ATENDENTE')
+  })
+
+  const isCozinha = computed(() => {
+    return user.value?.tipoUsuario === 'COZINHA' || user.value?.roles?.includes('ROLE_COZINHA')
   })
 
   const hasPermission = computed(() => {
     return (permission) => {
-      return user.value?.permissions?.includes(permission) || false
+      // No momento as permissões são baseadas nos roles/tipoUsuario
+      if (isAdmin.value) return true
+      return false
     }
   })
 
   // Actions
+  /**
+   * Realiza o login do operador
+   * @param {string} telefone - +244...
+   * @param {string} senha - password
+   */
   const login = async (telefone, senha) => {
-    // Integração real com API - sem mock
     try {
-      console.log('[Auth] Iniciando login...', { telefone })
+      console.log('[AuthStore] Iniciando login para:', telefone)
       
-      const response = await fetch('/api/auth/admin/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telefone, senha })
-      })
+      const result = await authService.login(telefone, senha)
       
-      console.log('[Auth] Response status:', response.status)
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        console.error('[Auth] Erro na resposta:', errorData)
-        throw new Error(errorData.message || 'Credenciais inválidas')
+      if (result.success) {
+        user.value = {
+          ...result.user,
+          // Mapeamento de conveniência para compatibilidade com componentes existentes
+          role: result.user.tipoUsuario,
+          roles: [`ROLE_${result.user.tipoUsuario}`]
+        }
+        token.value = result.token
+        isAuthenticated.value = true
+        
+        // Sincronizar com localStorage para persistência entre tabs se necessário
+        // (Service já usa sessionStorage para segurança extra)
+        localStorage.setItem('token', result.token)
+        localStorage.setItem('user', JSON.stringify(user.value))
+        
+        console.log('[AuthStore] Login bem-sucedido:', user.value.tipoUsuario)
+        return { success: true }
       }
       
-      const responseData = await response.json()
-      console.log('[Auth] Resposta completa:', JSON.stringify(responseData, null, 2))
-      
-      // Estrutura REAL do backend (diferente da documentação):
-      // { success, message, data: { id, nome, telefone, email, tipoUsuario, token, expiresIn } }
-      if (!responseData.data?.token) {
-        console.error('[Auth] responseData.data:', responseData.data)
-        throw new Error('Token não encontrado na resposta')
-      }
-      
-      const userData = responseData.data
-      console.log('[Auth] Token extraído:', userData.token ? 'SIM' : 'NÃO')
-      console.log('[Auth] Usuário extraído:', { id: userData.id, nome: userData.nome, tipoUsuario: userData.tipoUsuario })
-
-      // [BACKEND] expiresIn é em SEGUNDOS (86400 = 24h), NÃO milissegundos.
-      // A expiração real é lida pelo checkAuth() via claim 'exp' do JWT.
-      // Fórmula correta se necessário: Date.now() + (userData.expiresIn * 1000)
-
-      // Armazenar token
-      token.value = userData.token
-      localStorage.setItem('token', userData.token)
-      console.log('[Auth] Token salvo no localStorage')
-      
-      // Usar dados do usuário da resposta (estrutura real do backend)
-      // [BACKEND] campo é 'tipoUsuario' (string), NÃO 'role' nem 'roles'
-      user.value = {
-        id: userData.id,
-        name: userData.nome,
-        telefone: userData.telefone,
-        email: userData.email || '',
-        role: userData.tipoUsuario,                    // 'ADMIN' | 'GERENTE' | 'ATENDENTE'
-        roles: [`ROLE_${userData.tipoUsuario}`],       // Derivado do tipoUsuario
-        ativo: true,
-        unidadeAtendimentoId: userData.unidadeAtendimentoId || null, // Não vem no JWT — lido daqui
-        permissions: []
-      }
-
-      // Persistir dados do utilizador para restaurar após refresh de página
-      // (JWT não contém nome, email, unidadeAtendimentoId)
-      localStorage.setItem('user', JSON.stringify(user.value))
-      
-      console.log('[Auth] Usuário logado:', user.value)
-      
-      isAuthenticated.value = true
-      console.log('[Auth] isAuthenticated:', isAuthenticated.value)
-      
-      return { success: true }
+      return { success: false, error: 'Erro desconhecido' }
     } catch (error) {
-      console.error('[Auth] Erro no login:', error)
+      console.error('[AuthStore] Erro no login:', error.message)
       return { success: false, error: error.message }
     }
   }

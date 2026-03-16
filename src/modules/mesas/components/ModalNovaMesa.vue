@@ -74,8 +74,8 @@
 import { ref, watch } from 'vue'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
-import mesasService from '@/services/mesasService'
-import qrcodeService from '@/services/qrcodeService'
+import mesasService from '@/api/mesasService'
+import qrcodeService from '@/api/qrcodeService'
 
 const props = defineProps({
   show: { type: Boolean, required: true }

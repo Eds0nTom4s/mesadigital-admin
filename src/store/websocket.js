@@ -4,62 +4,82 @@ import SockJS from 'sockjs-client'
 import { Client } from '@stomp/stompjs'
 
 /**
- * Store Pinia para gerenciar WebSocket globalmente
- * 
- * Mantém uma única conexão WebSocket para toda aplicação
- * Permite múltiplos componentes se inscreverem em diferentes tópicos
+ * Store Pinia — WebSocket global (conexão única)
+ *
+ * Correcções aplicadas (06/03/2026):
+ *  1. webSocketFactory reinstancia SockJS em cada tentativa de conexão
+ *     para que reconexões automáticas funcionem após queda.
+ *  2. _realizarInscricaoStomp rastreia o objeto Subscription e garante
+ *     no máximo 1 sub STOMP activa por tópico por sessão.
+ *  3. desinscrever remove o callback correcto; cancela a sub STOMP quando
+ *     não restam callbacks para o tópico.
+ *  4. reinscreverTodos limpa stompSubs antes de reinscrever, eliminando
+ *     duplicações após reconexão.
+ *  5. Flag _ativo impede múltiplos activate() simultâneos.
  */
 export const useWebSocketStore = defineStore('websocket', () => {
-  // Estado
-  const cliente = ref(null)
-  const conectado = ref(false)
+  // ── Estado ────────────────────────────────────────────────────────────────
+  const cliente      = ref(null)
+  const conectado    = ref(false)
   const reconectando = ref(false)
-  const inscricoes = ref(new Map()) // Map<topico, Set<callback>>
-  const notificacoes = ref([]) // Histórico de notificações
+  const notificacoes = ref([])
 
-  // Configuração
-  const wsUrl = import.meta.env.VITE_WS_URL || 'http://localhost:8080/api/ws'
+  /**
+   * Map<topico, Set<callback>>
+   * Persiste entre reconexões para que reinscreverTodos() os recupere.
+   */
+  const inscricoes = ref(new Map())
 
-  // Getters
+  /**
+   * Map<topico, StompSubscription>
+   * Rastreia a subscrição STOMP activa — limpo em onWebSocketClose.
+   */
+  const stompSubs = new Map()
+
+  let _ativo = false
+
+  // ── Configuração ──────────────────────────────────────────────────────────
+  const wsUrl = import.meta.env.VITE_WS_URL || '/api/ws'
+
+  // ── Getters ───────────────────────────────────────────────────────────────
   const statusConexao = computed(() => {
-    if (conectado.value) return 'conectado'
+    if (conectado.value)    return 'conectado'
     if (reconectando.value) return 'reconectando'
     return 'desconectado'
   })
 
-  const ultimasNotificacoes = computed(() => {
-    return notificacoes.value.slice(-10).reverse()
-  })
+  const ultimasNotificacoes = computed(() =>
+    notificacoes.value.slice(-10).reverse()
+  )
 
-  /**
-   * Conectar ao WebSocket
-   */
+  // ── Conexão ───────────────────────────────────────────────────────────────
   const conectar = () => {
-    if (cliente.value) {
-      console.log('[WebSocketStore] Já conectado')
+    if (_ativo) {
+      console.log('[WebSocketStore] já activo, ignorando conectar()')
       return
     }
-
     console.log('[WebSocketStore] Iniciando conexão...', wsUrl)
+    _ativo = true
 
     try {
-      const socket = new SockJS(wsUrl, null, {
-        // Desabilitar transports que causam 404 em /info
-        transports: ['websocket', 'xhr-streaming', 'xhr-polling']
-      })
+      // Ler token no momento da conexão (C1 — JWT enviado no CONNECT)
+      const token = localStorage.getItem('token')
 
       cliente.value = new Client({
-        webSocketFactory: () => socket,
-        reconnectDelay: 5000,
+        // Factory reinstanciada a cada tentativa → reconexões reais funcionam
+        webSocketFactory: () => new SockJS(wsUrl, null, {
+          transports: ['websocket', 'xhr-streaming', 'xhr-polling']
+        }),
+        // JWT enviado no frame STOMP CONNECT
+        connectHeaders: token ? { Authorization: `Bearer ${token}` } : {},
+        reconnectDelay:    5000,
         heartbeatIncoming: 4000,
         heartbeatOutgoing: 4000,
 
         onConnect: (frame) => {
-          console.log('[WebSocketStore] Conectado', frame)
-          conectado.value = true
+          console.log('[WebSocketStore] Conectado', frame.headers?.['user-name'] ?? '')
+          conectado.value    = true
           reconectando.value = false
-
-          // Re-inscrever em todos os tópicos
           reinscreverTodos()
         },
 
@@ -69,179 +89,141 @@ export const useWebSocketStore = defineStore('websocket', () => {
         },
 
         onStompError: (frame) => {
-          console.error('[WebSocketStore] Erro STOMP:', frame)
+          console.error('[WebSocketStore] Erro STOMP:', frame.headers?.message, frame.body)
           conectado.value = false
         },
 
         onWebSocketClose: () => {
-          console.log('[WebSocketStore] Conexão fechada. Reconectando...')
+          console.log('[WebSocketStore] WebSocket fechado — a reconectar...')
           reconectando.value = true
-          conectado.value = false
+          conectado.value    = false
+          stompSubs.clear()  // invalidadas — serão recriadas em onConnect
         }
       })
 
       cliente.value.activate()
-    } catch (error) {
-      console.error('[WebSocketStore] Erro ao conectar:', error)
+    } catch (err) {
+      console.error('[WebSocketStore] Erro ao criar cliente STOMP:', err)
+      _ativo = false
     }
   }
 
-  /**
-   * Desconectar do WebSocket
-   */
   const desconectar = () => {
     if (cliente.value) {
       console.log('[WebSocketStore] Desconectando...')
       cliente.value.deactivate()
       cliente.value = null
-      conectado.value = false
-      inscricoes.value.clear()
     }
+    conectado.value    = false
+    reconectando.value = false
+    _ativo = false
+    stompSubs.clear()
+    inscricoes.value.clear()
   }
 
-  /**
-   * Inscrever em um tópico
-   */
+  // ── Subscrições ───────────────────────────────────────────────────────────
   const inscrever = (topico, callback) => {
     if (!callback) {
-      console.warn('[WebSocketStore] Callback não fornecido para:', topico)
-      return
+      console.warn('[WebSocketStore] callback em falta para:', topico)
+      return () => {}
     }
 
-    // Adicionar callback ao set de callbacks do tópico
     if (!inscricoes.value.has(topico)) {
       inscricoes.value.set(topico, new Set())
     }
     inscricoes.value.get(topico).add(callback)
 
-    // Se já conectado, inscrever imediatamente
-    if (conectado.value && cliente.value) {
-      realizarInscricao(topico)
+    // Se já conectado e sem sub STOMP para este tópico, criar agora
+    if (conectado.value && cliente.value && !stompSubs.has(topico)) {
+      _realizarInscricaoStomp(topico)
     }
 
     console.log('[WebSocketStore] Inscrito em:', topico)
-
-    // Retornar função para desinscrever
     return () => desinscrever(topico, callback)
   }
 
-  /**
-   * Desinscrever de um tópico
-   */
   const desinscrever = (topico, callback) => {
-    if (inscricoes.value.has(topico)) {
+    if (!inscricoes.value.has(topico)) return
+
+    if (callback) {
       inscricoes.value.get(topico).delete(callback)
-      
-      // Se não há mais callbacks, remover tópico
-      if (inscricoes.value.get(topico).size === 0) {
-        inscricoes.value.delete(topico)
-      }
+    } else {
+      inscricoes.value.get(topico).clear()
     }
-    console.log('[WebSocketStore] Desinscrito de:', topico)
+
+    if (inscricoes.value.get(topico).size === 0) {
+      inscricoes.value.delete(topico)
+      const sub = stompSubs.get(topico)
+      if (sub) { try { sub.unsubscribe() } catch (_) {} }
+      stompSubs.delete(topico)
+      console.log('[WebSocketStore] Tópico removido:', topico)
+    } else {
+      console.log('[WebSocketStore] Callback removido de:', topico)
+    }
   }
 
-  /**
-   * Realizar inscrição no tópico via STOMP
-   */
-  const realizarInscricao = (topico) => {
+  /** Cria uma sub STOMP (no máximo 1 por tópico por sessão). */
+  const _realizarInscricaoStomp = (topico) => {
     if (!cliente.value || !conectado.value) return
+    if (stompSubs.has(topico)) return  // já existe
 
-    cliente.value.subscribe(topico, (message) => {
-      try {
-        const dados = JSON.parse(message.body)
-        
-        // Adicionar ao histórico
-        notificacoes.value.push({
-          topico,
-          dados,
-          timestamp: new Date().toISOString()
-        })
-
-        // Limitar histórico
-        if (notificacoes.value.length > 100) {
-          notificacoes.value.shift()
-        }
-
-        // Chamar todos os callbacks registrados para este tópico
-        const callbacks = inscricoes.value.get(topico)
-        if (callbacks) {
-          callbacks.forEach(callback => {
-            try {
-              callback(dados)
-            } catch (error) {
-              console.error('[WebSocketStore] Erro ao executar callback:', error)
-            }
-          })
-        }
-
-        console.log('[WebSocketStore] Mensagem recebida:', topico, dados)
-      } catch (error) {
-        console.error('[WebSocketStore] Erro ao processar mensagem:', error)
+    const sub = cliente.value.subscribe(topico, (message) => {
+      let dados
+      try { dados = JSON.parse(message.body) } catch {
+        console.warn('[WebSocketStore] mensagem não-JSON em', topico)
+        return
       }
+
+      notificacoes.value.push({ topico, dados, timestamp: new Date().toISOString() })
+      if (notificacoes.value.length > 100) notificacoes.value.shift()
+
+      const cbs = inscricoes.value.get(topico)
+      if (cbs) {
+        cbs.forEach(cb => { try { cb(dados) } catch (err) {
+          console.error('[WebSocketStore] Erro no callback de', topico, err)
+        }})
+      }
+      console.log('[WebSocketStore] ←', topico, dados)
     })
+
+    stompSubs.set(topico, sub)
+    console.log('[WebSocketStore] Sub STOMP criada:', topico)
   }
 
-  /**
-   * Re-inscrever em todos os tópicos após reconexão
-   */
+  /** Recria todas as subs após reconexão (stompSubs já está vazio). */
   const reinscreverTodos = () => {
-    console.log('[WebSocketStore] Re-inscrevendo em', inscricoes.value.size, 'tópicos')
-    inscricoes.value.forEach((callbacks, topico) => {
-      realizarInscricao(topico)
-    })
+    console.log('[WebSocketStore] Re-inscrevendo', inscricoes.value.size, 'tópicos')
+    inscricoes.value.forEach((_, topico) => _realizarInscricaoStomp(topico))
   }
 
-  /**
-   * Limpar histórico de notificações
-   */
-  const limparNotificacoes = () => {
-    notificacoes.value = []
-  }
+  const limparNotificacoes = () => { notificacoes.value = [] }
 
-  /**
-   * Inscrever em tópico de cozinha
-   */
-  const inscreverCozinha = (cozinhaId, callback) => {
-    return inscrever(`/topic/cozinha/${cozinhaId}`, callback)
-  }
+  // ── Helpers de domínio ────────────────────────────────────────────────────
+  // Tópicos conforme documentation §4 (integration-docs/admin_panel_integration.md)
+  const inscreverCozinha   = (id, cb) => inscrever(`/topic/subpedidos/cozinha/${id}`, cb)
+  const inscreverAtendente = (id, cb) => inscrever(`/topic/atendente/unidade/${id}`, cb)
+  const inscreverSubPedido = (id, cb) => inscrever(`/topic/subpedido/${id}`, cb)
+  const inscreverPedido    = (_id, cb) => inscrever('/topic/pedidos', cb)
 
-  /**
-   * Inscrever em tópico de atendente por unidade
-   */
-  const inscreverAtendente = (unidadeId, callback) => {
-    return inscrever(`/topic/atendente/unidade/${unidadeId}`, callback)
-  }
-
-  /**
-   * Inscrever em tópico de subpedido específico
-   */
-  const inscreverSubPedido = (subPedidoId, callback) => {
-    return inscrever(`/topic/subpedido/${subPedidoId}`, callback)
-  }
-
-  /**
-   * Inscrever em tópico de pedido
-   */
-  const inscreverPedido = (pedidoId, callback) => {
-    return inscrever(`/topic/pedido/${pedidoId}`, callback)
-  }
-
+  // ── Exposição ─────────────────────────────────────────────────────────────
   return {
-    // Estado
+    // Estado reactivo
     conectado,
     reconectando,
     statusConexao,
     notificacoes,
     ultimasNotificacoes,
 
-    // Métodos gerais
+    // Ciclo de vida
     conectar,
     desconectar,
+
+    // Subscrições
     inscrever,
     desinscrever,
     limparNotificacoes,
 
-    // Métodos específicos
+    // Helpers de domínio
     inscreverCozinha,
     inscreverAtendente,
     inscreverSubPedido,

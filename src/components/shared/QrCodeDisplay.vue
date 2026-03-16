@@ -137,7 +137,7 @@
 <script setup>
 import { computed, ref, watch, onUnmounted } from 'vue'
 import { useAuthStore } from '@/store/auth'
-import api from '@/services/api'
+import api from '@/api/api'
 
 const props = defineProps({
   qrCode: {
