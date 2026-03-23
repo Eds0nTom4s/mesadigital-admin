@@ -31,14 +31,24 @@ export const pedidosBalcaoService = {
 
   /**
    * Buscar pedido ATIVO de uma sessão de consumo
-   * GET /api/pedidos/sessao-consumo/{sessaoConsumoId}/ativo
+   * Atualizado conforme PedidoController.java (@GetMapping("/sessao/{id}/ativos"))
    * 
-   * Retorna o pedido ativo (status != FINALIZADO && status != CANCELADO)
-   * com todos os SubPedidos, ItemPedidos e dados de Cozinha
+   * @param {number} sessaoConsumoId - ID da sessão de consumo ativa
+   * @returns {Promise<Object|null>} Retorna o primeiro pedido ativo encontrado ou null
    */
   async getPedidoAtivoSessao(sessaoConsumoId) {
-    const response = await api.get(`/pedidos/sessao-consumo/${sessaoConsumoId}/ativo`)
-    return response.data
+    try {
+      const response = await api.get(`/pedidos/sessao/${sessaoConsumoId}/ativos`)
+      // O backend retorna ApiResponse<Page<PedidoResponse>>
+      const apiResponse = response.data
+      const page = apiResponse?.data
+      const content = page?.content || []
+      
+      return content // Retorna a lista completa de pedidos ativos
+    } catch (error) {
+      if (error.response?.status === 404) return null
+      throw error
+    }
   },
 
   /**

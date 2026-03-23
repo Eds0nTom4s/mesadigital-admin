@@ -154,8 +154,13 @@ const carregarHistorico = async () => {
   loading.value = true
   try {
     const response = await pedidoApi.getBySessaoConsumo(props.sessaoConsumoId)
-    const raw = response.data || response
-    pedidos.value = Array.isArray(raw) ? raw : raw.data || []
+    // response.data é a ApiResponse<Page<PedidoResponse>>
+    const apiResponse = response.data
+    const page = apiResponse?.data
+    const content = page?.content || []
+    
+    // Suporte para resposta em array simples ou Page
+    pedidos.value = Array.isArray(content) ? content : (Array.isArray(apiResponse) ? apiResponse : [])
   } catch (error) {
     console.error('[ModalHistorico] Erro ao carregar histórico:', error)
     notificationStore.erro('Erro ao carregar histórico de pedidos')

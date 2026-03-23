@@ -26,6 +26,22 @@ const fundoConsumoService = {
   },
 
   /**
+   * Adicionar fundo manualmente (se ainda suportado/legado no backend)
+   * POST /api/fundos/criar-avulso ou equivalente
+   */
+  async criarFundo(dados) {
+    try {
+      const response = await api.post('/fundos', dados)
+      return response.data?.data || response.data
+    } catch (e) {
+      if (e.response && e.response.status === 404) {
+        throw new Error('A criação de Fundo avulso já não é suportada diretamente pelo backend. Abra uma nova sessão para o cliente ou utilize o Gateway de Pagamentos para recarga.')
+      }
+      throw e
+    }
+  },
+
+  /**
    * Consultar fundo pelo qrCodeSessao (token do QR Code da sessão)
    * GET /api/fundos/{token}  [ATD/GER/ADM]
    * @param {string} token - qrCodeSessao da SessaoConsumo

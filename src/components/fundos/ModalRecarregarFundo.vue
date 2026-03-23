@@ -1,5 +1,5 @@
 <template>
-  <div v-if="isOpen" class="modal-overlay" @click.self="$emit('close')">
+  <div v-if="isOpen && fundo" class="modal-overlay" @click.self="$emit('close')">
     <div class="modal-dialog">
       <div class="modal-header">
         <h3>Recarregar Fundo de Consumo</h3>
@@ -56,9 +56,40 @@
         <!-- Método de Pagamento -->
         <div v-if="fundoAtivo" class="form-group">
           <label class="form-label">
-            Método de Pagamento AppyPay <span class="required">*</span>
+            Método de Recebimento <span class="required">*</span>
           </label>
           <div class="payment-methods">
+            <!-- CASH -->
+            <label 
+              class="payment-method" 
+              :class="{ 'selected': formulario.metodoPagamento === 'CASH' }"
+            >
+              <input type="radio" v-model="formulario.metodoPagamento" value="CASH" />
+              <div class="method-content">
+                <div class="method-icon">💵</div>
+                <div class="method-details">
+                  <span class="method-title">Dinheiro (CASH)</span>
+                  <span class="method-desc">Recebimento manual em espécie</span>
+                </div>
+              </div>
+            </label>
+
+            <!-- TPA -->
+            <label 
+              class="payment-method" 
+              :class="{ 'selected': formulario.metodoPagamento === 'TPA' }"
+            >
+              <input type="radio" v-model="formulario.metodoPagamento" value="TPA" />
+              <div class="method-content">
+                <div class="method-icon">💳</div>
+                <div class="method-details">
+                  <span class="method-title">Multicaixa (TPA)</span>
+                  <span class="method-desc">Pagamento via terminal físico</span>
+                </div>
+              </div>
+            </label>
+
+            <!-- DIGITAL (GPO) -->
             <label 
               class="payment-method" 
               :class="{ 'selected': formulario.metodoPagamento === 'GPO' }"
@@ -67,12 +98,13 @@
               <div class="method-content">
                 <div class="method-icon">⚡</div>
                 <div class="method-details">
-                  <span class="method-title">GPO - Pagamento Instantâneo</span>
-                  <span class="method-desc">Redirecionamento para AppyPay</span>
+                  <span class="method-title">Digital (M-Express / GPO)</span>
+                  <span class="method-desc">Disparar pedido para o telemóvel do cliente</span>
                 </div>
               </div>
             </label>
             
+            <!-- REF (Opcional, manter se necessário) -->
             <label 
               class="payment-method" 
               :class="{ 'selected': formulario.metodoPagamento === 'REF' }"
@@ -81,12 +113,29 @@
               <div class="method-content">
                 <div class="method-icon">🏦</div>
                 <div class="method-details">
-                  <span class="method-title">REF - Referência Bancária</span>
-                  <span class="method-desc">Pagamento via banco</span>
+                  <span class="method-title">Referência Bancária</span>
+                  <span class="method-desc">Gerar dados para ATM/Internet Banking</span>
                 </div>
               </div>
             </label>
           </div>
+        </div>
+
+        <!-- Telefone para Digital (GPO/M-Express) -->
+        <div v-if="formulario.metodoPagamento === 'GPO' && !pagamentoCriado" class="form-group mt-4 animate-fade-in">
+          <label class="form-label">Número do Telemóvel (Cliente) <span class="required">*</span></label>
+          <div class="input-with-prefix">
+            <span class="prefix">+244</span>
+            <input 
+              v-model="formulario.telefoneDigital"
+              type="tel"
+              placeholder="9xx xxx xxx"
+              class="form-control"
+              maxlength="9"
+              @input="limparTelefone"
+            />
+          </div>
+          <p class="form-hint">O cliente receberá o pedido de confirmação no telemóvel.</p>
         </div>
 
         <!-- Preview do Novo Saldo -->
@@ -97,11 +146,11 @@
           </div>
           <div class="preview-row plus">
             <span>+ Recarga:</span>
-            <span>{{ formatCurrency(valorRecargaCentavos) }}</span>
+            <span>{{ formatCurrency(formulario.valorDecimal) }}</span>
           </div>
           <div class="preview-row total">
             <span>Novo Saldo:</span>
-            <span class="preview-value">{{ formatCurrency(fundo.saldoAtual + valorRecargaCentavos) }}</span>
+            <span class="preview-value">{{ formatCurrency(fundo.saldoAtual + formulario.valorDecimal) }}</span>
           </div>
         </div>
 
@@ -137,16 +186,16 @@
       </div>
 
       <div class="modal-footer">
-        <button @click="$emit('fechar')" class="btn btn-secondary" :disabled="loading">
-          {{ pagamentoCriado ? 'Fechar' : 'Cancelar' }}
+        <button @click="$emit('close')" class="btn btn-secondary" :disabled="loading">
+          {{ (pagamentoCriado || recargaSucesso) ? 'Fechar' : 'Cancelar' }}
         </button>
         <button 
-          v-if="!pagamentoCriado"
+          v-if="!pagamentoCriado && !recargaSucesso"
           @click="confirmarRecarga" 
           class="btn btn-primary"
           :disabled="!podeConfirmar || loading"
         >
-          {{ loading ? 'Processando...' : 'Confirmar Recarga' }}
+          {{ loading ? 'Processando...' : 'Confirmar e Creditar' }}
         </button>
       </div>
     </div>
@@ -158,13 +207,10 @@ import { ref, computed, onMounted } from 'vue'
 import { useCurrency } from '@/utils/currency'
 import { useNotificationStore } from '@/store/notifications'
 import fundoConsumoService from '@/api/fundoConsumoService'
+import pagamentoService from '@/api/pagamentoService'
 import { configuracaoFinanceiraService } from '@/api/configuracaoFinanceiraService'
 
 const props = defineProps({
-  isOpen: {
-    type: Boolean,
-    default: false
-  },
   fundo: {
     type: Object,
     default: null
@@ -176,12 +222,14 @@ const emit = defineEmits(['close', 'recarga-realizada'])
 const { formatCurrency } = useCurrency()
 const notificationStore = useNotificationStore()
 
-const valorMinimo = ref(5000) // centavos
+const valorMinimo = ref(10) // AOA
 const loading = ref(false)
 const pagamentoCriado = ref(null)
+const recargaSucesso = ref(false)
 const formulario = ref({
   valorDecimal: 50.00, // valor em decimal (Kz)
-  metodoPagamento: 'GPO'
+  metodoPagamento: 'CASH',
+  telefoneDigital: ''
 })
 
 // Computed para converter decimal → centavos
@@ -189,15 +237,21 @@ const valorRecargaCentavos = computed(() => {
   return Math.round((formulario.value.valorDecimal || 0) * 100)
 })
 
-// Computed para valor mínimo em decimal
+// Computed para valor mínimo em decimal (AOA)
 const valorMinimoDecimal = computed(() => {
-  return (valorMinimo.value / 100).toFixed(2)
+  return (valorMinimo.value || 0).toFixed(2)
 })
 
 const podeConfirmar = computed(() => {
-  return fundoAtivo.value &&
-         valorRecargaCentavos.value >= valorMinimo.value && 
+  const baseValid = fundoAtivo.value &&
+         formulario.value.valorDecimal >= valorMinimo.value && 
          formulario.value.metodoPagamento
+  
+  if (formulario.value.metodoPagamento === 'GPO') {
+    return baseValid && formulario.value.telefoneDigital.length >= 9
+  }
+  
+  return baseValid
 })
 
 const fundoAtivo = computed(() => {
@@ -207,12 +261,19 @@ const fundoAtivo = computed(() => {
 onMounted(async () => {
   try {
     const config = await configuracaoFinanceiraService.buscarConfiguracao()
-    valorMinimo.value = config.data?.valorMinimoOperacao ?? 5000 // já vem em centavos
-    formulario.value.valorDecimal = ((config.data?.valorMinimoOperacao ?? 5000) / 100) // converte para decimal
+    // Backend envia BigDecimal (AOA), ex: 10.00
+    valorMinimo.value = config.valorMinimoOperacao ?? 10
+    formulario.value.valorDecimal = valorMinimo.value
   } catch (error) {
     console.error('Erro ao carregar valor mínimo:', error)
   }
 })
+
+const limparTelefone = (event) => {
+  // Remove tudo que não é dígito
+  const val = event.target.value.replace(/\D/g, '')
+  formulario.value.telefoneDigital = val.substring(0, 9)
+}
 
 const confirmarRecarga = async () => {
   if (!fundoAtivo.value) {
@@ -225,37 +286,83 @@ const confirmarRecarga = async () => {
     return
   }
 
-  if (valorRecargaCentavos.value < valorMinimo.value) {
+  if (formulario.value.valorDecimal < valorMinimo.value) {
     notificationStore.aviso(`Valor mínimo de recarga: ${formatCurrency(valorMinimo.value)}`)
     return
   }
 
   loading.value = true
   try {
-    const pagamento = await fundoConsumoService.recarregarFundo(
-      props.fundo.tokenPortador,
-      valorRecargaCentavos.value,
-      `Recarga balc\u00e3o - ${formulario.value.metodoPagamento}`
-    )
+    // Caso 1: CASH ou TPA (Direto Administrativo)
+    if (formulario.value.metodoPagamento === 'CASH' || formulario.value.metodoPagamento === 'TPA') {
+      const token = props.fundo.qrCodeSessao || props.fundo.tokenPortador || props.fundo.token
+      const resp = await fundoConsumoService.recarregarFundo(
+        token,
+        formulario.value.valorDecimal, // API espera AOA
+        `Recarga Balcão ${formulario.value.metodoPagamento}`
+      )
+      notificationStore.sucesso(`${formulario.value.metodoPagamento} creditado com sucesso!`)
+      recargaSucesso.value = true
+      emit('recarga-realizada', resp)
+      return
+    }
+
+    // Caso 2: DIGITAL (GPO) ou REF (Gateway)
+    const pagamento = await pagamentoService.recarregarFundo({
+      fundoId: props.fundo.id,
+      valor: formulario.value.valorDecimal,
+      metodo: formulario.value.metodoPagamento,
+      telefone: formulario.value.metodoPagamento === 'GPO' ? formulario.value.telefoneDigital : null
+    })
 
     pagamentoCriado.value = pagamento
     
     if (formulario.value.metodoPagamento === 'GPO') {
-      notificationStore.sucesso('Redirecionando para AppyPay...')
-      // URL será aberta pelo usuário clicando no botão
+      notificationStore.sucesso('Pedido enviado ao telemóvel do cliente.')
     } else if (formulario.value.metodoPagamento === 'REF') {
-      notificationStore.sucesso('Referência bancária gerada com sucesso!')
+      notificationStore.sucesso('Referência bancária gerada!')
     }
 
     emit('recarga-realizada', pagamento)
   } catch (error) {
-    const mensagem = error.response?.data?.message || error.message || 'Erro ao criar recarga'
+    const mensagem = error.response?.data?.message || error.message || 'Erro ao processar recarga'
     notificationStore.erro(mensagem)
   } finally {
     loading.value = false
   }
 }
 </script>
+
+<style scoped>
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.input-with-prefix {
+  display: flex;
+  align-items: center;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.prefix {
+  background: #eee;
+  padding: 10px 12px;
+  font-weight: 600;
+  color: #666;
+  border-right: 1px solid #ddd;
+}
+
+.input-with-prefix .form-control {
+  border: none;
+  border-radius: 0;
+}
 
 <style scoped>
 .modal-overlay {
@@ -265,7 +372,7 @@ const confirmarRecarga = async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
+  z-index: 999999;
   padding: 20px;
 }
 
@@ -385,16 +492,21 @@ const confirmarRecarga = async () => {
 }
 
 .payment-methods {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
 .payment-method {
+  flex: 1 1 calc(50% - 12px);
+  min-width: 200px;
   border: 2px solid #e0e0e0;
   border-radius: 8px;
-  padding: 12px;
+  padding: 10px;
   cursor: pointer;
   transition: all 0.2s;
+  display: flex;
+  align-items: center;
 }
 
 .payment-method:hover {
@@ -420,7 +532,7 @@ const confirmarRecarga = async () => {
 }
 
 .method-icon {
-  font-size: 24px;
+  font-size: 20px;
 }
 
 .method-details {
@@ -435,7 +547,7 @@ const confirmarRecarga = async () => {
 }
 
 .method-desc {
-  font-size: 12px;
+  font-size: 11px;
   color: #666;
 }
 

@@ -103,151 +103,153 @@
       </div>
     </div>
 
-    <!-- B) PEDIDO ATIVO -->
-    <div v-if="pedidoAtivo" class="card">
-      <div class="flex items-center justify-between mb-4">
-        <div>
-          <h4 class="text-lg font-bold text-text-primary">📋 Pedido: #{{ pedidoAtivo.numero }}</h4>
-          <p class="text-xs text-text-secondary mt-1">Sessão #{{ unidade.sessaoAtiva?.id }}</p>
-        </div>
-        <span :class="['px-3 py-1 rounded-full text-sm font-semibold', corStatusPedido]">{{ iconStatusPedido }} {{ labelStatusPedido }}</span>
-      </div>
-
-      <div class="mt-2">
-        <p class="text-text-secondary text-sm">Total Pedido</p>
-        <p class="text-2xl font-bold text-primary">{{ formatCurrency(pedidoAtivo.total || 0) }}</p>
-      </div>
-    </div>
-
-    <!-- C) SUBPEDIDOS — agrupados por unidade de produção -->
-    <div v-if="pedidoAtivo && pedidoAtivo.subPedidos && pedidoAtivo.subPedidos.length > 0" class="space-y-3">
-      <div
-        v-for="sub in pedidoAtivo.subPedidos"
-        :key="sub.id"
-        class="card"
-      >
-        <!-- Header do SubPedido -->
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-2">
-            <span class="text-xl">{{ iconeCozinha(sub.cozinhaNome || sub.unidadeProducaoNome) }}</span>
-            <div>
-              <p class="font-semibold text-text-primary text-sm">{{ sub.cozinhaNome || sub.unidadeProducaoNome || 'Cozinha' }}</p>
-              <p class="text-xs text-text-secondary">SubPedido #{{ sub.numero || sub.id }}</p>
-            </div>
-          </div>
-          <span :class="['px-3 py-1 rounded-full text-xs font-bold uppercase', badgeStatusSubPedido(sub.status)]">
-            {{ labelStatusSubPedido(sub.status) }}
-          </span>
-        </div>
-
-        <!-- Itens do SubPedido -->
-        <div class="space-y-1 mb-3">
-          <div
-            v-for="item in (sub.itens || sub.itemPedidos || [])"
-            :key="item.id"
-            class="flex justify-between items-center py-1 border-b border-border last:border-0"
-          >
-            <div class="flex-1">
-              <p class="text-sm font-medium text-text-primary">{{ item.quantidade }}x {{ item.produtoNome }}</p>
-              <p v-if="item.observacoes" class="text-xs text-text-secondary italic">{{ item.observacoes }}</p>
-            </div>
-            <p class="text-sm font-semibold text-text-primary ml-4">{{ formatCurrency(item.subtotal || item.valorTotal) }}</p>
-          </div>
-        </div>
-
-        <!-- Ação: Marcar Entregue (apenas quando PRONTO) -->
-        <div v-if="podeMarcarEntregue(sub)" class="pt-2 border-t border-border">
-          <button
-            @click="marcarEntregue(sub.id)"
-            class="btn-success text-sm"
-          >
-            ✅ Marcar como Entregue
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- C-alt) ITENS DO PEDIDO (fallback sem subpedidos agrupados) -->
-    <div v-else-if="pedidoAtivo && pedidoAtivo.itens && pedidoAtivo.itens.length > 0" class="card">
-      <h4 class="font-semibold text-text-primary mb-3">Itens do Pedido</h4>
-      <div class="space-y-2">
-        <div v-for="item in pedidoAtivo.itens"
-             :key="item.id"
-             class="flex justify-between items-center py-2 border-b border-border last:border-0">
-          <div class="flex-1">
-            <p class="font-medium text-text-primary">{{ item.quantidade }}x {{ item.produtoNome }}</p>
-            <p v-if="item.observacoes" class="text-sm text-text-secondary">{{ item.observacoes }}</p>
-          </div>
-          <p class="font-semibold text-text-primary ml-4">{{ formatCurrency(item.subtotal) }}</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- D) AÇÕES PERMITIDAS -->
-    <div v-if="pedidoAtivo" class="card">
-      <div class="flex flex-wrap gap-3">
-        <button @click="$emit('adicionar-produtos')" 
-                class="btn-primary">
-          + Adicionar Produtos
-        </button>
-
-        <button @click="$emit('ver-historico')" 
-                class="btn-secondary">
-          📊 Ver Histórico
-        </button>
-
-        <button
-          v-if="pedidoAtivo.status !== 'FINALIZADO' && pedidoAtivo.status !== 'CANCELADO' && !mostrarFormCancelamento"
-          @click="mostrarFormCancelamento = true"
-          class="btn-error"
+    <!-- B) LISTA DE PEDIDOS ATIVOS -->
+    <div v-if="pedidosAtivos && pedidosAtivos.length > 0" class="space-y-4">
+      <div class="flex items-center justify-between px-1">
+        <h3 class="text-sm font-bold text-text-secondary uppercase tracking-wider">Pedidos em Curso</h3>
+        <button 
+          @click="$emit('novo-pedido')" 
+          class="btn-primary py-1.5 px-3 text-xs flex items-center gap-1 shadow-sm"
         >
-          ❌ Cancelar Pedido
+          <span class="text-lg leading-none">+</span> Novo Pedido
         </button>
       </div>
-
-      <!-- Nota: Finalização automática -->
-      <div class="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-        <p class="text-xs text-blue-600">
-          ℹ️ O pedido é finalizado automaticamente pelo sistema quando todos os SubPedidos forem marcados como <strong>Entregues</strong>.
-        </p>
-      </div>
-
-      <!-- Formulário de cancelamento inline -->
-      <div v-if="mostrarFormCancelamento" class="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-        <p class="text-sm font-semibold text-red-700 mb-2">❌ Confirmar cancelamento do pedido</p>
-        <textarea
-          v-model="motivoCancelamento"
-          placeholder="Motivo do cancelamento (obrigatório)..."
-          class="w-full p-2 text-sm border border-red-300 rounded-md resize-none"
-          rows="2"
-          maxlength="500"
-        ></textarea>
-        <div class="flex gap-2 mt-2">
-          <button
-            @click="confirmarCancelamento"
-            :disabled="!motivoCancelamento.trim()"
-            class="btn-error text-sm"
-          >
-            Confirmar Cancelamento
-          </button>
-          <button
-            @click="mostrarFormCancelamento = false; motivoCancelamento = ''"
-            class="btn-secondary text-sm"
-          >
-            Voltar
-          </button>
+      
+      <div v-for="pedido in pedidosAtivos" :key="pedido.id" class="card-pedido-container">
+        <!-- Cabeçalho do Pedido (Click para expandir) -->
+        <div 
+          class="pedido-header-click card cursor-pointer hover:border-primary transition-all duration-200"
+          :class="{ 'border-l-4 border-l-primary': pedidoExpandido === pedido.id }"
+          @click="alternarPedido(pedido.id)"
+        >
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <span class="text-2xl">{{ iconStatusPedido(pedido) }}</span>
+              <div>
+                <h4 class="text-lg font-bold text-text-primary">Pedido #{{ pedido.numero }}</h4>
+                <p class="text-xs text-text-secondary mt-1">
+                  {{ pedido.subPedidos?.length || 0 }} SubPedidos • {{ formatCurrency(pedido.total || 0) }}
+                </p>
+              </div>
+            </div>
+            
+            <div class="flex items-center gap-3">
+              <!-- Novo Badge de Status Consolidado -->
+              <span :class="['px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider shadow-sm', corStatusPedido(pedido)]">
+                {{ labelStatusPedido(pedido) }}
+              </span>
+              
+              <svg 
+                class="w-6 h-6 text-gray-400 transition-transform duration-300" 
+                :class="{ 'rotate-180': pedidoExpandido === pedido.id }"
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+              </svg>
+            </div>
+          </div>
         </div>
+
+        <!-- Conteúdo do Pedido (Expandido) -->
+        <transition name="fade-slide">
+          <div v-if="pedidoExpandido === pedido.id" class="pedido-expandido-detalhes mt-2 space-y-4">
+            
+            <!-- Ações do Pedido no topo do expandido -->
+            <div class="flex flex-wrap gap-2 px-1">
+              <button 
+                v-if="pedido.status !== 'FINALIZADO' && pedido.status !== 'CANCELADO' && !mostrarFormCancelamento"
+                @click="idPedidoCancelamento = pedido.id; mostrarFormCancelamento = true"
+                class="btn-error py-1 px-4 text-sm"
+              >
+                ❌ Cancelar Pedido
+              </button>
+            </div>
+
+            <!-- Listagem de SubPedidos do Pedido Selecionado -->
+            <div v-if="pedido.subPedidos && pedido.subPedidos.length > 0" class="subpedidos-grid grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div
+                v-for="sub in pedido.subPedidos"
+                :key="sub.id"
+                class="subpedido-card bg-white border border-gray-100 rounded-xl shadow-sm p-4 hover:shadow-md transition-shadow"
+              >
+                <div class="flex justify-between items-start mb-3">
+                  <div class="flex items-center gap-2">
+                    <span class="text-lg">{{ iconeCozinha(sub.cozinhaNome || sub.unidadeProducaoNome) }}</span>
+                    <div>
+                      <h5 class="font-bold text-sm text-gray-800">{{ sub.cozinhaNome || sub.unidadeProducaoNome || 'Cozinha' }}</h5>
+                      <span class="text-[10px] text-gray-400 font-mono">#{{ sub.numero || sub.id }}</span>
+                    </div>
+                  </div>
+                  <span :class="['px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-tighter', badgeStatusSubPedido(sub.status)]">
+                    {{ labelStatusSubPedido(sub.status) }}
+                  </span>
+                </div>
+
+                <div class="itens-list space-y-2 mb-4">
+                  <!-- Garantir listagem de itens do subpedido -->
+                  <div v-for="item in (sub.itens || sub.itemPedidos || [])" :key="item.id" class="flex justify-between text-xs">
+                    <span class="text-gray-600">
+                      <strong class="text-gray-900">{{ item.quantidade }}x</strong> {{ item.produtoNome }}
+                      <span v-if="item.observacoes" class="block text-[10px] text-gray-400 italic">"{{ item.observacoes }}"</span>
+                    </span>
+                    <span class="font-semibold text-gray-500">{{ formatCurrency(item.subtotal || item.valorTotal) }}</span>
+                  </div>
+                </div>
+
+                <div v-if="podeMarcarEntregue(sub)" class="mt-auto pt-3 border-t border-gray-50 flex justify-end">
+                  <button @click.stop="marcarEntregue(sub.id)" class="btn-success py-1 px-3 text-xs w-full">
+                    ✓ Marcar Entregue
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Fallback para Itens sem SubPedidos agrupados (ou lista completa) -->
+            <div v-else-if="(pedido.itens || pedido.itemPedidos)?.length > 0" class="bg-gray-50 rounded-lg p-4 border border-gray-200">
+               <h5 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                 <span>📋</span> Itens do Pedido
+               </h5>
+               <div class="space-y-2">
+                 <div v-for="item in (pedido.itens || pedido.itemPedidos)" :key="item.id" class="flex justify-between items-start py-2 border-b border-gray-100 last:border-0">
+                    <div class="flex-1">
+                      <p class="text-sm">
+                        <strong class="font-bold">{{ item.quantidade }}x</strong> {{ item.produtoNome }}
+                      </p>
+                      <p v-if="item.observacoes" class="text-[10px] text-gray-400 italic mt-0.5">"{{ item.observacoes }}"</p>
+                    </div>
+                    <span class="font-semibold text-sm text-gray-600 ml-4">{{ formatCurrency(item.subtotal || item.valorTotal) }}</span>
+                 </div>
+               </div>
+            </div>
+
+            <!-- Formulário de cancelamento específico -->
+            <div v-if="mostrarFormCancelamento && idPedidoCancelamento === pedido.id" class="p-4 bg-red-50 border border-red-200 rounded-lg shadow-inner">
+                <p class="text-sm font-bold text-red-700 mb-2">Motivo do Cancelamento</p>
+                <textarea v-model="motivoCancelamento" placeholder="Motivo do cancelamento (obrigatório)..." class="w-full p-2 text-sm border border-red-200 rounded-md mb-2 resize-none" rows="2" maxlength="500"></textarea>
+                <div class="flex gap-2">
+                  <button 
+                    @click="confirmarCancelamento(pedido.id)" 
+                    :disabled="!motivoCancelamento.trim()"
+                    class="btn-error text-xs flex-1"
+                  >
+                    Confirmar
+                  </button>
+                  <button @click="mostrarFormCancelamento = false; motivoCancelamento = ''" class="btn-secondary text-xs flex-1">Voltar</button>
+                </div>
+            </div>
+          </div>
+        </transition>
       </div>
     </div>
 
-    <!-- E) AÇÕES DE SESSÃO -->
+    <!-- D) AÇÕES GERAIS DA SESSÃO (se não houver pedidos ativos, ou ações que se aplicam à sessão como um todo) -->
     <div class="card">
       <h4 class="text-sm font-semibold text-text-secondary mb-3">Gestão da Sessão</h4>
       <div class="flex flex-wrap gap-3">
         <!-- Aguardar Pagamento: apenas se sessao ABERTA -->
         <button
           v-if="unidade.sessaoAtiva?.status === 'ABERTA'"
-          @click="$emit('aguardar-pagamento')"
+          @click="$emit('solicitar-liquidacao')"
           class="btn-secondary"
           style="border-color:#f57c00; color:#f57c00;"
         >
@@ -263,11 +265,16 @@
         >
           🔴 Encerrar Sessão
         </button>
+
+        <button @click="$emit('ver-historico')" 
+                class="btn-secondary">
+          📊 Ver Histórico
+        </button>
       </div>
     </div>
 
-    <!-- Estado vazio -->
-    <div v-if="!pedidoAtivo" class="card text-center py-12">
+    <!-- F) ESTADO VAZIO -->
+    <div v-if="(!pedidosAtivos || pedidosAtivos.length === 0)" class="card text-center py-12">
       <div class="text-6xl mb-4">🍽️</div>
       <p class="text-xl font-semibold text-text-primary mb-2">Nenhum pedido ativo</p>
       <p class="text-text-secondary mb-6">Crie um novo pedido para esta unidade</p>
@@ -279,7 +286,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useCurrency } from '@/utils/currency'
 import subpedidosService from '@/api/subpedidos'
 import pedidosBalcaoService from '@/api/pedidosBalcaoService'
@@ -293,9 +300,9 @@ const props = defineProps({
     type: Object,
     required: true
   },
-  pedidoAtivo: {
-    type: Object,
-    default: null
+  pedidosAtivos: {
+    type: Array,
+    default: () => []
   },
   fundo: {
     type: Object,
@@ -303,11 +310,25 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['pedido-atualizado', 'fechar', 'adicionar-produtos', 'ver-historico', 'novo-pedido', 'recarregar-fundo', 'fechar-sessao', 'aguardar-pagamento'])
+const emit = defineEmits(['pedido-atualizado', 'fechar', 'adicionar-produtos', 'ver-historico', 'novo-pedido', 'recarregar-fundo', 'fechar-sessao', 'solicitar-liquidacao'])
 
 // ── Estado local ──────────────────────────────────────────────────────────────
+const pedidoExpandido = ref(null)
+const idPedidoCancelamento = ref(null)
 const mostrarFormCancelamento = ref(false)
 const motivoCancelamento = ref('')
+
+const alternarPedido = (id) => {
+  pedidoExpandido.value = (pedidoExpandido.value === id) ? null : id
+}
+
+// Auto-expand if only one order
+watch(() => props.pedidosAtivos, (newVal) => {
+  console.log('[PainelUnidade] Pedidos ativos atualizados:', newVal?.length)
+  if (newVal?.length === 1 && !pedidoExpandido.value) {
+    pedidoExpandido.value = newVal[0].id
+  }
+}, { immediate: true })
 
 // ── Cronómetro de sessão ──────────────────────────────────────────────────────
 const cronometro = ref('--:--:--')
@@ -418,36 +439,68 @@ const labelStatusUnidade = (status) => {
   return labels[status] || status
 }
 
-// ── Status do pedido ──────────────────────────────────────────────────────────
-const iconStatusPedido = computed(() => {
+// ── Status do pedido consolidado (Lógica solicitada) ─────────────────────────
+const iconStatusPedido = (pedido) => {
+  const status = getStatusConsolidado(pedido)
   const icones = {
     'CRIADO': '⏳',
     'EM_ANDAMENTO': '🔄',
+    'PRONTO': '🛎️',
     'FINALIZADO': '✅',
     'CANCELADO': '❌'
   }
-  return icones[props.pedidoAtivo?.status] || '📋'
-})
+  return icones[status] || '📋'
+}
 
-const labelStatusPedido = computed(() => {
+const labelStatusPedido = (pedido) => {
+  const status = getStatusConsolidado(pedido)
   const labels = {
     'CRIADO': 'Criado',
     'EM_ANDAMENTO': 'Em Andamento',
+    'PRONTO': 'TUDO PRONTO',
     'FINALIZADO': 'Finalizado',
     'CANCELADO': 'Cancelado'
   }
-  return labels[props.pedidoAtivo?.status] || props.pedidoAtivo?.status || '—'
-})
+  return labels[status] || status || '—'
+}
 
-const corStatusPedido = computed(() => {
+const corStatusPedido = (pedido) => {
+  const status = getStatusConsolidado(pedido)
   const cores = {
     'CRIADO': 'bg-yellow-100 text-yellow-800',
     'EM_ANDAMENTO': 'bg-blue-100 text-blue-800',
+    'PRONTO': 'bg-green-500 text-white animate-pulse',
     'FINALIZADO': 'bg-green-100 text-green-800',
     'CANCELADO': 'bg-red-100 text-red-800'
   }
-  return cores[props.pedidoAtivo?.status] || 'bg-gray-100 text-gray-600'
-})
+  return cores[status] || 'bg-gray-100 text-gray-600'
+}
+
+const getStatusConsolidado = (pedido) => {
+  if (!pedido) return '—'
+  if (pedido.status === 'CANCELADO' || pedido.status === 'FINALIZADO') return pedido.status
+
+  const sub = pedido.subPedidos || []
+  if (sub.length === 0) return pedido.status
+
+  const todosCancelados = sub.every(s => s.status === 'CANCELADO')
+  if (todosCancelados) return 'CANCELADO'
+
+  // Logica solicitada: Todos subpedidos pronto? então pedido PRONTO.
+  // Consideramos PRONTO se todos os não-cancelados estiverem PRONTO ou ENTREGUE
+  const ativos = sub.filter(s => s.status !== 'CANCELADO')
+  if (ativos.length === 0) return 'CANCELADO'
+
+  const todosProntosOuEntregues = ativos.every(s => s.status === 'PRONTO' || s.status === 'ENTREGUE')
+  const temAoMenosUmPronto = ativos.some(s => s.status === 'PRONTO')
+
+  if (todosProntosOuEntregues) {
+    // Se todos entregues, o backend vira FINALIZADO. No front mantemos PRONTO se ainda houver o que entregar.
+    return temAoMenosUmPronto ? 'PRONTO' : 'FINALIZADO'
+  }
+
+  return 'EM_ANDAMENTO'
+}
 
 
 
@@ -482,14 +535,15 @@ const marcarEntregue = async (subPedidoId) => {
   }
 }
 
-const confirmarCancelamento = async () => {
+const confirmarCancelamento = async (pedidoId) => {
   const motivo = motivoCancelamento.value.trim()
   if (!motivo) return
   try {
-    await pedidosBalcaoService.cancelar(props.pedidoAtivo.id, motivo)
+    await pedidosBalcaoService.cancelar(pedidoId, motivo)
     notificationStore.sucesso('Pedido cancelado')
     mostrarFormCancelamento.value = false
     motivoCancelamento.value = ''
+    idPedidoCancelamento.value = null
     emit('pedido-atualizado')
   } catch (error) {
     console.error('[PainelUnidade] Erro ao cancelar pedido:', error)
@@ -520,6 +574,9 @@ const confirmarEncerramento = () => {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn-primary:hover {
@@ -570,4 +627,27 @@ const confirmarEncerramento = () => {
 .btn-error:hover {
   background: #d32f2f;
 }
+
+.fade-slide-enter-active, .fade-slide-leave-active {
+  transition: all 0.3s ease;
+}
+.fade-slide-enter-from, .fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+.pedido-header-click {
+  background: white;
+  border: 1px solid #e5e7eb;
+  padding: 1.25rem;
+}
+
+.subpedido-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.badge-info { background: #03a9f4; color: white; }
+.bg-info { background: #03a9f4; }
+.bg-error { background: #f44336; }
 </style>

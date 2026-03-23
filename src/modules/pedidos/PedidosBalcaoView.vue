@@ -77,6 +77,10 @@
               <span class="label">Cliente:</span>
               <span class="value">{{ unidade.cliente.nome }}</span>
             </div>
+            <div v-if="unidade.cliente?.saldoFundo > 0" class="card-info" style="color:#2e7d32; font-weight:700;">
+              <span class="label">Fundo:</span>
+              <span class="value">{{ formatCurrency(unidade.cliente.saldoFundo) }}</span>
+            </div>
             <div v-if="unidade.totalConsumido > 0" class="card-info">
               <span class="label">Consumo:</span>
               <span class="value">{{ formatCurrency(unidade.totalConsumido) }}</span>
@@ -108,7 +112,7 @@
     <div v-else class="unidade-selecionada">
       <PainelUnidadeConsumo
         :unidade="unidadeSelecionada"
-        :pedido-ativo="pedidoAtivo"
+        :pedidos-ativos="pedidosAtivos"
         :fundo="fundoAtivo"
         @pedido-atualizado="recarregarPedido"
         @fechar="voltarListaUnidades"
@@ -117,104 +121,136 @@
         @novo-pedido="abrirModalNovoPedido"
         @recarregar-fundo="handleRecarregarFundo"
         @fechar-sessao="fecharSessao"
+        @solicitar-liquidacao="modalLiquidarAberto = true"
         @aguardar-pagamento="aguardarPagamento"
       />
     </div>
 
     <!-- Modal: Novo Pedido -->
-    <Teleport to="body">
-      <ModalNovoPedido
-        v-if="mostrarModalNovoPedido"
-        :isOpen="mostrarModalNovoPedido"
-        :unidade="unidadeSelecionada"
-        :produtos="produtosDisponiveis"
-        @fechar="fecharModalNovoPedido"
-        @pedido-criado="handlePedidoCriado"
-        @criar-fundo="handleCriarFundo"
-        @recarregar-fundo="handleRecarregarFundo"
-      />
-    </Teleport>
+    <ModalNovoPedido
+      v-if="mostrarModalNovoPedido"
+      :isOpen="mostrarModalNovoPedido"
+      :unidade="unidadeSelecionada"
+      :produtos="produtosDisponiveis"
+      @fechar="fecharModalNovoPedido"
+      @pedido-criado="handlePedidoCriado"
+      @criar-fundo="handleCriarFundo"
+      @recarregar-fundo="handleRecarregarFundo"
+    />
 
-    <!-- Modal: Adicionar Produtos (a pedido existente) -->
-    <Teleport to="body">
-      <ModalAdicionarProdutos
-        v-if="mostrarModalAdicionarProdutos"
-        :unidade="unidadeSelecionada"
-        :pedido-id="pedidoAtivo?.id"
-        :produtos="produtosDisponiveis"
-        @fechar="fecharModalAdicionarProdutos"
-        @produtos-adicionados="handleProdutosAdicionados"
-      />
-    </Teleport>
+    <!-- Modal: Adicionar Produtos -->
+    <ModalAdicionarProdutos
+      v-if="mostrarModalAdicionarProdutos"
+      :isOpen="mostrarModalAdicionarProdutos"
+      :sessao-id="unidadeSelecionada?.sessaoAtivaId"
+      :produtos-disponiveis="produtosDisponiveis"
+      @fechar="fecharModalAdicionarProdutos"
+      @produtos-adicionados="handleProdutosAdicionados"
+    />
 
     <!-- Modal: Histórico de Pedidos -->
-    <Teleport to="body">
-      <ModalHistoricoPedidos
-        v-if="mostrarModalHistorico"
-        :sessao-consumo-id="unidadeSelecionada?.sessaoConsumoId"
-        :referencia="unidadeSelecionada?.referencia"
-        @fechar="fecharModalHistorico"
-      />
-    </Teleport>
+    <ModalHistoricoPedidos
+      v-if="mostrarModalHistorico"
+      :isOpen="mostrarModalHistorico"
+      :sessao-id="unidadeSelecionada?.sessaoAtivaId"
+      @fechar="fecharModalHistorico"
+    />
 
     <!-- Modal: Criar Fundo -->
-    <Teleport to="body">
-      <ModalCriarFundo
-        v-if="mostrarModalCriarFundo"
-        :cliente="clienteSelecionadoFundo"
-        @close="fecharModalCriarFundo"
-        @sucesso="handleFundoCriado"
-      />
-    </Teleport>
+    <ModalCriarFundo
+      v-if="mostrarModalCriarFundo"
+      :isOpen="mostrarModalCriarFundo"
+      :cliente="clienteSelecionadoFundo"
+      :sessao="sessaoSelecionadaFundo"
+      @fechar="fecharModalCriarFundo"
+      @fundo-criado="handleFundoCriado"
+    />
 
     <!-- Modal: Recarregar Fundo -->
-    <Teleport to="body">
-      <ModalRecarregarFundo
-        v-if="mostrarModalRecarregar"
-        :fundo="fundoSelecionado"
-        @fechar="fecharModalRecarregar"
-        @recarga-criada="handleRecargaCriada"
-      />
-    </Teleport>
+    <ModalRecarregarFundo
+      v-if="mostrarModalRecarregar"
+      :isOpen="mostrarModalRecarregar"
+      :key="fundoSelecionado?.id"
+      :fundo="fundoSelecionado"
+      @close="fecharModalRecarregar"
+      @recarga-realizada="handleRecargaCriada"
+    />
 
-    <!-- Modal: Abrir Sessão (mesa disponível) -->
+    <!-- Modal: Abrir Sessão -->
+    <ModalAbrirSessao
+      v-if="mostrarModalAbrirSessao"
+      :show="mostrarModalAbrirSessao"
+      :mesa="mesaParaAbrirSessao"
+      @close="fecharModalAbrirSessao"
+      @sessao-aberta="handleSessaoAberta"
+    />
+
+    <!-- Modal: Liquidação de Conta -->
     <Teleport to="body">
-      <ModalAbrirSessao
-        v-if="mostrarModalAbrirSessao"
-        :show="mostrarModalAbrirSessao"
-        :mesa="mesaParaAbrirSessao"
-        :mesas-disponiveis="unidadesConsumo.filter(u => !u.sessaoAtiva)"
-        @close="fecharModalAbrirSessao"
-        @sessao-aberta="handleSessaoAberta"
-      />
+      <div v-if="modalLiquidarAberto" class="modal-overlay" @click.self="modalLiquidarAberto = false">
+        <div class="modal-liquidar shadow-xl">
+          <div class="modal-header">
+            <h3>Liquidar Conta Pendente</h3>
+            <button @click="modalLiquidarAberto = false" class="btn-close">&times;</button>
+          </div>
+          
+          <div class="modal-body p-6">
+            <p class="mb-4">Valor pendente: <strong>{{ formatCurrency(unidadeSelecionada?.totalConsumido || 0) }}</strong></p>
+            
+            <div class="form-group mb-4">
+              <label class="form-label">Método de Pagamento</label>
+              <select v-model="formLiquidar.metodo" class="form-control w-full">
+                <option value="CASH">Dinheiro (CASH)</option>
+                <option value="TPA">Multicaixa (TPA)</option>
+                <option value="DIGITAL">Digital (M-Express / GPO)</option>
+                <option value="FUNDO_CONSUMO">Fundo de Consumo (QR/Token)</option>
+              </select>
+            </div>
+
+            <!-- Telefone para Digital -->
+            <div v-if="formLiquidar.metodo === 'DIGITAL'" class="form-group mb-4 animate-fade-in">
+              <label class="form-label">Telemóvel do Cliente (M-Express)</label>
+              <div class="input-phone-container" style="display:flex; align-items:center; border:1px solid #ddd; border-radius:6px; overflow:hidden;">
+                <span style="background:#f5f5f5; padding:8px 12px; border-right:1px solid #ddd; font-weight:600; color:#666;">+244</span>
+                <input v-model="formLiquidar.telefoneDigital" type="tel" placeholder="9xx xxx xxx" class="form-control" style="border:none; flex:1;">
+              </div>
+              <p class="form-hint" style="font-size:11px; color:#888; margin-top:4px;">O cliente receberá uma notificação para confirmar o pagamento.</p>
+            </div>
+
+            <div v-if="formLiquidar.metodo === 'FUNDO_CONSUMO'" class="form-group mb-4">
+              <label class="form-label">Token/QR do Fundo</label>
+              <input v-model="formLiquidar.qrCode" type="text" placeholder="Insira o Token..." class="form-control w-full">
+              <p class="text-xs text-muted mt-2">Pode deixar vazio para usar o fundo da própria sessão (se existir).</p>
+            </div>
+
+            <div class="flex justify-end gap-3 mt-6" style="display:flex; justify-content:flex-end; gap:12px;">
+              <button @click="modalLiquidarAberto = false" class="btn btn-outline">Cancelar</button>
+              <button @click="handleConfirmarLiquidar" class="btn btn-primary" :disabled="formLiquidar.metodo === 'FUNDO_CONSUMO' && !formLiquidar.qrCode && !fundoAtivo">Confirmar e Finalizar</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </Teleport>
   </div>
 </template>
 
 <script setup>
-import { defineAsyncComponent } from 'vue'
+import { ref, defineAsyncComponent } from 'vue'
 import PainelUnidadeConsumo from '@/components/pedidos/PainelUnidadeConsumo.vue'
+import ModalNovoPedido from '@/components/pedidos/ModalNovoPedido.vue'
+import ModalAdicionarProdutos from '@/components/pedidos/ModalAdicionarProdutos.vue'
+import ModalHistoricoPedidos from '@/components/pedidos/ModalHistoricoPedidos.vue'
+import ModalCriarFundo from '@/components/fundos/ModalCriarFundo.vue'
+import ModalRecarregarFundo from '@/components/fundos/ModalRecarregarFundo.vue'
+import ModalAbrirSessao from '@/modules/mesas/components/ModalAbrirSessao.vue'
 import { usePedidosBalcao } from '@/composables/usePedidosBalcao'
 
-// Lazy load modals (code splitting)
-const ModalNovoPedido = defineAsyncComponent(() =>
-  import('@/components/pedidos/ModalNovoPedido.vue')
-)
-const ModalAdicionarProdutos = defineAsyncComponent(() =>
-  import('@/components/pedidos/ModalAdicionarProdutos.vue')
-)
-const ModalHistoricoPedidos = defineAsyncComponent(() =>
-  import('@/components/pedidos/ModalHistoricoPedidos.vue')
-)
-const ModalCriarFundo = defineAsyncComponent(() =>
-  import('@/components/fundos/ModalCriarFundo.vue')
-)
-const ModalRecarregarFundo = defineAsyncComponent(() =>
-  import('@/components/fundos/ModalRecarregarFundo.vue')
-)
-const ModalAbrirSessao = defineAsyncComponent(() =>
-  import('@/modules/mesas/components/ModalAbrirSessao.vue')
-)
+const modalLiquidarAberto = ref(false)
+const formLiquidar = ref({
+  metodo: 'CASH',
+  qrCode: '',
+  telefoneDigital: ''
+})
 
 const {
   formatCurrency,
@@ -222,6 +258,7 @@ const {
   busca,
   loading,
   unidadeSelecionada,
+  pedidosAtivos,
   pedidoAtivo,
   fundoAtivo,
   produtosDisponiveis,
@@ -234,6 +271,7 @@ const {
   mostrarModalAbrirSessao,
   mesaParaAbrirSessao,
   clienteSelecionadoFundo,
+  sessaoSelecionadaFundo,
   fundoSelecionado,
   tituloContexto,
   unidadesFiltradas,
@@ -259,9 +297,21 @@ const {
   handleSessaoAberta,
   fecharSessao,
   aguardarPagamento,
+  liquidarConta,
   iconeTipoUnidade,
   labelStatusUnidade
 } = usePedidosBalcao()
+
+const handleConfirmarLiquidar = async () => {
+  await liquidarConta({
+    metodo: formLiquidar.value.metodo,
+    qrCodeFundoExterno: formLiquidar.value.qrCode,
+    telefone: formLiquidar.value.telefoneDigital
+  })
+  modalLiquidarAberto.value = false
+  // Reset form
+  formLiquidar.value = { metodo: 'CASH', qrCode: '', telefoneDigital: '' }
+}
 </script>
 
 <style scoped>
@@ -545,5 +595,57 @@ const {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-liquidar {
+  background: white;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  padding: 16px 24px;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.btn-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #666;
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  font-size: 14px;
 }
 </style>

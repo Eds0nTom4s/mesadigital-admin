@@ -152,7 +152,7 @@
       :qr-code="qrCodeSelecionado"
       @close="fecharDetalhesMesa"
       @fechar-mesa="fecharMesa"
-      @aguardar-pagamento="aguardarPagamento"
+      @liquidar-conta="liquidarConta"
       @novo-pedido="novoPedido"
       @imprimir-conta="imprimirConta"
       @recarregar="recarregarFundo"
@@ -365,32 +365,7 @@ const fecharDetalhesMesa = () => {
   qrCodeSelecionado.value = null
 }
 
-// ── Aguardar Pagamento ─────────────────────────────────────────────────────
-const aguardarPagamento = async (mesa) => {
-  const sessaoId = sessaoAtiva.value?.id
-  if (!sessaoId) {
-    notificationStore.erro('Sessão não identificada')
-    return
-  }
-  try {
-    await sessoesConsumoService.aguardarPagamento(sessaoId)
-    notificationStore.sucesso('Mesa a aguardar pagamento.')
-    // Atualizar o estado da sessão localmente e recarregar o mapa
-    if (sessaoAtiva.value) {
-      sessaoAtiva.value = { ...sessaoAtiva.value, status: 'AGUARDANDO_PAGAMENTO' }
-    }
-    await carregarMesas()
-  } catch (error) {
-    console.error('[GestaoMesasView] Erro ao marcar aguardar pagamento:', error)
-    if (error.response?.status === 400) {
-      notificationStore.erro('Esta sessão já foi encerrada ou não está no estado correcto.')
-    } else {
-      notificationStore.erro('Erro ao marcar pagamento: ' + (error.response?.data?.message || error.message))
-    }
-  }
-}
-
-// ── Fechar Mesa (encerrar sessão) ──────────────────────────────────────────
+// ── Fechar Mesa (encerrar sessão sem débito pendente) ──────────────────────
 const fecharMesa = async (mesa) => {
   const sessaoId = sessaoAtiva.value?.id
   if (!sessaoId) {
@@ -405,6 +380,24 @@ const fecharMesa = async (mesa) => {
   } catch (error) {
     console.error('[GestaoMesasView] Erro ao fechar sessão:', error)
     notificationStore.erro('Erro ao encerrar sessão: ' + (error.response?.data?.message || error.message))
+  }
+}
+
+// ── Liquidar Conta Pós-Paga ────────────────────────────────────────────────
+const liquidarConta = async ({ mesa, metodo, qrCodeFundoExterno }) => {
+  const sessaoId = sessaoAtiva.value?.id
+  if (!sessaoId) {
+    notificationStore.erro('Sessão não identificada')
+    return
+  }
+  try {
+    await sessoesConsumoService.liquidar(sessaoId, metodo, qrCodeFundoExterno)
+    notificationStore.sucesso('Conta liquidada e sessão encerrada com sucesso!')
+    fecharDetalhesMesa()
+    await carregarMesas()
+  } catch (error) {
+    console.error('[GestaoMesasView] Erro ao liquidar conta:', error)
+    notificationStore.erro('Erro ao liquidar conta: ' + (error.response?.data?.message || error.message))
   }
 }
 

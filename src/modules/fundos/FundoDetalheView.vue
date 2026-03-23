@@ -28,6 +28,7 @@ const { formatCurrency } = useCurrency()
 const fundo = ref(null)
 const transacoes = ref([])
 const valorMinimo = ref(5000)
+const configuracoes = ref({ permitirSaldoNegativo: false, fundoMinimo: 5000 })
 const loading = ref(true)
 const error = ref(null)
 const modalRecarregarAberto = ref(false)
@@ -37,9 +38,12 @@ onMounted(async () => {
   try {
     const fundoToken = route.params.id
     
-    // Carrega valor mínimo
+    // Carrega configurações financeiras
     const configResp = await configuracaoFinanceiraService.buscarConfiguracao()
-    valorMinimo.value = configResp.data?.valorMinimoOperacao ?? 5000
+    if (configResp.data) {
+      configuracoes.value = configResp.data
+      valorMinimo.value = configResp.data.valorMinimoOperacao ?? 5000
+    }
     
     // Busca fundo pelo token portador
     fundo.value = await fundoConsumoService.consultarFundo(fundoToken)

@@ -73,9 +73,10 @@ const sessoesConsumoService = {
    *  - 409: cliente já possui sessão aberta em outra mesa
    *  - 422: mesa está inativa (ativa = false)
    *
-   * @param {Object} dados
+   * @param {Object}  dados
    * @param {number}  dados.mesaId                   (OBRIGATÓRIO)
    * @param {string}  [dados.telefoneCliente]         — vincula a um cliente cadastrado
+   * @param {string}  [dados.nomeCliente]             — nome para identificação (opcional)
    * @param {boolean} [dados.modoAnonimo=false]       — sessão sem cliente
    * @param {number}  [dados.atendenteId]             — atendente que abriu a sessão
    */
@@ -103,6 +104,21 @@ const sessoesConsumoService = {
    */
   async aguardarPagamento(id) {
     const response = await api.put(`/sessoes-consumo/${id}/aguardar-pagamento`)
+    return response.data
+  },
+
+  /**
+   * Liquidar toda a conta pós-paga (Checkout completo)
+   * PUT /api/sessoes-consumo/{id}/liquidar
+   */
+  async liquidar(id, metodoPagamento, qrCodeFundoExterno = null, telefone = null) {
+    const params = new URLSearchParams()
+    if (metodoPagamento) params.append('metodoPagamento', metodoPagamento)
+    if (qrCodeFundoExterno) params.append('qrCodeFundoExterno', qrCodeFundoExterno)
+    if (telefone) params.append('telefone', telefone)
+    
+    const url = `/sessoes-consumo/${id}/liquidar${params.toString() ? '?' + params.toString() : ''}`
+    const response = await api.put(url)
     return response.data
   },
 

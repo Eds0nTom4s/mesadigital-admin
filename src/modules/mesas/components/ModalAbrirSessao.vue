@@ -27,18 +27,33 @@
           </p>
         </div>
 
-        <div v-if="!form.modoAnonimo">
-          <label class="block text-sm font-medium text-text-primary mb-1">
-            Telefone do Cliente <span class="text-error">*</span>
-          </label>
-          <input
-            v-model="form.telefoneCliente"
-            type="tel"
-            placeholder="923456789"
-            class="input-field w-full"
-            required
-          />
-          <p class="text-xs text-text-secondary mt-1">Obrigatório — vincula a sessão a um cliente cadastrado</p>
+        <div v-if="!form.modoAnonimo" class="space-y-3">
+          <div>
+            <label class="block text-sm font-medium text-text-primary mb-1">
+              Nome do Cliente
+            </label>
+            <input
+              v-model="form.nomeCliente"
+              type="text"
+              placeholder="Ex: João Silva"
+              class="input-field w-full"
+            />
+            <p class="text-xs text-text-secondary mt-1">Opcional — ajuda na identificação da mesa</p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-text-primary mb-1">
+              Telefone do Cliente <span class="text-error">*</span>
+            </label>
+            <input
+              v-model="form.telefoneCliente"
+              type="tel"
+              placeholder="923456789"
+              class="input-field w-full"
+              required
+            />
+            <p class="text-xs text-text-secondary mt-1">Obrigatório — vincula a sessão ao cliente</p>
+          </div>
         </div>
 
         <div>
@@ -80,6 +95,7 @@ const abrindo = ref(false)
 const form = ref({
   mesaId: null,
   telefoneCliente: '',
+  nomeCliente: '',
   modoAnonimo: false
 })
 
@@ -95,6 +111,7 @@ watch(() => props.show, (val) => {
     form.value = {
       mesaId: props.mesa?.id ?? null,
       telefoneCliente: '',
+      nomeCliente: '',
       modoAnonimo: false
     }
   }
@@ -119,7 +136,10 @@ const confirmarAbrirSessao = async () => {
     abrindo.value = true
 
     const payload = { mesaId, modoAnonimo: form.value.modoAnonimo }
-    if (!payload.modoAnonimo) payload.telefoneCliente = form.value.telefoneCliente
+    if (!payload.modoAnonimo) {
+      payload.telefoneCliente = form.value.telefoneCliente
+      payload.nomeCliente = form.value.nomeCliente
+    }
 
     const sessao = await sessoesConsumoService.abrir(payload)
     notificationStore.sucesso('Sessão aberta! Mesa está ocupada.')

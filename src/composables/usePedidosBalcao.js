@@ -31,6 +31,7 @@ export function usePedidosBalcao() {
   // ── Estado dos modais ─────────────────────────────────────────────────────
   const mostrarModalCriarFundo = ref(false)
   const mostrarModalRecarregar = ref(false)
+  const fundoSelecionado = ref(null)
   const mostrarModalNovoPedido = ref(false)
   const mostrarModalAdicionarProdutos = ref(false)
   const mostrarModalHistorico = ref(false)
@@ -38,11 +39,11 @@ export function usePedidosBalcao() {
   const mesaParaAbrirSessao = ref(null)
 
   const clienteSelecionadoFundo = ref(null)
-  const fundoSelecionado = ref(null)
+  const sessaoSelecionadaFundo = ref(null)
 
   // ── Estado principal ──────────────────────────────────────────────────────
   const unidadeSelecionada = ref(null)
-  const pedidoAtivo = ref(null)
+  const pedidosAtivos = ref([]) // Lista de pedidos ativos na sessão
   const fundoAtivo = ref(null)
   const loadingFundo = ref(false)
   const busca = ref('')
@@ -106,17 +107,24 @@ export function usePedidosBalcao() {
         console.error('[usePedidosBalcao] ERRO ao carregar sessões:', err.response?.status, err.message)
       }
 
-      unidadesConsumo.value = rawMesas.map(mesa => ({
-        ...mesa,
-        sessaoAtiva: sessoesMap.get(mesa.id) || null,
-        sessaoConsumoId: sessoesMap.get(mesa.id)?.id || null,
-        cliente: sessoesMap.get(mesa.id) ? {
-          id: sessoesMap.get(mesa.id).clienteId,
-          nome: sessoesMap.get(mesa.id).nomeCliente,
-          telefone: sessoesMap.get(mesa.id).telefoneCliente
-        } : null,
-        totalConsumido: sessoesMap.get(mesa.id)?.totalConsumo || 0
-      }))
+        unidadesConsumo.value = rawMesas.map(mesa => {
+          const sessao = sessoesMap.get(mesa.id) || null
+          return {
+            ...mesa,
+            sessaoAtiva: sessao,
+            sessaoConsumoId: sessao?.id || null,
+            qrCodeSessao: sessao?.qrCodeSessao || null,
+            modoAnonimo: sessao?.modoAnonimo || false,
+            cliente: sessao ? {
+              id: sessao.clienteId,
+              nome: sessao.nomeCliente,
+              telefone: sessao.telefoneCliente,
+              fundoId: sessao.fundoId,
+              saldoFundo: sessao.saldoFundo || 0
+            } : null,
+            totalConsumido: sessao?.totalConsumo || 0
+          }
+        })
       console.log('[usePedidosBalcao] Com sessão ativa:', unidadesConsumo.value.filter(u => u.sessaoAtiva).length)
     } catch (error) {
       console.error('[usePedidosBalcao] Erro ao carregar mesas:', error)
@@ -131,33 +139,43 @@ export function usePedidosBalcao() {
     loadingProdutos.value = true
     try {
       const response = await produtosService.getAll()
-      // response.data é a Page object (se for ApiResponse<Page>)
-      // ou response pode ser a Page object directamente dependendo de como o service retorna
-      const inner = response.data ?? response
-      const lista = Array.isArray(inner.content) ? inner.content : (Array.isArray(inner) ? inner : [])
+      console.log('[usePedidosBalcao] Resposta bruta getAll produtos:', response)
       
+      // Lidar com ApiResponse<Page<Produto>> ou Page<Produto> ou Array
+      const inner = response.data ?? response
+      let lista = []
+      
+      if (Array.isArray(inner.content)) {
+        lista = inner.content
+      } else if (Array.isArray(inner.data?.content)) {
+        lista = inner.data.content
+      } else if (Array.isArray(inner)) {
+        lista = inner
+      } else if (inner.data && Array.isArray(inner.data)) {
+        lista = inner.data
+      }
+      
+      console.log('[usePedidosBalcao] Lista processada de produtos:', lista.length)
       produtosDisponiveis.value = lista.filter(p => p.ativo === true)
     } catch (error) {
       console.error('[usePedidosBalcao] Erro ao carregar produtos:', error)
-      notificationStore.erro('Erro ao carregar produtos')
-      produtosDisponiveis.value = []
+      notificationStore.erro('Falha ao carregar catálogo de produtos')
     } finally {
       loadingProdutos.value = false
     }
   }
 
   const carregarPedidoAtivo = async (sessaoConsumoId) => {
-    if (!sessaoConsumoId) { pedidoAtivo.value = null; return }
+    if (!sessaoConsumoId) { pedidosAtivos.value = []; return }
     try {
-      const response = await pedidosBalcaoService.getPedidoAtivoSessao(sessaoConsumoId)
-      pedidoAtivo.value = response?.data ?? response ?? null
+      const content = await pedidosBalcaoService.getPedidoAtivoSessao(sessaoConsumoId)
+      pedidosAtivos.value = Array.isArray(content) ? content : (content ? [content] : [])
     } catch (error) {
-      // 404 = sem pedido ativo — comportamento normal
       if (error.response?.status === 404) {
-        pedidoAtivo.value = null
+        pedidosAtivos.value = []
       } else {
-        console.error('[usePedidosBalcao] Erro ao carregar pedido ativo:', error)
-        pedidoAtivo.value = null
+        console.error('[usePedidosBalcao] Erro ao carregar pedidos ativos:', error)
+        pedidosAtivos.value = []
       }
     }
   }
@@ -211,9 +229,12 @@ export function usePedidosBalcao() {
     }
     unidadeSelecionada.value = unidade
     fundoAtivo.value = null
-    await carregarPedidoAtivo(unidade.sessaoConsumoId)
-    await carregarFundoSessao(unidade.sessaoConsumoId, unidade.cliente?.id)
-    cleanupUnidadeWS = inscreverUnidade(unidade.id)
+    await carregarPedidoAtivo(unidade.sessaoAtivaId)
+    await carregarFundoSessao(unidade.sessaoAtivaId, unidade.cliente?.id)
+    cleanupUnidadeWS = inscreverUnidade(unidade.id, () => {
+      console.log('[usePedidosBalcao] WS: Notificação na unidade, recarregando dados...')
+      recarregarPedido()
+    })
     if (produtosDisponiveis.value.length === 0) {
       await carregarProdutos()
     }
@@ -222,7 +243,7 @@ export function usePedidosBalcao() {
   const voltarListaUnidades = () => {
     if (cleanupUnidadeWS) { cleanupUnidadeWS(); cleanupUnidadeWS = null }
     unidadeSelecionada.value = null
-    pedidoAtivo.value = null
+    pedidosAtivos.value = []
     fundoAtivo.value = null
     carregarUnidades()
   }
@@ -246,7 +267,7 @@ export function usePedidosBalcao() {
     fecharModalAbrirSessao()
     await carregarUnidades()
     const sessaoId = sessaoData?.data?.id ?? sessaoData?.id
-    const mesa = unidadesConsumo.value.find(u => u.sessaoConsumoId === sessaoId)
+    const mesa = unidadesConsumo.value.find(u => u.sessaoAtivaId === sessaoId)
     if (mesa) {
       await selecionarUnidade(mesa)
     } else {
@@ -260,14 +281,16 @@ export function usePedidosBalcao() {
     recarregarPedido()
   }
 
-  const handleCriarFundo = (cliente) => {
+  const handleCriarFundo = (cliente, sessao = null) => {
     clienteSelecionadoFundo.value = cliente
+    sessaoSelecionadaFundo.value = sessao
     mostrarModalCriarFundo.value = true
   }
 
   const fecharModalCriarFundo = () => {
     mostrarModalCriarFundo.value = false
     clienteSelecionadoFundo.value = null
+    sessaoSelecionadaFundo.value = null
   }
 
   const handleFundoCriado = async (fundo) => {
@@ -277,7 +300,7 @@ export function usePedidosBalcao() {
   }
 
   const handleRecarregarFundo = (fundo) => {
-    fundoSelecionado.value = fundo ?? fundoAtivo.value
+    fundoSelecionado.value = fundo || fundoAtivo.value
     mostrarModalRecarregar.value = true
   }
 
@@ -286,15 +309,17 @@ export function usePedidosBalcao() {
     fundoSelecionado.value = null
   }
 
-  const handleRecargaCriada = async () => {
+  const handleRecargaCriada = async (resp) => {
+    // Para recargas imediatas (CASH/TPA), fechamos o modal e voltamos para a lista
+    // Para métodos que geram pagamento (GPO/REF), o usuário pode querer ver os dados no modal,
+    // mas se o usuário pediu para "desaparecer e redirecionar", vamos uniformizar se for sucesso.
+    
+    // Se a resposta contém o saldo atualizado ou é um sucesso imediato
+    fecharModalRecarregar()
+    
     if (unidadeSelecionada.value) {
-      setTimeout(async () => {
-        await carregarFundoSessao(
-          unidadeSelecionada.value.sessaoConsumoId,
-          unidadeSelecionada.value.cliente?.id
-        )
-        await selecionarUnidade(unidadeSelecionada.value)
-      }, 2000)
+      await carregarUnidades() // Refresh all
+      voltarListaUnidades()    // Go back to the list
     }
   }
 
@@ -336,6 +361,20 @@ export function usePedidosBalcao() {
     }
   }
 
+  const liquidarConta = async ({ metodo, qrCodeFundoExterno, telefone }) => {
+    const sessaoId = unidadeSelecionada.value?.sessaoConsumoId
+    if (!sessaoId) { notificationStore.erro('Sessão não identificada'); return }
+    try {
+      await sessoesConsumoService.liquidar(sessaoId, metodo, qrCodeFundoExterno, telefone)
+      notificationStore.sucesso('Conta liquidada com sucesso!')
+      await recarregarPedido()
+      voltarListaUnidades()
+    } catch (error) {
+      console.error('[usePedidosBalcao] Erro ao liquidar conta:', error)
+      notificationStore.erro('Erro ao liquidar conta: ' + (error.response?.data?.message || error.message))
+    }
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────────
   const iconeTipoUnidade = (tipo) => {
     const icones = {
@@ -363,7 +402,8 @@ export function usePedidosBalcao() {
     formatCurrency,
     statusConexao,
     unidadeSelecionada,
-    pedidoAtivo,
+    pedidosAtivos,
+    pedidoAtivo: computed(() => pedidosAtivos.value[0] || null), // Retro-compatibilidade for simple cases
     fundoAtivo,
     loadingFundo,
     busca,
@@ -372,13 +412,14 @@ export function usePedidosBalcao() {
     unidadesConsumo,
     produtosDisponiveis,
     mostrarModalCriarFundo,
-    mostrarModalRecarregar,
     mostrarModalNovoPedido,
     mostrarModalAdicionarProdutos,
     mostrarModalHistorico,
     mostrarModalAbrirSessao,
     mesaParaAbrirSessao,
     clienteSelecionadoFundo,
+    sessaoSelecionadaFundo,
+    mostrarModalRecarregar,
     fundoSelecionado,
     // Computed
     tituloContexto,
@@ -406,6 +447,7 @@ export function usePedidosBalcao() {
     handleSessaoAberta,
     fecharSessao,
     aguardarPagamento,
+    liquidarConta,
     iconeTipoUnidade,
     labelStatusUnidade
   }

@@ -23,10 +23,10 @@
             </span>
             <span v-else class="value">{{ unidade?.cliente?.nome || 'Não associado' }}</span>
           </div>
-          <div class="info-item" v-if="fundoConsumo && !unidade?.modoAnonimo">
+          <div class="info-item" v-if="fundoConsumo">
             <span class="label">Saldo Fundo:</span>
-            <span class="value" :class="{'text-danger': fundoConsumo.saldoAtual < 1000, 'text-warning': fundoConsumo.saldoAtual < 5000}">
-              {{ formatCurrency(fundoConsumo.saldoAtual) }}
+            <span class="value" :class="{'text-danger': (fundoConsumo.saldoAtual || 0) < 1000, 'text-warning': (fundoConsumo.saldoAtual || 0) < 5000}">
+              {{ formatCurrency(fundoConsumo.saldoAtual || 0) }}
             </span>
           </div>
         </div>
@@ -57,20 +57,17 @@
           </div>
         </div>
 
-        <!-- Alerta: Cliente sem fundo -->
-        <div v-if="unidade?.cliente && !fundoConsumo && !carregandoFundo" class="alert alert-info">
+        <!-- Alerta: Sessão sem fundo (Não deve ocorrer por design §41-45 sessao service) -->
+        <div v-if="unidade?.sessaoAtiva && !fundoConsumo && !carregandoFundo" class="alert alert-danger">
           <div class="alert-content">
             <svg class="alert-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
             </svg>
             <div>
-              <p class="alert-title">Cliente não possui Fundo de Consumo</p>
-              <p class="alert-message">É necessário criar um fundo para usar pagamento pré-pago.</p>
+              <p class="alert-title">Falha na Integridade do Fundo</p>
+              <p class="alert-message">Esta sessão deveria possuir um fundo ativo, mas ele não foi detectado. Tente recarregar a sessão.</p>
             </div>
           </div>
-          <button @click="abrirModalCriarFundo" class="btn btn-sm btn-primary">
-            Criar Fundo
-          </button>
         </div>
 
         <!-- Alerta: Saldo insuficiente -->
@@ -355,14 +352,51 @@ onMounted(() => {
   
   // Regra ALINHAMENTO §6.1: consultar status antes de montar seletor de pagamento
   buscarPosPagoStatus()
+  
+  // Otimização: Se a unidade já tem dados do fundo na sessão ativa, usamos eles (evita erro de repetição detectado)
+  if (props.unidade?.sessaoAtiva?.fundoId) {
+    console.log('[ModalNovoPedido] Usando fundo da sessão ativa:', props.unidade.sessaoAtiva.fundoId)
+    fundoConsumo.value = {
+      id: props.unidade.sessaoAtiva.fundoId,
+      saldoAtual: props.unidade.sessaoAtiva.saldoFundo || 0,
+      qrCodeSessao: props.unidade.sessaoAtiva.qrCodeSessao,
+      ativo: true
+    }
+    return
+  }
 
-  // Buscar fundo APENAS se unidade tiver cliente (não anónima)
-  if (props.unidade?.cliente?.id && !props.unidade?.modoAnonimo) {
+  // Fallback: Buscar fundo conforme o modo da unidade
+  if (props.unidade?.sessaoAtiva?.modoAnonimo) {
+    buscarFundoSessao().catch(err => {
+      console.warn('[ModalNovoPedido] Erro ao buscar fundo da sessão (não crítico):', err)
+    })
+  } else if (props.unidade?.cliente?.id) {
     buscarFundoCliente().catch(err => {
-      console.warn('[ModalNovoPedido] Erro ao buscar fundo (não crítico):', err)
+      console.warn('[ModalNovoPedido] Erro ao buscar fundo do cliente (não crítico):', err)
     })
   }
 })
+
+/**
+ * Busca o fundo associado à sessão (para modo anónimo)
+ */
+const buscarFundoSessao = async () => {
+  const sessaoId = props.unidade.sessaoConsumoId || props.unidade.id
+  if (!sessaoId) return
+
+  try {
+    carregandoFundo.value = true
+    fundoConsumo.value = await fundoConsumoService.buscarPorSessao(sessaoId)
+    console.log('[ModalNovoPedido] Fundo da sessão carregado:', fundoConsumo.value)
+    
+    // Sempre usa PRE_PAGO para anónimos por padrão
+    tipoPagamento.value = 'PRE_PAGO'
+  } catch (err) {
+    console.error('[ModalNovoPedido] Erro ao buscar fundo da sessão:', err)
+  } finally {
+    carregandoFundo.value = false
+  }
+}
 
 /**
  * Consulta o status do pós-pago via endpoint leve.
@@ -552,17 +586,16 @@ const handleImageError = (event) => {
 }
 
 const abrirModalCriarFundo = () => {
-  emit('criar-fundo', props.unidade.cliente)
+  emit('criar-fundo', props.unidade.cliente, props.unidade.sessaoAtiva)
 }
 
 const abrirModalRecarregar = () => {
-  // Redirecionar para a página de detalhes do fundo ao invés de abrir modal
   if (fundoConsumo.value?.id) {
-    console.log('[ModalNovoPedido] Redirecionando para detalhes do fundo:', fundoConsumo.value.id)
-    emit('fechar')
-    router.push({ name: 'fundo-detalhe', params: { id: fundoConsumo.value.tokenPortador } })
+    console.log('[ModalNovoPedido] Abrindo modal de recarga para fundo:', fundoConsumo.value.id)
+    emit('recarregar-fundo', fundoConsumo.value)
   } else {
-    notificationStore.erro('Fundo não encontrado')
+    // Se não tem fundo (anônimo que ainda não criou), emitimos para criar
+    abrirModalCriarFundo()
   }
 }
 

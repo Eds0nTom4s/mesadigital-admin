@@ -19,8 +19,16 @@
           </div>
         </div>
 
+        <div v-if="sessao && !props.cliente" class="cliente-info" style="background: #fff8e1; border-color: #ffe082;">
+          <div class="info-row">
+            <span class="label">Sessão:</span>
+            <span class="value">Sessão Anónima #{{ sessao.id }}</span>
+          </div>
+          <p style="font-size: 11px; color: #795548; margin: 4px 0 0 0;">O fundo será vinculado automaticamente a esta sessão.</p>
+        </div>
+
         <!-- Formulário -->
-        <div class="form-group">
+        <div class="form-group" v-if="!sessao && !cliente">
           <label class="form-label">
             ID do Cliente <span class="required">*</span>
           </label>
@@ -29,7 +37,6 @@
             type="number" 
             class="form-control"
             placeholder="Ex: 123"
-            :disabled="!!cliente"
             required
           />
           <p class="form-hint">ID numérico do cliente no sistema</p>
@@ -57,16 +64,82 @@
           <textarea 
             v-model="formulario.observacoes" 
             class="form-control"
-            rows="3"
+            rows="2"
             placeholder="Informações adicionais (opcional)"
           />
+        </div>
+
+        <!-- Método de Recebimento -->
+        <div class="form-group">
+          <label class="form-label">
+            Método de Recebimento <span class="required">*</span>
+          </label>
+          <div class="payment-methods">
+            <!-- CASH -->
+            <label 
+              class="payment-method" 
+              :class="{ 'selected': formulario.metodoPagamento === 'CASH' }"
+            >
+              <input type="radio" v-model="formulario.metodoPagamento" value="CASH" />
+              <div class="method-content">
+                <div class="method-icon">💵</div>
+                <div class="method-details">
+                  <span class="method-title">Dinheiro (CASH)</span>
+                </div>
+              </div>
+            </label>
+
+            <!-- TPA -->
+            <label 
+              class="payment-method" 
+              :class="{ 'selected': formulario.metodoPagamento === 'TPA' }"
+            >
+              <input type="radio" v-model="formulario.metodoPagamento" value="TPA" />
+              <div class="method-content">
+                <div class="method-icon">💳</div>
+                <div class="method-details">
+                  <span class="method-title">Multicaixa (TPA)</span>
+                </div>
+              </div>
+            </label>
+
+            <!-- DIGITAL -->
+            <label 
+              class="payment-method" 
+              :class="{ 'selected': formulario.metodoPagamento === 'GPO' }"
+            >
+              <input type="radio" v-model="formulario.metodoPagamento" value="GPO" />
+              <div class="method-content">
+                <div class="method-icon">⚡</div>
+                <div class="method-details">
+                  <span class="method-title">Digital (M-Express)</span>
+                </div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Telefone para Digital (GPO) -->
+        <div v-if="formulario.metodoPagamento === 'GPO'" class="form-group animate-fade-in">
+          <label class="form-label">Número do Telemóvel <span class="required">*</span></label>
+          <div class="input-with-prefix">
+            <span class="prefix">+244</span>
+            <input 
+              v-model="formulario.telefoneDigital"
+              type="tel"
+              placeholder="9xx xxx xxx"
+              class="form-control"
+              maxlength="9"
+              @input="limparTelefone"
+            />
+          </div>
         </div>
 
         <!-- Preview do Valor -->
         <div class="preview-box">
           <div class="preview-row">
             <span>Saldo Inicial:</span>
-            <span class="preview-value">{{ formatCurrency(saldoInicialCentavos) }}</span>
+            <span class="preview-value">{{ formatCurrency(formulario.saldoInicialDecimal) }}</span>
           </div>
         </div>
       </div>
@@ -92,9 +165,15 @@ import { ref, computed, onMounted } from 'vue'
 import { useCurrency } from '@/utils/currency'
 import { useNotificationStore } from '@/store/notifications'
 import fundoConsumoService from '@/api/fundoConsumoService'
+import pagamentoService from '@/api/pagamentoService'
+import { configuracaoFinanceiraService } from '@/api/configuracaoFinanceiraService'
 
 const props = defineProps({
   cliente: {
+    type: Object,
+    default: null
+  },
+  sessao: {
     type: Object,
     default: null
   }
@@ -105,11 +184,13 @@ const emit = defineEmits(['close', 'sucesso'])
 const { formatCurrency } = useCurrency()
 const notificationStore = useNotificationStore()
 
-const valorMinimo = ref(5000) // centavos
+const valorMinimo = ref(10) // Valor em AOA (Fonte: ConfiguracaoFinanceira)
 const loading = ref(false)
 const formulario = ref({
   clienteId: props.cliente?.id || null,
-  saldoInicialDecimal: 50.00, // valor em decimal (Kz)
+  saldoInicialDecimal: 50.00,
+  metodoPagamento: 'CASH',
+  telefoneDigital: props.cliente?.telefone || '',
   observacoes: ''
 })
 
@@ -118,46 +199,77 @@ const saldoInicialCentavos = computed(() => {
   return Math.round((formulario.value.saldoInicialDecimal || 0) * 100)
 })
 
-// Computed para valor mínimo em decimal
+// Computed para valor mínimo em decimal (AOA)
 const valorMinimoDecimal = computed(() => {
-  return (valorMinimo.value / 100).toFixed(2)
+  return (valorMinimo.value || 0).toFixed(2)
 })
 
 const podeConfirmar = computed(() => {
-  return formulario.value.clienteId && 
-         saldoInicialCentavos.value >= valorMinimo.value
+  // Obrigatório ter ou Cliente ou Sessão ou ID do Cliente manual
+  const temContexto = !!(props.cliente?.id || props.sessao?.id || formulario.value.clienteId)
+  
+  // Saldo mínimo para criação administrativa: respeita a configuração do backend
+  const baseValid = temContexto && 
+         formulario.value.saldoInicialDecimal >= valorMinimo.value && 
+         formulario.value.metodoPagamento
+
+  if (formulario.value.metodoPagamento === 'GPO') {
+    return baseValid && (formulario.value.telefoneDigital?.length || 0) >= 9
+  }
+  return baseValid
 })
 
 onMounted(async () => {
   try {
-    const config = await fundoConsumoService.consultarValorMinimo()
-    valorMinimo.value = config.valorMinimo // já vem em centavos
-    formulario.value.saldoInicialDecimal = (config.valorMinimo / 100) // converte para decimal
-  } catch (error) {
-    console.error('Erro ao carregar valor mínimo:', error)
+    // Buscar configuração global (Fonte única da verdade §1.1)
+    const config = await configuracaoFinanceiraService.buscarConfiguracao()
+    if (config?.valorMinimoOperacao) {
+      valorMinimo.value = config.valorMinimoOperacao
+    }
+  } catch (err) {
+    console.warn('[ModalCriarFundo] Não foi possível carregar valorMinimo, usando fallback 10 Kz')
   }
+
+  // Define o valor inicial como o mínimo configurado (AOA)
+  formulario.value.saldoInicialDecimal = valorMinimo.value 
 })
 
-const confirmarCriacao = async () => {
-  if (!podeConfirmar.value) {
-    notificationStore.aviso('Preencha todos os campos obrigatórios')
-    return
-  }
+const limparTelefone = (event) => {
+  const val = event.target.value.replace(/\D/g, '')
+  formulario.value.telefoneDigital = val.substring(0, 9)
+}
 
-  if (saldoInicialCentavos.value < valorMinimo.value) {
-    notificationStore.aviso(`Saldo inicial deve ser no mínimo ${formatCurrency(valorMinimo.value)}`)
+const confirmarCriacao = async () => {
+  if (formulario.value.saldoInicialDecimal < valorMinimo.value) {
+    notificationStore.aviso(`Valor mínimo para criação: ${formatCurrency(valorMinimo.value)}`)
     return
   }
 
   loading.value = true
   try {
+    // 1. Criar o fundo (Backend sempre com saldo 0 ou saldo inicial administrativo)
     const fundo = await fundoConsumoService.criarFundo({
-      clienteId: formulario.value.clienteId,
-      saldoInicial: saldoInicialCentavos.value, // envia em centavos
-      observacoes: formulario.value.observacoes || 'Carga inicial'
+      clienteId: formulario.value.clienteId || props.cliente?.id,
+      sessaoId: props.sessao?.id, // Novo: vincula à sessão se fornecido
+      saldoInicial: (formulario.value.metodoPagamento === 'CASH' || formulario.value.metodoPagamento === 'TPA') 
+        ? formulario.value.saldoInicialDecimal 
+        : 0,
+      observacoes: formulario.value.observacoes || `Carga inicial ${formulario.value.metodoPagamento}`
     })
 
-    notificationStore.sucesso(`Fundo criado com sucesso! Saldo: ${formatCurrency(saldoInicialCentavos.value)}`)
+    // 2. Se for Digital, disparar pagamento
+    if (formulario.value.metodoPagamento === 'GPO') {
+      await pagamentoService.recarregarFundo({
+        fundoId: fundo.id,
+        valor: formulario.value.saldoInicialDecimal,
+        metodo: 'GPO',
+        telefone: formulario.value.telefoneDigital
+      })
+      notificationStore.sucesso('Fundo criado. Pedido de pagamento enviado ao telemóvel.')
+    } else {
+      notificationStore.sucesso(`Fundo criado com sucesso! Saldo: ${formatCurrency(saldoInicialCentavos.value)}`)
+    }
+
     emit('sucesso', fundo)
   } catch (error) {
     const mensagem = error.response?.data?.message || error.message || 'Erro ao criar fundo'
@@ -176,7 +288,7 @@ const confirmarCriacao = async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
+  z-index: 11000;
   padding: 20px;
 }
 
@@ -294,6 +406,43 @@ const confirmarCriacao = async () => {
   color: #666;
 }
 
+.payment-methods {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.payment-method {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 10px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.payment-method.selected {
+  border-color: #1976d2;
+  background: #e3f2fd;
+  box-shadow: 0 2px 4px rgba(25, 118, 210, 0.2);
+}
+
+.payment-method input {
+  display: none;
+}
+
+.method-icon {
+  font-size: 20px;
+  margin-bottom: 4px;
+}
+
+.method-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #333;
+  display: block;
+}
+
 .preview-box {
   background: #f0f7ff;
   border: 2px solid #1976d2;
@@ -354,5 +503,32 @@ const confirmarCriacao = async () => {
 
 .btn-secondary:hover:not(:disabled) {
   background: #e0e0e0;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.input-with-prefix {
+  display: flex;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.prefix {
+  background: #eee;
+  padding: 10px;
+  font-weight: 600;
+  border-right: 1px solid #ddd;
+}
+
+.input-with-prefix .form-control {
+  border: none;
 }
 </style>

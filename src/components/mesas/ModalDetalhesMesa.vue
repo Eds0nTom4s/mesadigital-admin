@@ -44,16 +44,7 @@
                 Novo Pedido
               </button>
 
-              <button 
-                v-if="podeAguardarPagamento"
-                @click="$emit('aguardarPagamento', mesa)"
-                class="flex-1 flex items-center justify-center px-4 py-2 bg-warning text-white rounded-lg hover:opacity-90 transition-opacity font-semibold shadow-lg"
-              >
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                </svg>
-                Aguardar Pagamento
-              </button>
+
               
               <button 
                 v-if="fundo"
@@ -243,6 +234,35 @@
         </div>
       </div>
     </transition>
+
+    <!-- Modal: Liquidação de Conta -->
+    <div v-if="modalLiquidarAberto" class="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-50 p-4">
+      <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-xl">
+        <h3 class="text-xl font-bold mb-4">Liquidar Conta Pendente</h3>
+        <p class="mb-4 text-text-secondary">Existe um valor pendente de <strong>{{ formatCurrency(totais.totalPendente) }}</strong> para ser liquidado.</p>
+        
+        <div class="mb-4">
+          <label class="block text-sm font-medium mb-1">Método de Pagamento</label>
+          <select v-model="formLiquidar.metodo" class="input-field w-full">
+            <option value="CASH">Dinheiro (CASH)</option>
+            <option value="TPA">Multicaixa (TPA)</option>
+            <option value="DIGITAL">Digital (AppyPay/Express)</option>
+            <option value="FUNDO_CONSUMO">Fundo de Consumo (QR/Token)</option>
+          </select>
+        </div>
+
+        <div v-if="formLiquidar.metodo === 'FUNDO_CONSUMO'" class="mb-4">
+          <label class="block text-sm font-medium mb-1">Token/QR do Fundo</label>
+          <input v-model="formLiquidar.qrCode" type="text" placeholder="Insira o Token..." class="input-field w-full">
+          <p class="text-xs text-text-secondary mt-1 text-info">Não é necessário preencher caso se use o Fundo da própria sessão e esta tenha saldo transferido previamente, embora este fluxo sirva mais para Fundos externos.</p>
+        </div>
+
+        <div class="flex justify-end gap-3 mt-6">
+          <button @click="modalLiquidarAberto = false" class="btn-secondary">Cancelar</button>
+          <button @click="confirmarLiquidar" class="btn-primary">Confirmar e Encerrar</button>
+        </div>
+      </div>
+    </div>
   </teleport>
 </template>
 
@@ -288,8 +308,8 @@ const props = defineProps({
 const emit = defineEmits([
   'close',
   'fecharMesa',
+  'liquidarConta',
   'novoPedido',
-  'aguardarPagamento',
   'imprimirConta',
   'recarregar',
   'atualizarQrCode'
@@ -423,7 +443,6 @@ const tempoDecorrido = computed(() => {
 
 // Permissões
 const podeNovoPedido = computed(() => props.sessao?.status === 'ABERTA')
-const podeAguardarPagamento = computed(() => props.sessao?.status === 'ABERTA')
 
 const podeFecharMesa = computed(() => {
   const temPermissao = authStore.isAdmin || authStore.isGerente
@@ -541,16 +560,32 @@ const cancelarQrCode = async () => {
   }
 }
 
-// Confirmar fechar mesa
+// Liquidação e Fecho
+const modalLiquidarAberto = ref(false)
+const formLiquidar = ref({
+  metodo: 'CASH',
+  qrCode: ''
+})
+
 const confirmarFecharMesa = () => {
   if (totais.value.totalPendente > 0) {
-    const confirmar = confirm(
-      `Existe valor pendente de ${formatCurrency(totais.value.totalPendente)}. Confirma fechamento?`
-    )
-    if (!confirmar) return
+    modalLiquidarAberto.value = true
+    return
   }
-  
   emit('fecharMesa', props.mesa)
+}
+
+const confirmarLiquidar = () => {
+  if (formLiquidar.value.metodo === 'FUNDO_CONSUMO' && !formLiquidar.value.qrCode) {
+    // Opção para permitir usar o fundo da sessão é passar undefined/vazio para qrCodeFundoExterno
+    // No backend, se receber vazio, tenta usar sessao.getFundoConsumo()
+  }
+  emit('liquidarConta', {
+    mesa: props.mesa,
+    metodo: formLiquidar.value.metodo,
+    qrCodeFundoExterno: formLiquidar.value.qrCode
+  })
+  modalLiquidarAberto.value = false
 }
 </script>
 
