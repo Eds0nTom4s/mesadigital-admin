@@ -61,6 +61,48 @@
 
           <!-- Body -->
           <div class="p-6 space-y-6">
+
+            <!-- CONFIGURAÇÃO DA MESA (Apenas se não tem sessão ativa) -->
+            <div v-if="!sessao" class="card bg-gray-50 border border-gray-200">
+               <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
+                 <svg class="w-5 h-5 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37..."/>
+                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                 </svg>
+                 Configuração da Mesa
+               </h3>
+               
+               <div class="space-y-4">
+                 <!-- Renomear -->
+                 <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-100">
+                   <label class="block text-sm font-medium text-gray-700 mb-2">Renomear Mesa / Referência</label>
+                   <div class="flex gap-2">
+                     <input v-model="editReferencia" type="text" class="input-field flex-1" placeholder="Ex: Mesa 12" />
+                     <button @click="salvarRenomeacao" :disabled="loadingConfig" class="btn-primary">Salvar</button>
+                   </div>
+                 </div>
+
+                 <!-- Ações Rápidas -->
+                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                   <button 
+                     @click="alterarStatus" 
+                     :disabled="loadingConfig"
+                     :class="['font-semibold py-2 px-4 rounded-lg transition-colors border-2', mesa.ativa ? 'border-warning text-warning hover:bg-warning/10' : 'border-success text-success hover:bg-success/10']"
+                   >
+                     {{ mesa.ativa ? '⛔ Marcar como Indisponível' : '✅ Reativar Mesa' }}
+                   </button>
+
+                   <button 
+                     @click="removerMesa" 
+                     :disabled="loadingConfig"
+                     class="font-semibold py-2 px-4 rounded-lg transition-colors border-2 border-error text-error hover:bg-error/10"
+                   >
+                     🗑️ Remover Mesa
+                   </button>
+                 </div>
+               </div>
+            </div>
+
             <!-- Informações do Cliente -->
             <div v-if="sessao" class="card">
               <h3 class="text-lg font-semibold text-text-primary mb-4 flex items-center">
@@ -107,7 +149,7 @@
             </div>
 
             <!-- Conta da Mesa -->
-            <div class="card">
+            <div v-if="sessao" class="card">
               <h3 class="text-lg font-semibold text-text-primary mb-4 flex items-center">
                 <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
@@ -137,7 +179,7 @@
             </div>
 
             <!-- Histórico de Pedidos -->
-            <div class="card">
+            <div v-if="sessao" class="card">
               <h3 class="text-lg font-semibold text-text-primary mb-4 flex items-center">
                 <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
@@ -271,8 +313,9 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { useCurrency } from '@/utils/currency'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
-import QrCodeDisplay from '@/components/shared/QrCodeDisplay.vue'
 import qrcodeService from '@/api/qrcodeService'
+import mesasService from '@/api/mesasService'
+import QrCodeDisplay from '@/components/shared/QrCodeDisplay.vue'
 
 const { formatCurrency } = useCurrency()
 const authStore = useAuthStore()
@@ -312,11 +355,68 @@ const emit = defineEmits([
   'novoPedido',
   'imprimirConta',
   'recarregar',
-  'atualizarQrCode'
+  'atualizarQrCode',
+  'atualizouMesa'
 ])
 
 const filtroPedidoAtivo = ref('TODOS')
 const loadingQrCode = ref(false)
+const loadingConfig = ref(false)
+const editReferencia = ref('')
+
+watch(() => props.mesa, (n) => {
+  if (n) {
+    editReferencia.value = n.referencia
+  }
+}, { immediate: true })
+
+const salvarRenomeacao = async () => {
+  if (!editReferencia.value.trim() || editReferencia.value === props.mesa.referencia) return
+  try {
+    loadingConfig.value = true
+    await mesasService.renomear(props.mesa.id, editReferencia.value)
+    notificationStore.sucesso('Mesa renomeada com sucesso')
+    emit('atualizouMesa')
+  } catch (error) {
+    notificationStore.erro(error.message || 'Erro ao renomear mesa')
+  } finally {
+    loadingConfig.value = false
+  }
+}
+
+const alterarStatus = async () => {
+  try {
+    loadingConfig.value = true
+    if (props.mesa.ativa) {
+      if (!confirm('Tornar a mesa indisponível para novos clientes?')) return
+      await mesasService.desativar(props.mesa.id)
+      notificationStore.sucesso('Mesa marcada como indisponível')
+    } else {
+      await mesasService.ativar(props.mesa.id)
+      notificationStore.sucesso('Mesa reativada')
+    }
+    emit('atualizouMesa')
+  } catch (error) {
+    notificationStore.erro(error.message || 'Erro ao alterar status')
+  } finally {
+    loadingConfig.value = false
+  }
+}
+
+const removerMesa = async () => {
+  if (!confirm('ATENÇÃO: Deseja mesmo remover permanentemente esta mesa e todos os seus históricos?\nEsta acção não pode ser desfeita!')) return
+  try {
+    loadingConfig.value = true
+    await mesasService.remover(props.mesa.id)
+    notificationStore.sucesso('Mesa removida com sucesso')
+    emit('atualizouMesa')
+    emit('close')
+  } catch (error) {
+    notificationStore.erro(error.response?.data?.message || error.message || 'Erro ao remover mesa')
+  } finally {
+    loadingConfig.value = false
+  }
+}
 
 // Função para abrir modal de novo pedido com validação
 const abrirModalNovoPedido = () => {

@@ -114,6 +114,26 @@ const mesasService = {
   async desativar(id) {
     const response = await api.put(`/mesas/${id}/desativar`)
     return response.data
+  },
+
+  /**
+   * Renomear mesa (ADMIN)
+   * PUT /api/mesas/{id}/renomear
+   */
+  async renomear(id, novaReferencia) {
+    const response = await api.put(`/mesas/${id}/renomear`, null, {
+      params: { novaReferencia }
+    })
+    return response.data
+  },
+
+  /**
+   * Remover mesa permanentemente (ADMIN)
+   * DELETE /api/mesas/{id}
+   */
+  async remover(id) {
+    const response = await api.delete(`/mesas/${id}`)
+    return response.data
   }
 }
 

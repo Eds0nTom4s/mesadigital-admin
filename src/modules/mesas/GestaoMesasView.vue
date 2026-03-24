@@ -157,6 +157,7 @@
       @imprimir-conta="imprimirConta"
       @recarregar="recarregarFundo"
       @atualizar-qr-code="atualizarQrCode"
+      @atualizou-mesa="carregarMesas"
     />
 
     <!-- Modal: Abrir Sessão -->
@@ -308,14 +309,10 @@ const handleSessaoAberta = async () => {
 
 // ── Abrir Detalhes da Mesa ─────────────────────────────────────────────────
 const abrirDetalhesMesa = async (mesa) => {
-  // Mesa DISPONÍVEL → fluxo de abrir sessão
-  if (mesa.status === 'DISPONIVEL') {
-    abrirModalSessao(mesa)
-    return
-  }
-
-  // Mesa OCUPADA → mostrar detalhes + sessão ativa
+  // Sempre mostramos detalhes/configuração para a página de Mesas, agora que é área de Gestão!
   mesaSelecionada.value = mesa
+
+  // Tenta puxar a sessão se estiver ocupada; se não, sessaoAtiva será null
   sessaoAtiva.value = mesa.sessaoAtiva || null
   modalDetalhesAberto.value = true
 
