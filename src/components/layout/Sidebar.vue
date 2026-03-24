@@ -14,7 +14,7 @@
         <span class="font-semibold text-text-primary">Admin Panel</span>
       </div>
       <button 
-        @click="toggleSidebar"
+        @click="$emit('toggle')"
         class="p-2 hover:bg-background rounded-lg transition-colors"
         :class="isCollapsed ? 'mx-auto' : ''"
       >
@@ -43,15 +43,18 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
-const route = useRoute()
-const isCollapsed = ref(false)
+const props = defineProps({
+  isCollapsed: {
+    type: Boolean,
+    default: false
+  }
+})
+defineEmits(['toggle'])
 
-const toggleSidebar = () => {
-  isCollapsed.value = !isCollapsed.value
-}
+const route = useRoute()
 
 const isActiveRoute = (path) => {
   return route.path.startsWith(path)

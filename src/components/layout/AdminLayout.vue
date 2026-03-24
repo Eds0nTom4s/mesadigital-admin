@@ -1,10 +1,10 @@
 <template>
   <div class="min-h-screen bg-background">
     <!-- Sidebar -->
-    <Sidebar />
+    <Sidebar :is-collapsed="isCollapsed" @toggle="toggleSidebar" />
 
     <!-- Main Content -->
-    <div class="pl-64 transition-all duration-300">
+    <div :class="['transition-all duration-300', isCollapsed ? 'pl-20' : 'pl-64']">
       <!-- Topbar -->
       <Topbar />
 
@@ -17,12 +17,17 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import Sidebar from './Sidebar.vue'
 import Topbar from './Topbar.vue'
 import { useWebSocketStore } from '@/store/websocket'
 
 const wsStore = useWebSocketStore()
+const isCollapsed = ref(false)
+
+const toggleSidebar = () => {
+  isCollapsed.value = !isCollapsed.value
+}
 
 /**
  * AdminLayout — Layout principal do painel.
