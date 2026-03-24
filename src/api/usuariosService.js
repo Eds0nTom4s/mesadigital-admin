@@ -40,10 +40,11 @@ const usuariosService = {
       const response = await api.get('/usuarios', { params: queryParams })
       
       // Unwrap response.data.data se existir (padrão backend)
-      const usuarios = response.data?.data || response.data
+      const payload = response.data?.data || response.data
+      const usuariosList = Array.isArray(payload) ? payload : (payload.content || [])
       
-      console.log('[UsuariosService] Usuários carregados:', usuarios.length)
-      return usuarios
+      console.log('[UsuariosService] Usuários carregados:', usuariosList.length)
+      return usuariosList
     } catch (error) {
       // Se endpoint não existe (404), informar que backend precisa implementar
       if (error.response?.status === 404) {

@@ -151,7 +151,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import usuariosService from '@/api/usuariosService'
-import unidadesConsumoService from '@/api/unidadesConsumoService'
+import unidadesAtendimentoService from '@/api/unidadesAtendimentoService'
 
 const props = defineProps({
   usuario: {
@@ -179,7 +179,7 @@ const erro = ref('')
 // Carregar unidades
 const carregarUnidades = async () => {
   try {
-    unidades.value = await unidadesConsumoService.listar()
+    unidades.value = await unidadesAtendimentoService.listar()
   } catch (error) {
     console.error('[ModalUsuario] Erro ao carregar unidades:', error)
   }

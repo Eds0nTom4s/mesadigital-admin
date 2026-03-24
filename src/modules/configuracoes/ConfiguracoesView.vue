@@ -44,6 +44,46 @@
       </div>
 
       <!-- ─────────────────────────────────────────────── -->
+      <!-- Secção: Instituição (Tenant)                    -->
+      <!-- ─────────────────────────────────────────────── -->
+      <div v-if="instituicao" class="config-section">
+        <div class="section-header">
+          <div class="section-icon">🏢</div>
+          <div>
+            <h2>Dados da Instituição (Tenant)</h2>
+            <p class="section-description">Informações gerais geradas nos talões e comunicações SMS</p>
+          </div>
+        </div>
+
+        <div class="section-body">
+          <div class="param-row">
+            <div class="param-info">
+              <h4>Nome & Sigla</h4>
+              <p>Nome da instituição e prefixo usado nos links (Ex: {{ instituicao.sigla }}-00000000).</p>
+            </div>
+            <div class="param-value">
+              <span class="valor-destaque text-base">{{ instituicao.nome }} ({{ instituicao.sigla }})</span>
+            </div>
+          </div>
+          
+          <div class="divider"></div>
+
+          <div class="param-row">
+            <div class="param-info">
+              <h4>NIF</h4>
+              <p>Número de Identificação Fiscal.</p>
+            </div>
+            <div class="param-value">
+              <span class="valor-destaque text-base">{{ instituicao.nif }}</span>
+              <button v-if="isAdmin" @click="abrirModalInstituicao" class="btn btn-sm btn-secondary ml-4">
+                ✏️ Editar Instituição
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─────────────────────────────────────────────── -->
       <!-- Secção: Controlo do Pós-Pago                   -->
       <!-- ─────────────────────────────────────────────── -->
       <div class="config-section">
@@ -122,7 +162,6 @@
               <h4>Limite Pós-Pago por Unidade</h4>
               <p>
                 Valor máximo de consumo em aberto por mesa/quarto sem pagamento.
-                Mínimo aceite: <strong>{{ formatCurrency(LIMITE_POS_PAGO_MINIMO) }}</strong>.
               </p>
             </div>
             <div class="param-value">
@@ -223,17 +262,14 @@
             <input
               v-model.number="modalLimite.novoValor"
               type="number"
-              :min="LIMITE_POS_PAGO_MINIMO"
+              min="0.01"
               step="0.01"
               class="input w-full"
               placeholder="Ex: 500.00"
             />
-            <p class="text-xs text-gray-400 mt-1">
-              Mínimo aceite: <strong>{{ formatCurrency(LIMITE_POS_PAGO_MINIMO) }}</strong>
-            </p>
-            <p v-if="modalLimite.novoValor !== null && modalLimite.novoValor < LIMITE_POS_PAGO_MINIMO"
+            <p v-if="modalLimite.novoValor !== null && modalLimite.novoValor < 0.01"
                class="text-xs text-red-500 mt-1">
-              ❌ Valor abaixo do mínimo ({{ formatCurrency(LIMITE_POS_PAGO_MINIMO) }})
+              ❌ Valor precisa de ser positivo.
             </p>
           </div>
 
@@ -256,7 +292,7 @@
           <button @click="modalLimite.aberto = false" class="btn btn-secondary">Cancelar</button>
           <button
             @click="confirmarAlterarLimite"
-            :disabled="carregando || !modalLimite.novoValor || modalLimite.novoValor < LIMITE_POS_PAGO_MINIMO"
+            :disabled="carregando || !modalLimite.novoValor || modalLimite.novoValor < 0.01"
             class="btn btn-primary"
           >
             {{ carregando ? 'Aguarde...' : 'Salvar Limite' }}
@@ -317,6 +353,46 @@
       </div>
     </div>
 
+    <!-- ══════════════════════════════════════════════════ -->
+    <!-- MODAL: Editar Instituição                         -->
+    <!-- ══════════════════════════════════════════════════ -->
+    <div v-if="modalInstituicao.aberto" class="modal-overlay" @click.self="modalInstituicao.aberto = false">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>✏️ Editar Instituição</h2>
+          <button @click="modalInstituicao.aberto = false" class="btn-close">✕</button>
+        </div>
+        <div class="modal-body space-y-4">
+          <div>
+            <label class="block text-sm font-medium mb-1">Nome</label>
+            <input v-model="modalInstituicao.dados.nome" type="text" class="input w-full" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">Sigla (Usada no Token)</label>
+            <input v-model="modalInstituicao.dados.sigla" type="text" maxlength="10" class="input w-full uppercase" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">NIF</label>
+            <input v-model="modalInstituicao.dados.nif" type="text" class="input w-full" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">URL do Logotipo (Opcional)</label>
+            <input v-model="modalInstituicao.dados.urlLogo" type="text" placeholder="https://..." class="input w-full" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="modalInstituicao.aberto = false" class="btn btn-secondary">Cancelar</button>
+          <button
+            @click="confirmarAlterarInstituicao"
+            :disabled="salvandoInstituicao || !modalInstituicao.dados.nome || !modalInstituicao.dados.sigla || !modalInstituicao.dados.nif"
+            class="btn btn-primary"
+          >
+            {{ salvandoInstituicao ? 'Aguarde...' : 'Salvar Instituição' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -326,10 +402,14 @@ import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
 import { useConfiguracaoFinanceira } from '@/composables/useConfiguracaoFinanceira'
 import { useCurrency } from '@/utils/currency'
+import { instituicaoService } from '@/api/instituicaoService'
 
 const authStore = useAuthStore()
 const notificationStore = useNotificationStore()
 const { formatCurrency } = useCurrency()
+
+const instituicao = ref(null)
+const salvandoInstituicao = ref(false)
 
 const {
   configuracao,
@@ -342,9 +422,6 @@ const {
   alterarValorMinimo
 } = useConfiguracaoFinanceira()
 
-// Mínimo de pós-pago aceite pelo backend (ALINHAMENTO §3.3 — baixou de 1.000 para 100 AOA)
-const LIMITE_POS_PAGO_MINIMO = 100
-
 const isAdmin = computed(() => authStore.isAdmin)
 
 // ─── Estado dos modais ────────────────────────────────────────────────────────
@@ -352,6 +429,7 @@ const isAdmin = computed(() => authStore.isAdmin)
 const modalPosPago = ref({ aberto: false, acao: 'ativar', motivo: '' })
 const modalLimite = ref({ aberto: false, novoValor: null, motivo: '' })
 const modalValorMinimo = ref({ aberto: false, novoValor: null, motivo: '' })
+const modalInstituicao = ref({ aberto: false, dados: {} })
 
 // ─── Abrir modais ─────────────────────────────────────────────────────────────
 
@@ -372,6 +450,13 @@ function abrirModalValorMinimo() {
     aberto: true,
     novoValor: configuracao.value?.valorMinimoOperacao ?? null,
     motivo: ''
+  }
+}
+
+function abrirModalInstituicao() {
+  modalInstituicao.value = {
+    aberto: true,
+    dados: { ...instituicao.value }
   }
 }
 
@@ -396,8 +481,8 @@ async function confirmarAlterarPosPago() {
 
 async function confirmarAlterarLimite() {
   const { novoValor, motivo } = modalLimite.value
-  if (!novoValor || novoValor < LIMITE_POS_PAGO_MINIMO) {
-    notificationStore.aviso(`Valor mínimo permitido é ${formatCurrency(LIMITE_POS_PAGO_MINIMO)}`)
+  if (!novoValor || novoValor < 0.01) {
+    notificationStore.aviso(`Valor mínimo permitido é 0.01`)
     return
   }
   try {
@@ -426,6 +511,33 @@ async function confirmarAlterarValorMinimo() {
   }
 }
 
+async function carregarInstituicao() {
+  try {
+    const res = await instituicaoService.getInstituicaoAtiva()
+    instituicao.value = res.data
+  } catch (e) {
+    console.warn('Instituicao não encontrada ou erro na API.', e)
+  }
+}
+
+async function confirmarAlterarInstituicao() {
+  try {
+    salvandoInstituicao.value = true
+    const payload = modalInstituicao.value.dados
+    payload.sigla = payload.sigla.toUpperCase()
+    
+    const res = await instituicaoService.atualizarInstituicao(instituicao.value.id, payload)
+    instituicao.value = res.data
+    notificationStore.sucesso('Instituição atualizada com sucesso.')
+    modalInstituicao.value.aberto = false
+  } catch (e) {
+    const msg = e?.response?.data?.message || e?.message || 'Erro ao alterar instituição'
+    notificationStore.erro(msg)
+  } finally {
+    salvandoInstituicao.value = false
+  }
+}
+
 // ─── Formatação ───────────────────────────────────────────────────────────────
 
 function formatData(isoDate) {
@@ -439,6 +551,7 @@ function formatData(isoDate) {
 // ─── Inicialização ────────────────────────────────────────────────────────────
 
 onMounted(() => {
+  carregarInstituicao()
   carregarConfiguracao().catch(e => {
     const status = e?.response?.status
     const msg = e?.response?.data?.message || e?.message

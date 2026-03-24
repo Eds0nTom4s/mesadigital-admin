@@ -1,0 +1,28 @@
+Assunto: Pedido de Partilha de Experiência: Formato de Tokens Curtos (Padrão ArenaTicket)
+
+Saudações, Equipa de Desenvolvimento ArenaTicket!
+
+Vimos por este meio contactar-vos em nome da equipa da MesaDigital / MASPE para vos pedir a partilha de algumas diretrizes técnicas a respeito e uma solução que vocês já utilizam de forma brilhante no vosso sistema.
+
+CONTEXTO
+Atualmente, no nosso Sistema de Restauração, os tokens de Sessão de Consumo que estão a ser gerados e enviados aos clientes via SMS baseiam-se em strings longas (ex: UUIDs). Notámos que isto gera URLs extensos, pouco amigáveis visualmente e mais difíceis de ditar no caso de o cliente precisar de verbalizar o código da sessão ao garçom no balcão.
+
+A NOSSA INSPIRAÇÃO: O VOSSO MODELO
+Acompanhamos a vossa plataforma e admiramos bastante o formato de tokens curtos que a ArenaTicket usa, nomeadamente:
+[SIGLA_DA_INSTITUIÇÃO] - [CÓDIGO NUMÉRICO DE 8 DÍGITOS]
+
+Exemplo Prático que vimos em vós:
+Apresentação Visual: MASPE - 5522 7711
+Resultado de URL / Link no SMS: https://[...]/sessao/MASPE-55227711
+
+O PEDIDO DE INSIGHTS
+Dado que pretendemos adotar/replicar exatamente este modelo para o nosso sistema ("para aplicarmos aqui"), gostaríamos muito de beber da vossa experiência com este padrão.
+Poderiam partilhar connosco algumas boas práticas a nível de arquitetura sobre como o implementam? Em específico:
+
+1. Geração Numérica: Como garantem que a geração dos 8 dígitos é suficientemente aleatória e não colide frequentemente e qual a melhor estratégia a nível de base de dados para fazer o "check de unicidade" durante a geração da sessão?
+2. Prevenção de Brute-Force: Sendo um código muito mais curto e apenas numérico (ao contrário de um UUID), utilizam rate-limiting agressivo na verificação (tentativas de acesso a sessões inválidas)?
+
+Agradecemos imensamente qualquer documentação rápida, pseudo-código ou mero conselho arquitetural que nos possam fornecer a partir do modelo que a ArenaTicket já estabilizou.
+
+Com os melhores cumprimentos,
+Vossos parceiros, Equipa de Desenvolvimento / Restaurante MASPE
