@@ -3,7 +3,7 @@
  * Encapsula toda a lógica de estado e operações do painel de pedidos (balcão).
  * Extraído de PedidosBalcaoView para separação de responsabilidades.
  */
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useCurrency } from '@/utils/currency'
 import { useNotificationStore } from '@/store/notifications'
 import { useAuthStore } from '@/store/auth'
@@ -12,6 +12,7 @@ import sessoesConsumoService from '@/api/sessoesConsumoService'
 import fundoConsumoService from '@/api/fundoConsumoService'
 import produtosService from '@/api/produtosService'
 import pedidosBalcaoService from '@/api/pedidosBalcaoService'
+import subpedidosService from '@/api/subpedidos'
 import { usePedidoWebSocket } from '@/composables/usePedidoWebSocket'
 
 export function usePedidosBalcao() {
@@ -21,7 +22,10 @@ export function usePedidosBalcao() {
 
   // ── WebSocket ─────────────────────────────────────────────────────────────
   const { inscreverUnidade, statusConexao } = usePedidoWebSocket({
-    onPedidoAtualizado: () => { recarregarPedido() },
+    onPedidoAtualizado: (notificacao) => {
+      console.log('[usePedidosBalcao] WS: Pedido atualizado via tópico específico:', notificacao)
+      recarregarPedido()
+    },
     onSubPedidoPronto: (notificacao) => {
       notificationStore.sucesso(`🍽️ SubPedido pronto! ${notificacao.cozinhaNome || 'Cozinha'}`)
       recarregarPedido()
@@ -55,6 +59,7 @@ export function usePedidosBalcao() {
 
   // WebSocket cleanup
   let cleanupUnidadeWS = null
+  const cleanupsPedidosWS = ref(new Map()) // Map<pedidoId, cleanupFn>
 
   // ── Computed ──────────────────────────────────────────────────────────────
   const tituloContexto = computed(() => {
@@ -169,7 +174,28 @@ export function usePedidosBalcao() {
     if (!sessaoConsumoId) { pedidosAtivos.value = []; return }
     try {
       const content = await pedidosBalcaoService.getPedidoAtivoSessao(sessaoConsumoId)
-      pedidosAtivos.value = Array.isArray(content) ? content : (content ? [content] : [])
+      const pedidosBasicos = Array.isArray(content) ? content : (content ? [content] : [])
+      
+      // Carregar detalhes completos (com subpedidos) para cada pedido ativo
+      const pedidosCompletos = await Promise.all(
+        pedidosBasicos.map(async (p) => {
+          try {
+            const detalheReq = await pedidosBalcaoService.getById(p.id)
+            const detalhe = detalheReq?.data || detalheReq || p
+            
+            // Buscar explicitly os SubPedidos para este Pedido, porque o Backend não os envia em PedidoResponse
+            const subpedidosReq = await subpedidosService.getByPedido(p.id)
+            detalhe.subPedidos = subpedidosReq?.data || subpedidosReq || []
+            
+            return detalhe
+          } catch (e) {
+            console.error('[usePedidosBalcao] Erro ao carregar detalhes ou subpedidos:', e)
+            return p
+          }
+        })
+      )
+      
+      pedidosAtivos.value = pedidosCompletos
     } catch (error) {
       if (error.response?.status === 404) {
         pedidosAtivos.value = []
@@ -206,6 +232,7 @@ export function usePedidosBalcao() {
           ...unidadeSelecionada.value,
           sessaoAtiva: sessaoData,
           totalConsumido: sessaoData.totalConsumo || 0,
+          qrCodeSessao: sessaoData.qrCodeSessao || null,
           cliente: sessaoData.clienteId ? {
             id: sessaoData.clienteId,
             nome: sessaoData.nomeCliente,
@@ -319,7 +346,7 @@ export function usePedidosBalcao() {
     
     if (unidadeSelecionada.value) {
       await carregarUnidades() // Refresh all
-      voltarListaUnidades()    // Go back to the list
+      await recarregarPedido() // Atualizar dados do pedido ativo s/ fechar contexto
     }
   }
 
@@ -394,8 +421,76 @@ export function usePedidosBalcao() {
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
-  onMounted(() => carregarUnidades())
-  onUnmounted(() => { if (cleanupUnidadeWS) cleanupUnidadeWS() })
+  const { inscreverPedido, inscreverSubPedido } = usePedidoWebSocket() // Nova instância ou reuso
+
+  // Gerir subscrições de pedidos individuais e subpedidos para reatividade total
+  watch(pedidosAtivos, (novosPedidos) => {
+    // 1. Determinar todos os IDs que devem estar ativos
+    const novosIds = new Set()
+    novosPedidos.forEach(p => {
+      novosIds.add(`pedido-${p.id}`)
+      p.subPedidos?.forEach(s => novosIds.add(`sub-${s.id}`))
+    })
+
+    // 2. Limpar inscrições que não são mais necessárias
+    cleanupsPedidosWS.value.forEach((cleanup, idChave) => {
+      if (!novosIds.has(idChave)) {
+        cleanup()
+        cleanupsPedidosWS.value.delete(idChave)
+        console.log(`[usePedidosBalcao] WS: Desinscrito de ${idChave}`)
+      }
+    })
+
+    // 3. Inscrever nos novos
+    novosPedidos.forEach(pedido => {
+      const pedidoKey = `pedido-${pedido.id}`
+      if (!cleanupsPedidosWS.value.has(pedidoKey)) {
+        const cleanup = inscreverPedido(pedido.id, () => {
+          console.log(`[usePedidosBalcao] WS: Atualização no pedido ${pedido.id}`)
+          recarregarPedido()
+        })
+        cleanupsPedidosWS.value.set(pedidoKey, cleanup)
+      }
+
+      pedido.subPedidos?.forEach(sub => {
+        const subKey = `sub-${sub.id}`
+        if (!cleanupsPedidosWS.value.has(subKey)) {
+          const cleanupSub = inscreverSubPedido(sub.id, () => {
+            console.log(`[usePedidosBalcao] WS: Atualização no subpedido ${sub.id}`)
+            recarregarPedido()
+          })
+          cleanupsPedidosWS.value.set(subKey, cleanupSub)
+        }
+      })
+    })
+  }, { deep: true })
+  // ── Persistência contra Refresh (F5) ───────────────────────────────────────
+  watch(unidadeSelecionada, (unidade) => {
+    if (unidade && unidade.id) {
+      sessionStorage.setItem('admin_painel_unidade_id', String(unidade.id))
+    } else {
+      sessionStorage.removeItem('admin_painel_unidade_id')
+    }
+  })
+
+  onMounted(async () => {
+    await carregarUnidades()
+    
+    // Restaurar seleção caso haja refrescamento da página (F5)
+    const ultimaUnidadeId = sessionStorage.getItem('admin_painel_unidade_id')
+    if (ultimaUnidadeId && !unidadeSelecionada.value) {
+      const unidadeSalva = unidadesConsumo.value.find(u => String(u.id) === ultimaUnidadeId)
+      if (unidadeSalva) {
+        selecionarUnidade(unidadeSalva)
+      }
+    }
+  })
+
+  onUnmounted(() => { 
+    if (cleanupUnidadeWS) cleanupUnidadeWS() 
+    cleanupsPedidosWS.value.forEach(cleanup => cleanup())
+    cleanupsPedidosWS.value.clear()
+  })
 
   return {
     // State

@@ -295,7 +295,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCurrency } from '@/utils/currency'
 import pedidosBalcaoService from '@/api/pedidosBalcaoService'
@@ -330,32 +330,12 @@ const carregandoPosPagoStatus = ref(false)
 // Status pós-pago carregado do backend — nunca hardcoded (ALINHAMENTO §6.1)
 const posPagoStatusGlobal = ref(false)
 
-// Buscar fundo do cliente ao montar (SIMPLIFICADO - sem travamento)
-onMounted(() => {
-  // CRÍTICO: Não executar se modal não está aberto
-  if (!props.isOpen) {
-    console.log('[ModalNovoPedido] Modal renderizado mas não aberto - ignorando onMounted')
-    return
-  }
-  
-  console.log('[ModalNovoPedido] Modal montado, unidade:', props.unidade)
-  console.log('[ModalNovoPedido] Produtos recebidos:', props.produtos?.length || 0)
-  if (props.produtos?.length > 0) {
-    console.log('[ModalNovoPedido] Exemplo de produto:', props.produtos[0])
-  }
-  
-  // VALIDAÇÃO: Verificar se unidade existe
-  if (!props.unidade) {
-    console.error('[ModalNovoPedido] ERRO: Modal aberto sem unidade definida')
-    return
-  }
-  
-  // Regra ALINHAMENTO §6.1: consultar status antes de montar seletor de pagamento
-  buscarPosPagoStatus()
-  
-  // Otimização: Se a unidade já tem dados do fundo na sessão ativa, usamos eles (evita erro de repetição detectado)
+// Função de atualização do Fundo Consumo
+const carregarDadosFundo = () => {
+  if (!props.isOpen || !props.unidade) return;
+
+  // Otimização: Se a unidade já tem dados do fundo na sessão ativa, usamos eles
   if (props.unidade?.sessaoAtiva?.fundoId) {
-    console.log('[ModalNovoPedido] Usando fundo da sessão ativa:', props.unidade.sessaoAtiva.fundoId)
     fundoConsumo.value = {
       id: props.unidade.sessaoAtiva.fundoId,
       saldoAtual: props.unidade.sessaoAtiva.saldoFundo || 0,
@@ -375,6 +355,19 @@ onMounted(() => {
       console.warn('[ModalNovoPedido] Erro ao buscar fundo do cliente (não crítico):', err)
     })
   }
+}
+
+// Reagir a mudanças (como o saldo atualizado de uma recarga recém-feita enquanto o modal está aberto)
+watch(() => props.unidade, (novoVal) => {
+  if (novoVal) carregarDadosFundo()
+}, { deep: true })
+
+onMounted(() => {
+  if (!props.isOpen || !props.unidade) return;
+  
+  // Regra ALINHAMENTO §6.1: consultar status antes de montar seletor de pagamento
+  buscarPosPagoStatus()
+  carregarDadosFundo()
 })
 
 /**

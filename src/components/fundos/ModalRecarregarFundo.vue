@@ -214,6 +214,10 @@ const props = defineProps({
   fundo: {
     type: Object,
     default: null
+  },
+  isOpen: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -363,6 +367,7 @@ const confirmarRecarga = async () => {
   border: none;
   border-radius: 0;
 }
+</style>
 
 <style scoped>
 .modal-overlay {

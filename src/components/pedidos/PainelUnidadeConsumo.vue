@@ -170,7 +170,10 @@
               <div
                 v-for="sub in pedido.subPedidos"
                 :key="sub.id"
-                class="subpedido-card bg-white border border-gray-100 rounded-xl shadow-sm p-4 hover:shadow-md transition-shadow"
+                :class="[
+                  'subpedido-card border-2 rounded-xl p-4 transition-all duration-300',
+                  corCardSubPedido(sub.status)
+                ]"
               >
                 <div class="flex justify-between items-start mb-3">
                   <div class="flex items-center gap-2">
@@ -408,6 +411,18 @@ const badgeStatusSubPedido = (status) => {
   return classes[status] || 'bg-gray-400 text-white'
 }
 
+const corCardSubPedido = (status) => {
+  const classes = {
+    'CRIADO': 'border-gray-200 bg-white',
+    'PENDENTE': 'border-blue-300 bg-blue-50',
+    'EM_PREPARACAO': 'border-amber-300 bg-amber-50',
+    'PRONTO': 'border-green-400 bg-green-50 shadow-md scale-[1.01]',
+    'ENTREGUE': 'border-gray-200 bg-gray-50 opacity-75',
+    'CANCELADO': 'border-red-300 bg-red-50'
+  }
+  return classes[status] || 'border-gray-200 bg-white'
+}
+
 // ── Tipo de sessão ────────────────────────────────────────────────────────────
 const sessaoTipoLabel = computed(() => {
   const tipo = props.unidade.sessaoAtiva?.tipoPagamento || props.unidade.sessaoAtiva?.tipo
@@ -456,6 +471,8 @@ const labelStatusPedido = (pedido) => {
   const status = getStatusConsolidado(pedido)
   const labels = {
     'CRIADO': 'Criado',
+    'PENDENTE': 'Pendente',
+    'EM_PREPARACAO': 'Em Preparação',
     'EM_ANDAMENTO': 'Em Andamento',
     'PRONTO': 'TUDO PRONTO',
     'FINALIZADO': 'Finalizado',
@@ -468,6 +485,8 @@ const corStatusPedido = (pedido) => {
   const status = getStatusConsolidado(pedido)
   const cores = {
     'CRIADO': 'bg-yellow-100 text-yellow-800',
+    'PENDENTE': 'bg-blue-100 text-blue-800',
+    'EM_PREPARACAO': 'bg-amber-100 text-amber-800',
     'EM_ANDAMENTO': 'bg-blue-100 text-blue-800',
     'PRONTO': 'bg-green-500 text-white animate-pulse',
     'FINALIZADO': 'bg-green-100 text-green-800',
@@ -483,23 +502,15 @@ const getStatusConsolidado = (pedido) => {
   const sub = pedido.subPedidos || []
   if (sub.length === 0) return pedido.status
 
-  const todosCancelados = sub.every(s => s.status === 'CANCELADO')
-  if (todosCancelados) return 'CANCELADO'
-
-  // Logica solicitada: Todos subpedidos pronto? então pedido PRONTO.
-  // Consideramos PRONTO se todos os não-cancelados estiverem PRONTO ou ENTREGUE
   const ativos = sub.filter(s => s.status !== 'CANCELADO')
   if (ativos.length === 0) return 'CANCELADO'
 
-  const todosProntosOuEntregues = ativos.every(s => s.status === 'PRONTO' || s.status === 'ENTREGUE')
-  const temAoMenosUmPronto = ativos.some(s => s.status === 'PRONTO')
+  if (ativos.every(s => s.status === 'ENTREGUE')) return 'FINALIZADO'
+  if (ativos.every(s => s.status === 'PRONTO' || s.status === 'ENTREGUE')) return 'PRONTO'
+  if (ativos.some(s => s.status === 'EM_PREPARACAO')) return 'EM_PREPARACAO'
+  if (ativos.some(s => s.status === 'PENDENTE')) return 'PENDENTE'
 
-  if (todosProntosOuEntregues) {
-    // Se todos entregues, o backend vira FINALIZADO. No front mantemos PRONTO se ainda houver o que entregar.
-    return temAoMenosUmPronto ? 'PRONTO' : 'FINALIZADO'
-  }
-
-  return 'EM_ANDAMENTO'
+  return pedido.status || 'EM_ANDAMENTO'
 }
 
 
