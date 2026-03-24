@@ -4,6 +4,7 @@
  * Extraído de PedidosBalcaoView para separação de responsabilidades.
  */
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useCurrency } from '@/utils/currency'
 import { useNotificationStore } from '@/store/notifications'
 import { useAuthStore } from '@/store/auth'
@@ -16,6 +17,8 @@ import subpedidosService from '@/api/subpedidos'
 import { usePedidoWebSocket } from '@/composables/usePedidoWebSocket'
 
 export function usePedidosBalcao() {
+  const router = useRouter()
+  const route = useRoute()
   const { formatCurrency } = useCurrency()
   const notificationStore = useNotificationStore()
   const authStore = useAuthStore()
@@ -464,22 +467,32 @@ export function usePedidosBalcao() {
       })
     })
   }, { deep: true })
-  // ── Persistência contra Refresh (F5) ───────────────────────────────────────
+  // ── Persistência de Navegação (F5 vs Troca de Rota) ─────────────────────
   watch(unidadeSelecionada, (unidade) => {
     if (unidade && unidade.id) {
-      sessionStorage.setItem('admin_painel_unidade_id', String(unidade.id))
+       router.replace({ query: { ...route.query, unidade: unidade.id } }).catch(()=>{})
     } else {
-      sessionStorage.removeItem('admin_painel_unidade_id')
+       const novaQuery = { ...route.query }
+       delete novaQuery.unidade
+       router.replace({ path: route.path, query: novaQuery }).catch(()=>{})
+    }
+  })
+
+  // Watch no Route Query: Permite que cliques na Sidebar (/pedidos) "resetem" a mesa, 
+  // voltando para a lista de todas as mesas de forma fluida e sem reload da página inteira!
+  watch(() => route.query, (newQuery, oldQuery) => {
+    if (!newQuery.unidade && oldQuery?.unidade && unidadeSelecionada.value) {
+       voltarListaUnidades()
     }
   })
 
   onMounted(async () => {
     await carregarUnidades()
     
-    // Restaurar seleção caso haja refrescamento da página (F5)
-    const ultimaUnidadeId = sessionStorage.getItem('admin_painel_unidade_id')
+    // Restaurar seleção caso haja refrescamento da página (F5) usando a query string natural (/pedidos?unidade=1)
+    const ultimaUnidadeId = route.query.unidade
     if (ultimaUnidadeId && !unidadeSelecionada.value) {
-      const unidadeSalva = unidadesConsumo.value.find(u => String(u.id) === ultimaUnidadeId)
+      const unidadeSalva = unidadesConsumo.value.find(u => String(u.id) === String(ultimaUnidadeId))
       if (unidadeSalva) {
         selecionarUnidade(unidadeSalva)
       }
