@@ -50,13 +50,7 @@
           </div>
         </div>
 
-        <div>
-          <label class="flex items-center space-x-2">
-            <input type="checkbox" v-model="form.gerarQrCode" class="rounded" />
-            <span class="text-sm text-text-primary">Gerar QR Code automaticamente (válido por 1 ano)</span>
-          </label>
-        </div>
-
+        <!-- A geração do QR Code agora é automática e silenciosa por definição -->
         <div class="flex space-x-2 pt-4">
           <button type="button" @click="$emit('close')" class="btn-secondary flex-1">
             Cancelar
