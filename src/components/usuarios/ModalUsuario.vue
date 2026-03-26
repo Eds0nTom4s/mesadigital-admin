@@ -73,7 +73,36 @@
             minlength="6"
             class="input-field w-full"
             placeholder="••••••••"
-          />
+        </div>
+
+        <!-- Código de Autorização (apenas criação) -->
+        <div v-if="!usuario" class="bg-warning/5 border border-warning/20 rounded-lg p-4">
+          <label class="block text-sm font-medium text-warning mb-2">
+            Código de Autorização (OTP) *
+          </label>
+          <div class="flex gap-2">
+            <input
+              v-model="form.otpAutorizacao"
+              type="text"
+              required
+              maxlength="10"
+              class="input-field flex-1"
+              placeholder="Digite o código"
+            />
+            <button
+              type="button"
+              @click="solicitarOtp"
+              :disabled="loadingOtp"
+              class="px-4 py-2 bg-warning/10 text-warning hover:bg-warning/20 rounded-lg text-sm font-medium transition-colors border border-warning/20"
+              :class="{ 'opacity-60 cursor-not-allowed': loadingOtp }"
+            >
+              <span v-if="loadingOtp">Aguarde...</span>
+              <span v-else>Solicitar OTP</span>
+            </button>
+          </div>
+          <p class="text-xs text-text-secondary mt-2">
+            Um código será enviado para o telefone de administração cadastrado na instituição.
+          </p>
         </div>
 
         <!-- Role e Unidade -->
@@ -169,11 +198,13 @@ const form = ref({
   email: '',
   senha: '',
   role: '',
-  unidadeId: ''
+  unidadeId: '',
+  otpAutorizacao: ''
 })
 
 const unidades = ref([])
 const loading = ref(false)
+const loadingOtp = ref(false)
 const erro = ref('')
 
 // Carregar unidades
@@ -229,6 +260,21 @@ const salvar = async () => {
     erro.value = error.message || 'Erro ao salvar usuário. Tente novamente.'
   } finally {
     loading.value = false
+  }
+}
+
+// Solicitar OTP de autorização
+const solicitarOtp = async () => {
+  try {
+    loadingOtp.value = true
+    erro.value = ''
+    await usuariosService.solicitarOtpAutorizacao()
+    alert('Código OTP solicitado com sucesso! Pode demorar alguns instantes para chegar ao administrador.')
+  } catch (error) {
+    console.error('[ModalUsuario] Erro ao solicitar OTP:', error)
+    erro.value = error.message || 'Erro ao enviar a solicitação de OTP. Tente novamente.'
+  } finally {
+    loadingOtp.value = false
   }
 }
 

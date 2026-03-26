@@ -35,21 +35,30 @@
         </div>
 
         <!-- Valor da Recarga -->
-        <div v-if="fundoAtivo" class="form-group">
+        <div v-if="fundoAtivo" class="form-group amount-group">
           <label class="form-label">
             Valor da Recarga <span class="required">*</span>
           </label>
-          <input 
-            v-model.number="formulario.valorDecimal" 
-            type="number" 
-            :min="valorMinimoDecimal"
-            step="0.01"
-            class="form-control"
-            placeholder="Ex: 50.00"
-            required
-          />
-          <p class="form-hint">
-            Mínimo: {{ formatCurrency(valorMinimo) }}
+          <div class="input-money-wrapper">
+             <span class="currency-prefix">Kz</span>
+             <input 
+               :value="valorFormatado"
+               type="text"
+               class="form-control money-input"
+               placeholder="0,00"
+               @input="handleInputMoney"
+               required
+             />
+          </div>
+          <div class="quick-amounts">
+            <button v-for="q in [1000, 2000, 5000, 10000]" :key="q" 
+                    type="button" class="btn-quick" 
+                    @click="formulario.valorDecimal = q">
+              + {{ q.toLocaleString() }}
+            </button>
+          </div>
+          <p class="form-hint" :class="{ 'warning': formulario.valorDecimal < valorMinimo }">
+            Mínimo permitido: <strong>{{ formatCurrency(valorMinimo) }}</strong>
           </p>
         </div>
 
@@ -236,6 +245,32 @@ const formulario = ref({
   telefoneDigital: ''
 })
 
+// Lógica de formatação de moeda em tempo real
+const valorFormatado = computed(() => {
+  if (!formulario.value.valorDecimal) return ''
+  return new Intl.NumberFormat('pt-AO', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(formulario.value.valorDecimal)
+})
+
+const handleInputMoney = (event) => {
+  let value = event.target.value.replace(/\D/g, '') // Remove tudo exceto dígitos
+  
+  if (!value) {
+    formulario.value.valorDecimal = 0
+    return
+  }
+
+  // Converte string de dígitos para decimal (ex: "5000" -> 50.00)
+  const numericValue = parseFloat(value) / 100
+  
+  // Limite de segurança
+  if (numericValue <= 99999999) {
+    formulario.value.valorDecimal = numericValue
+  }
+}
+
 // Computed para converter decimal → centavos
 const valorRecargaCentavos = computed(() => {
   return Math.round((formulario.value.valorDecimal || 0) * 100)
@@ -292,6 +327,11 @@ const confirmarRecarga = async () => {
 
   if (formulario.value.valorDecimal < valorMinimo.value) {
     notificationStore.aviso(`Valor mínimo de recarga: ${formatCurrency(valorMinimo.value)}`)
+    return
+  }
+
+  if (formulario.value.valorDecimal > 99999999) {
+    notificationStore.erro('O valor da recarga não pode exceder 99.999.999,99 Kz')
     return
   }
 
@@ -761,5 +801,95 @@ const confirmarRecarga = async () => {
 .badge-danger {
   background: #ffebee;
   color: #c62828;
+}
+
+/* Novos estilos para o input financeiro */
+.amount-group {
+  background: #fdfdfd;
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid #eee;
+  margin-bottom: 25px;
+}
+
+.input-money-wrapper {
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border: 2px solid #e0e0e0;
+  border-radius: 10px;
+  padding: 0 15px;
+  transition: all 0.3s ease;
+  margin-bottom: 12px;
+}
+
+.input-money-wrapper:focus-within {
+  border-color: #1976d2;
+  box-shadow: 0 0 0 4px rgba(25, 118, 210, 0.1);
+}
+
+.currency-prefix {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1976d2;
+  margin-right: 10px;
+  user-select: none;
+}
+
+.money-input {
+  border: none !important;
+  font-size: 32px !important;
+  font-weight: 700 !important;
+  color: #333 !important;
+  padding: 10px 0 !important;
+  background: transparent !important;
+  width: 100%;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.money-input::placeholder {
+  color: #ccc;
+}
+
+/* Remover flechas do input number */
+.money-input::-webkit-outer-spin-button,
+.money-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.quick-amounts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.btn-quick {
+  padding: 6px 12px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-quick:hover {
+  border-color: #1976d2;
+  color: #1976d2;
+  background: #f0f7ff;
+}
+
+.btn-quick:active {
+  transform: translateY(1px);
+}
+
+.form-hint.warning {
+  color: #d32f2f;
+  font-weight: 600;
 }
 </style>

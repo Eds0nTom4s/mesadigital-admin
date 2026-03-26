@@ -108,7 +108,8 @@ const usuariosService = {
         email: dados.email || null,
         nomeCompleto: dados.nomeCompleto || dados.nome || null,
         telefone: dados.telefone || null,
-        roles: dados.roles || (dados.role ? [`ROLE_${dados.role.toUpperCase()}`] : [])
+        roles: dados.roles || (dados.role ? [`ROLE_${dados.role.toUpperCase()}`] : []),
+        otpAutorizacao: dados.otpAutorizacao || undefined
       }
 
       const response = await api.post('/usuarios', payload)
@@ -348,6 +349,21 @@ const usuariosService = {
       }
       console.error('[UsuariosService] Erro ao listar logs:', error)
       throw error
+    }
+  },
+
+  /**
+   * Solicita um OTP de autorização (enviado ao admin da instituição)
+   * Útil para validar operações críticas como cadastro de usuários.
+   */
+  async solicitarOtpAutorizacao() {
+    try {
+      console.log('[UsuariosService] Solicitando OTP de autorização da Instituição...')
+      await api.post('/instituicoes/autorizacao/otp')
+      console.log('[UsuariosService] Solicitação enviada com sucesso')
+    } catch (error) {
+      console.error('[UsuariosService] Erro ao solicitar OTP:', error)
+      throw new Error('Falha ao solicitar código de autorização. Tente novamente.')
     }
   }
 }
