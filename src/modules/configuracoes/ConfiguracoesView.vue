@@ -44,6 +44,51 @@
       </div>
 
       <!-- ─────────────────────────────────────────────── -->
+      <!-- Secção: Operação                               -->
+      <!-- ─────────────────────────────────────────────── -->
+      <div class="config-section">
+        <div class="section-header">
+          <div class="section-icon">🏬</div>
+          <div>
+            <h2>Estrutura Operacional</h2>
+            <p class="section-description">Configure os pontos de atendimento usados por mesas e pedidos</p>
+          </div>
+        </div>
+
+        <div class="section-body">
+          <div class="param-row">
+            <div class="param-info">
+              <h4>Unidades de Atendimento</h4>
+              <p>
+                Cadastre restaurante, bar, lounge, piscina ou outros pontos operacionais antes de criar mesas.
+              </p>
+            </div>
+            <div class="param-value">
+              <router-link to="/admin/configuracoes/unidades-atendimento" class="btn btn-sm btn-primary">
+                Gerir Unidades
+              </router-link>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="param-row">
+            <div class="param-info">
+              <h4>Unidades de Produção</h4>
+              <p>
+                Cadastre áreas de preparo como cozinha central, pastelaria, bar e churrascaria, e revise quais Unidades de Atendimento cada uma serve.
+              </p>
+            </div>
+            <div class="param-value">
+              <router-link to="/admin/configuracoes/unidades-producao" class="btn btn-sm btn-primary">
+                Gerir Produção
+              </router-link>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─────────────────────────────────────────────── -->
       <!-- Secção: Instituição (Tenant)                    -->
       <!-- ─────────────────────────────────────────────── -->
       <div v-if="instituicao" class="config-section">
@@ -75,6 +120,18 @@
             </div>
             <div class="param-value">
               <span class="valor-destaque text-base">{{ instituicao.nif }}</span>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="param-row">
+            <div class="param-info">
+              <h4>Telefone de Autorização</h4>
+              <p>Número que recebe o OTP para criação de utilizadores administrativos.</p>
+            </div>
+            <div class="param-value">
+              <span class="valor-destaque text-base">{{ instituicao.telefoneAutorizacao || 'Não configurado' }}</span>
               <button v-if="isAdmin" @click="abrirModalInstituicao" class="btn btn-sm btn-secondary ml-4">
                 ✏️ Editar Instituição
               </button>
@@ -379,12 +436,16 @@
             <label class="block text-sm font-medium mb-1">URL do Logotipo (Opcional)</label>
             <input v-model="modalInstituicao.dados.urlLogo" type="text" placeholder="https://..." class="input w-full" />
           </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">Telefone de Autorização (Recebe OTP)</label>
+            <input v-model="modalInstituicao.dados.telefoneAutorizacao" type="text" placeholder="+244900000000" class="input w-full" />
+          </div>
         </div>
         <div class="modal-footer">
           <button @click="modalInstituicao.aberto = false" class="btn btn-secondary">Cancelar</button>
           <button
             @click="confirmarAlterarInstituicao"
-            :disabled="salvandoInstituicao || !modalInstituicao.dados.nome || !modalInstituicao.dados.sigla || !modalInstituicao.dados.nif"
+            :disabled="salvandoInstituicao || !modalInstituicao.dados.nome || !modalInstituicao.dados.sigla || !modalInstituicao.dados.nif || !modalInstituicao.dados.telefoneAutorizacao"
             class="btn btn-primary"
           >
             {{ salvandoInstituicao ? 'Aguarde...' : 'Salvar Instituição' }}

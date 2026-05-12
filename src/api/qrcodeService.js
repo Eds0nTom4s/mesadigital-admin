@@ -6,7 +6,7 @@ import api from './api'
  * Gerenciamento de QR Codes para mesas, entregas e pagamentos
  * Conforme documentação: INSTRUCOES_FRONTEND_QR_CODE_GESTAO_MESAS.txt
  * 
- * Base URL: http://localhost:8080/api/qrcode
+ * Base URL: /api/qrcode
  * Autenticação: Bearer Token JWT obrigatório
  */
 
@@ -167,7 +167,7 @@ export const cancelarQrCode = async (token) => {
  * @returns {string} URL da imagem
  */
 export const getImagemUrl = (token, print = false) => {
-  const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8080/api'
+  const baseUrl = import.meta.env.VITE_API_URL || '/api'
   return print 
     ? `${baseUrl}/qrcode/imagem/${token}/print`
     : `${baseUrl}/qrcode/imagem/${token}`

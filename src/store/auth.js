@@ -49,21 +49,38 @@ export const useAuthStore = defineStore('auth', () => {
   // Actions
   /**
    * Realiza o login do operador
-   * @param {string} telefone - +244...
+   * @param {string} identificador - username ou telefone
    * @param {string} senha - password
    */
-  const login = async (telefone, senha) => {
+  const login = async (identificador, senha) => {
     try {
-      console.log('[AuthStore] Iniciando login para:', telefone)
+      console.log('[AuthStore] Iniciando login para:', identificador)
       
-      const result = await authService.login(telefone, senha)
+      const result = await authService.login(identificador, senha)
       
       if (result.success) {
+        let rolesFromToken = []
+        try {
+          const payload = JSON.parse(atob(result.token.split('.')[1]))
+          const rolesRaw = payload.roles || ''
+          rolesFromToken = typeof rolesRaw === 'string'
+            ? rolesRaw.split(',').map(r => r.trim()).filter(Boolean)
+            : (Array.isArray(rolesRaw) ? rolesRaw : [rolesRaw])
+        } catch (_) {
+          rolesFromToken = []
+        }
+
+        const roles = rolesFromToken.length > 0
+          ? rolesFromToken
+          : [`ROLE_${result.user.tipoUsuario || 'ATENDENTE'}`]
+        const role = (roles[0] || 'ROLE_ATENDENTE').replace('ROLE_', '')
+
         user.value = {
           ...result.user,
           // Mapeamento de conveniência para compatibilidade com componentes existentes
-          role: result.user.tipoUsuario,
-          roles: [`ROLE_${result.user.tipoUsuario}`]
+          tipoUsuario: result.user.tipoUsuario || role,
+          role,
+          roles
         }
         token.value = result.token
         isAuthenticated.value = true
@@ -170,6 +187,8 @@ export const useAuthStore = defineStore('auth', () => {
     userInitials,
     isAdmin,
     isGerente,
+    isAtendente,
+    isCozinha,
     hasPermission,
     // Actions
     login,

@@ -89,11 +89,9 @@
           
           <select v-model="tipoFiltro" class="input-field w-48">
             <option value="TODOS">Todos os Tipos</option>
-            <option value="MESA_FISICA">Mesa Física</option>
-            <option value="QUARTO">Quarto</option>
-            <option value="AREA_EVENTO">Área de Evento</option>
-            <option value="ESPACO_LOUNGE">Espaço Lounge</option>
-            <option value="VIRTUAL">Virtual</option>
+            <option v-for="tipo in tiposMesa" :key="tipo.codigo" :value="tipo.codigo">
+              {{ tipo.descricao }}
+            </option>
           </select>
         </div>
         
@@ -139,6 +137,7 @@
     <!-- Modal: Nova Mesa -->
     <ModalNovaMesa
       :show="modalNovaAberto"
+      :tipos-mesa="tiposMesa"
       @close="modalNovaAberto = false"
       @mesa-criada="handleMesaCriada"
     />
@@ -154,10 +153,19 @@
       @fechar-mesa="fecharMesa"
       @liquidar-conta="liquidarConta"
       @novo-pedido="novoPedido"
-      @imprimir-conta="imprimirConta"
+      @gerar-fatura="abrirModalFatura"
       @recarregar="recarregarFundo"
       @atualizar-qr-code="atualizarQrCode"
       @atualizou-mesa="carregarMesas"
+    />
+
+    <ModalGerarFatura
+      :show="modalFaturaAberto"
+      :mesa="mesaSelecionada"
+      :sessao="sessaoAtiva"
+      :fundo="fundoSelecionado"
+      @close="modalFaturaAberto = false"
+      @imprimir="imprimirConta"
     />
 
     <!-- Modal: Abrir Sessão -->
@@ -188,9 +196,11 @@ import mesasService from '@/api/mesasService'
 import sessoesConsumoService from '@/api/sessoesConsumoService'
 import fundoConsumoService from '@/api/fundoConsumoService'
 import qrcodeService from '@/api/qrcodeService'
+import pedidosBalcaoService from '@/api/pedidosBalcaoService'
 import CardMesa from '@/components/shared/CardMesa.vue'
 import ModalDetalhesMesa from '@/components/mesas/ModalDetalhesMesa.vue'
 import ModalNovoPedido from '@/components/pedidos/ModalNovoPedido.vue'
+import ModalGerarFatura from '@/components/mesas/ModalGerarFatura.vue'
 import ModalNovaMesa from './components/ModalNovaMesa.vue'
 import ModalAbrirSessao from './components/ModalAbrirSessao.vue'
 
@@ -199,6 +209,7 @@ const authStore = useAuthStore()
 const notificationStore = useNotificationStore()
 
 const mesas = ref([])
+const tiposMesa = ref([])
 const loading = ref(false)
 const statusFiltro = ref('TODOS')
 const tipoFiltro = ref('TODOS')
@@ -216,6 +227,7 @@ const mesaSelecionada = ref(null)
 const sessaoAtiva = ref(null)
 const fundoSelecionado = ref(null)
 const qrCodeSelecionado = ref(null)
+const modalFaturaAberto = ref(false)
 
 // ── Modal Novo Pedido ──────────────────────────────────────────────────────
 const modalNovoPedidoAberto = ref(false)
@@ -250,6 +262,19 @@ const mesasFiltradas = computed(() => {
     return true
   })
 })
+
+const carregarTiposMesa = async () => {
+  try {
+    const response = await mesasService.getTipos()
+    const rawTipos = Array.isArray(response) ? response : response.data || []
+    tiposMesa.value = rawTipos.length > 0 ? rawTipos : [
+      { codigo: 'MESA_FISICA', descricao: 'Mesa Física' }
+    ]
+  } catch (error) {
+    console.warn('[GestaoMesasView] Aviso ao carregar tipos de mesa:', error)
+    tiposMesa.value = [{ codigo: 'MESA_FISICA', descricao: 'Mesa Física' }]
+  }
+}
 
 // ── Carregar Mesas + Sessões ───────────────────────────────────────────────
 const carregarMesas = async () => {
@@ -325,6 +350,19 @@ const abrirDetalhesMesa = async (mesa) => {
     } else {
       const s = await sessoesConsumoService.getSessaoAtivaMesa(mesa.id)
       sessaoAtiva.value = s
+    }
+
+    if (sessaoAtiva.value?.id) {
+      try {
+        const pedidos = await pedidosBalcaoService.getPedidoAtivoSessao(sessaoAtiva.value.id)
+        sessaoAtiva.value = {
+          ...sessaoAtiva.value,
+          pedidos: Array.isArray(pedidos) ? pedidos : []
+        }
+      } catch (pedidoErr) {
+        console.warn('[GestaoMesasView] Aviso ao buscar pedidos da sessão:', pedidoErr)
+        sessaoAtiva.value = { ...sessaoAtiva.value, pedidos: [] }
+      }
     }
 
     // Buscar dados adicionais em paralelo
@@ -452,8 +490,182 @@ const pedidoCriado = async () => {
 }
 
 // ── Outros ────────────────────────────────────────────────────────────────
-const imprimirConta = () => {
-  notificationStore.info('Funcionalidade de impressão em desenvolvimento')
+const abrirModalFatura = (mesa = null) => {
+  if (mesa) mesaSelecionada.value = mesa
+  if (!sessaoAtiva.value?.id) {
+    notificationStore.erro('Não há sessão ativa para gerar fatura.')
+    return
+  }
+  modalFaturaAberto.value = true
+}
+
+const formatCurrency = (valor) => {
+  return new Intl.NumberFormat('pt-AO', {
+    style: 'currency',
+    currency: 'AOA',
+    minimumFractionDigits: 2
+  }).format(Number(valor || 0))
+}
+
+const formatDateTime = (valor) => {
+  if (!valor) return '-'
+  return new Date(valor).toLocaleString('pt-AO', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+const escapeHtml = (valor) => String(valor ?? '')
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#039;')
+
+const itensDaConta = (pedidos) => {
+  return pedidos.flatMap(pedido => {
+    const itens = Array.isArray(pedido.itens) && pedido.itens.length > 0
+      ? pedido.itens
+      : (pedido.subPedidos || []).flatMap(sub => sub.itens || [])
+
+    return itens.map(item => ({
+      pedidoNumero: pedido.numero || `#${pedido.id}`,
+      nome: item.produtoNome || item.nomeProduto || 'Item',
+      quantidade: Number(item.quantidade || 0),
+      precoUnitario: Number(item.precoUnitario || 0),
+      subtotal: Number(item.subtotal ?? (Number(item.quantidade || 0) * Number(item.precoUnitario || 0))),
+      observacoes: item.observacoes || item.observacao || ''
+    }))
+  })
+}
+
+const imprimirConta = (mesa = null) => {
+  const mesaBase = mesa || mesaSelecionada.value
+  const sessao = sessaoAtiva.value
+
+  if (!sessao?.id) {
+    notificationStore.erro('Não há sessão ativa para imprimir a conta.')
+    return
+  }
+
+  const pedidos = sessao.pedidos || []
+  if (pedidos.length === 0) {
+    notificationStore.erro('Nenhum pedido encontrado para imprimir.')
+    return
+  }
+
+  const itens = itensDaConta(pedidos)
+  const totalPedidos = pedidos.reduce((sum, pedido) => sum + Number(pedido.total || 0), 0)
+  const total = Number(sessao.totalConsumo ?? totalPedidos)
+  const saldoFundo = Number(fundoSelecionado.value?.saldoAtual ?? fundoSelecionado.value?.saldo ?? sessao.saldoFundo ?? 0)
+  const pendente = Math.max(total - Math.max(saldoFundo, 0), 0)
+  const agora = new Date()
+  const numeroFatura = `MESA-${sessao.id}-${agora.getFullYear()}${String(agora.getMonth() + 1).padStart(2, '0')}${String(agora.getDate()).padStart(2, '0')}`
+
+  const linhas = itens.map(item => `
+    <tr>
+      <td>
+        <strong>${escapeHtml(item.nome)}</strong>
+        <div class="muted">${escapeHtml(item.pedidoNumero)}${item.observacoes ? ' - ' + escapeHtml(item.observacoes) : ''}</div>
+      </td>
+      <td class="num">${item.quantidade}</td>
+      <td class="num">${formatCurrency(item.precoUnitario)}</td>
+      <td class="num">${formatCurrency(item.subtotal)}</td>
+    </tr>
+  `).join('')
+
+  const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Conta ${escapeHtml(mesaBase?.referencia || sessao.referenciaMesa || sessao.id)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; margin: 0; color: #111827; }
+    .page { width: 80mm; padding: 12px; margin: 0 auto; }
+    .center { text-align: center; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    h2 { font-size: 14px; margin: 12px 0 8px; border-top: 1px dashed #9ca3af; padding-top: 8px; }
+    p { margin: 3px 0; font-size: 12px; }
+    .muted { color: #6b7280; font-size: 11px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { font-size: 11px; padding: 5px 0; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+    th { text-align: left; color: #374151; }
+    .num { text-align: right; white-space: nowrap; }
+    .totals { margin-top: 10px; border-top: 1px dashed #9ca3af; padding-top: 8px; }
+    .total-row { display: flex; justify-content: space-between; font-size: 12px; margin: 4px 0; }
+    .grand { font-size: 15px; font-weight: 700; }
+    .footer { margin-top: 14px; border-top: 1px dashed #9ca3af; padding-top: 10px; }
+    @page { size: 80mm auto; margin: 4mm; }
+    @media print {
+      .no-print { display: none; }
+      .page { width: auto; padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="center">
+      <h1>Sistema de Restauração</h1>
+      <p>Conta / Fatura Proforma</p>
+      <p class="muted">${escapeHtml(numeroFatura)}</p>
+    </div>
+
+    <h2>Dados da Mesa</h2>
+    <p><strong>Mesa:</strong> ${escapeHtml(mesaBase?.referencia || sessao.referenciaMesa || '-')}</p>
+    <p><strong>Sessão:</strong> ${escapeHtml(sessao.qrCodeSessao || sessao.id)}</p>
+    <p><strong>Cliente:</strong> ${escapeHtml(sessao.nomeCliente || 'Anónimo')}</p>
+    <p><strong>Abertura:</strong> ${escapeHtml(formatDateTime(sessao.abertaEm))}</p>
+    <p><strong>Emissão:</strong> ${escapeHtml(formatDateTime(agora))}</p>
+
+    <h2>Itens Consumidos</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th class="num">Qtd</th>
+          <th class="num">Preço</th>
+          <th class="num">Total</th>
+        </tr>
+      </thead>
+      <tbody>${linhas}</tbody>
+    </table>
+
+    <div class="totals">
+      <div class="total-row"><span>Total consumido</span><strong>${formatCurrency(total)}</strong></div>
+      <div class="total-row"><span>Saldo/fundo disponível</span><strong>${formatCurrency(saldoFundo)}</strong></div>
+      <div class="total-row grand"><span>Total a pagar</span><span>${formatCurrency(pendente)}</span></div>
+    </div>
+
+    <div class="footer center">
+      <p>Obrigado pela preferência.</p>
+      <p class="muted">Documento gerado para conferência da mesa.</p>
+    </div>
+
+    <div class="no-print center" style="margin-top:16px;">
+      <button onclick="window.print()">Imprimir</button>
+      <button onclick="window.close()">Fechar</button>
+    </div>
+  </div>
+  <script>
+    window.addEventListener('load', () => setTimeout(() => window.print(), 250));
+  <\/script>
+</body>
+</html>`
+
+  const janela = window.open('', '_blank', 'width=420,height=720')
+  if (!janela) {
+    notificationStore.erro('O navegador bloqueou a janela de impressão. Permita pop-ups para imprimir.')
+    return
+  }
+
+  janela.document.open()
+  janela.document.write(html)
+  janela.document.close()
+  notificationStore.sucesso('Conta enviada para impressão.')
 }
 
 const recarregarFundo = (fundo) => {
@@ -465,7 +677,9 @@ const atualizarQrCode = (novoQrCode) => {
   qrCodeSelecionado.value = novoQrCode
 }
 
-onMounted(() => { carregarMesas() })
+onMounted(async () => {
+  await Promise.all([carregarTiposMesa(), carregarMesas()])
+})
 </script>
 
 <style scoped>

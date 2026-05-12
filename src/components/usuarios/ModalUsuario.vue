@@ -24,6 +24,7 @@
             v-model="form.nomeCompleto"
             type="text"
             required
+            maxlength="150"
             class="input-field w-full"
             placeholder="Ex: João Silva Santos"
           />
@@ -39,6 +40,7 @@
               v-model="form.telefone"
               type="tel"
               required
+              maxlength="20"
               :disabled="!!usuario"
               class="input-field w-full"
               :class="{ 'opacity-60 cursor-not-allowed': !!usuario }"
@@ -55,6 +57,7 @@
             <input
               v-model="form.email"
               type="email"
+              maxlength="100"
               class="input-field w-full"
               placeholder="usuario@exemplo.com"
             />
@@ -71,8 +74,10 @@
             type="password"
             required
             minlength="6"
+            maxlength="128"
             class="input-field w-full"
             placeholder="••••••••"
+          />
         </div>
 
         <!-- Código de Autorização (apenas criação) -->
@@ -231,7 +236,8 @@ if (props.usuario) {
     email: props.usuario.email || '',
     senha: '',
     role: primaryRole,
-    unidadeId: props.usuario.unidadeId || ''
+    unidadeId: props.usuario.unidadeAtendimentoId || props.usuario.unidadeId || '',
+    otpAutorizacao: ''
   }
 }
 
@@ -246,8 +252,9 @@ const salvar = async () => {
       await usuariosService.atualizar(props.usuario.id, {
         nomeCompleto: form.value.nomeCompleto,
         email: form.value.email || null,
+        telefone: form.value.telefone,
         role: form.value.role,
-        unidadeId: form.value.unidadeId || null
+        unidadeAtendimentoId: form.value.unidadeId || null
       })
     } else {
       // Criar — service faz o mapeamento para username/nomeCompleto/roles

@@ -7,8 +7,8 @@ import axios from 'axios'
  * Inclui interceptors para autenticação e tratamento de erros
  */
 
-// Base URL da API (configurar conforme ambiente)
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api'
+// Base URL da API. Em desenvolvimento, /api passa pelo proxy Vite para o backend Docker.
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api'
 
 console.log('[api.js] VITE_API_URL env =', import.meta.env.VITE_API_URL)
 console.log('[api.js] API_BASE_URL efectivo =', API_BASE_URL)

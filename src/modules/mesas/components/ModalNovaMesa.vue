@@ -20,11 +20,19 @@
         <div>
           <label class="block text-sm font-medium text-text-primary mb-1">Tipo *</label>
           <select v-model="form.tipo" class="input-field w-full" required>
-            <option value="MESA_FISICA">Mesa Física</option>
-            <option value="QUARTO">Quarto (Room Service)</option>
-            <option value="AREA_EVENTO">Área de Evento</option>
-            <option value="ESPACO_LOUNGE">Espaço Lounge</option>
-            <option value="VIRTUAL">Virtual/Delivery</option>
+            <option v-for="tipo in tiposDisponiveis" :key="tipo.codigo" :value="tipo.codigo">
+              {{ tipo.descricao }}
+            </option>
+          </select>
+        </div>
+
+        <div v-if="!authStore.user?.unidadeAtendimentoId">
+          <label class="block text-sm font-medium text-text-primary mb-1">Unidade de Atendimento *</label>
+          <select v-model="form.unidadeAtendimentoId" class="input-field w-full" required>
+            <option :value="null" disabled>Selecione uma unidade</option>
+            <option v-for="unidade in unidadesDisponiveis" :key="unidade.id" :value="unidade.id">
+              {{ unidade.nome }}
+            </option>
           </select>
         </div>
 
@@ -65,14 +73,16 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
 import mesasService from '@/api/mesasService'
 import qrcodeService from '@/api/qrcodeService'
+import unidadesAtendimentoService from '@/api/unidadesAtendimentoService'
 
 const props = defineProps({
-  show: { type: Boolean, required: true }
+  show: { type: Boolean, required: true },
+  tiposMesa: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['close', 'mesa-criada'])
@@ -88,6 +98,19 @@ const form = ref({
   capacidade: 4,
   unidadeAtendimentoId: null,
   gerarQrCode: true
+})
+
+const unidadesDisponiveis = ref([])
+const tiposDisponiveis = computed(() => (
+  props.tiposMesa?.length ? props.tiposMesa : [{ codigo: 'MESA_FISICA', descricao: 'Mesa Física' }]
+))
+
+onMounted(async () => {
+  try {
+    unidadesDisponiveis.value = await unidadesAtendimentoService.listarAtivas()
+  } catch (error) {
+    console.error('Erro ao carregar unidades de atendimento', error)
+  }
 })
 
 // Reset form when modal opens

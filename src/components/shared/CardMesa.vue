@@ -25,6 +25,9 @@
     <p class="text-sm font-medium text-text-primary mb-2 truncate">
       {{ mesa.referencia }}
     </p>
+    <p class="text-xs text-text-secondary mb-2 truncate">
+      Código: <span class="font-mono font-semibold text-text-primary">{{ codigoReferenciaMesa }}</span>
+    </p>
 
     <!-- Cliente (se ocupada) -->
     <div v-if="mesa.status === 'OCUPADA'" class="space-y-2">
@@ -148,6 +151,8 @@ const statusLabel = computed(() => {
   }
   return labels[props.mesa.status] || props.mesa.status
 })
+
+const codigoReferenciaMesa = computed(() => props.mesa.referencia || `MESA-${props.mesa.id || '-'}`)
 
 // Label do tipo
 const tipoLabel = computed(() => {

@@ -158,6 +158,7 @@
 import { ref, watch } from 'vue'
 import { useNotificationStore } from '@/store/notifications'
 import api from '@/api/api'
+import produtosService from '@/api/produtosService'
 import ImageUpload from '@/components/produtos/ImageUpload.vue'
 
 const props = defineProps({
@@ -211,6 +212,8 @@ const emptyForm = () => ({
 
 const form = ref(emptyForm())
 
+const isFile = (value) => typeof File !== 'undefined' && value instanceof File
+
 // Reinitialize form when modal opens or produto changes
 watch(
   () => [props.show, props.produto],
@@ -222,7 +225,7 @@ watch(
         codigo: props.produto.codigo || '',
         nome: props.produto.nome || '',
         descricao: props.produto.descricao || '',
-        preco: props.produto.preco != null ? (props.produto.preco / 100).toFixed(2) : '',
+        preco: props.produto.preco != null ? Number(props.produto.preco).toFixed(2) : '',
         categoria: props.produto.categoria || 'LANCHE',
         urlImagem: props.produto.urlImagem || '',
         tempoPreparoMinutos: props.produto.tempoPreparoMinutos?.toString() || '',
@@ -277,18 +280,25 @@ const salvarProduto = async () => {
       codigo: form.value.codigo,
       nome: form.value.nome,
       descricao: form.value.descricao || null,
-      preco: Math.round(parseFloat(form.value.preco) * 100),
+      preco: parseFloat(form.value.preco),
       categoria: form.value.categoria,
-      urlImagem: form.value.urlImagem || null,
+      urlImagem: typeof form.value.urlImagem === 'string' ? (form.value.urlImagem || null) : null,
       tempoPreparoMinutos: form.value.tempoPreparoMinutos ? parseInt(form.value.tempoPreparoMinutos) : null,
       tipoPreparo: form.value.tipoPreparo
     }
 
     if (props.modoEdicao && props.produto) {
       await api.put(`/produtos/${props.produto.id}`, payload)
+      if (isFile(form.value.urlImagem)) {
+        await produtosService.uploadImagem(props.produto.id, form.value.urlImagem)
+      }
       notificationStore.sucesso('Produto atualizado com sucesso')
     } else {
-      await api.post('/produtos', payload)
+      const response = await api.post('/produtos', payload)
+      const produtoCriado = response.data?.data
+      if (produtoCriado?.id && isFile(form.value.urlImagem)) {
+        await produtosService.uploadImagem(produtoCriado.id, form.value.urlImagem)
+      }
       notificationStore.sucesso('Produto criado com sucesso')
     }
 

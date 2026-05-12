@@ -104,7 +104,7 @@
                   {{ getRoleLabel(getPrimaryRole(usuario.roles)) }}
                 </span>
               </td>
-              <td class="py-4 px-4 text-sm text-text-secondary">{{ usuario.unidadeNome || '-' }}</td>
+              <td class="py-4 px-4 text-sm text-text-secondary">{{ usuario.unidadeAtendimentoNome || usuario.unidadeNome || '-' }}</td>
               <td class="py-4 px-4">
                 <span :class="usuario.ativo ? 'badge-success' : 'badge-error'" class="text-xs">
                   {{ usuario.ativo ? 'Ativo' : 'Inativo' }}

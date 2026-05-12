@@ -14,9 +14,12 @@ const router = useRouter()
 const authStore = useAuthStore()
 
 const formulario = ref({
-  telefone: '',
+  identificador: '',
   senha: ''
 })
+
+const LIMITE_IDENTIFICADOR = 50
+const LIMITE_SENHA = 128
 
 const loading = ref(false)
 const erro = ref('')
@@ -32,8 +35,8 @@ const fazerLogin = async () => {
     erro.value = ''
     
     // Valida campos
-    if (!formulario.value.telefone) {
-      erro.value = 'Informe o telefone'
+    if (!formulario.value.identificador) {
+      erro.value = 'Informe o usuário ou telefone'
       loading.value = false
       return
     }
@@ -43,14 +46,15 @@ const fazerLogin = async () => {
       return
     }
     
-    console.log('[LoginView] Tentando login para:', formulario.value.telefone)
+    console.log('[LoginView] Tentando login para:', formulario.value.identificador)
     
     // Chama API de login através da store
-    const result = await authStore.login(formulario.value.telefone, formulario.value.senha)
+    const result = await authStore.login(formulario.value.identificador, formulario.value.senha)
     
     if (result.success) {
       console.log('[LoginView] Login bem-sucedido, redirecionando...')
-      router.push('/admin/dashboard')
+      const destino = authStore.isCozinha ? '/admin/cozinha' : '/admin/dashboard'
+      router.push(destino)
     } else {
       erro.value = result.error || 'Credenciais inválidas. Tente novamente.'
     }
@@ -86,20 +90,21 @@ const fazerLogin = async () => {
 
         <!-- Formulário -->
         <form @submit.prevent="fazerLogin" class="space-y-4">
-          <!-- Telefone -->
+          <!-- Usuário ou Telefone -->
           <div>
-            <label for="telefone" class="block text-sm font-medium text-text-primary mb-2">
-              Telefone
+            <label for="identificador" class="block text-sm font-medium text-text-primary mb-2">
+              Usuário ou Telefone
             </label>
             <input
-              id="telefone"
+              id="identificador"
               data-cy="input-telefone"
-              v-model="formulario.telefone"
+              v-model="formulario.identificador"
               type="text"
               class="input-field w-full"
-              placeholder="+244923000000"
+              placeholder="admin ou +244923000000"
               :disabled="loading"
-              autocomplete="tel"
+              :maxlength="LIMITE_IDENTIFICADOR"
+              autocomplete="username"
             />
           </div>
 
@@ -117,6 +122,7 @@ const fazerLogin = async () => {
                 class="input-field w-full pr-10"
                 placeholder="Digite sua senha"
                 :disabled="loading"
+                :maxlength="LIMITE_SENHA"
                 autocomplete="current-password"
               />
               <button

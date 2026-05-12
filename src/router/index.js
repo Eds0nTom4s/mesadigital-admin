@@ -28,12 +28,23 @@ const routes = [
     redirect: '/admin/dashboard',
     children: [
       {
+        path: 'cozinha',
+        name: 'Cozinha',
+        component: () => import('@/modules/cozinha/CozinhaView.vue'),
+        meta: {
+          title: 'Fila da Cozinha',
+          requiresAuth: true,
+          roles: ['COZINHA', 'GERENTE', 'ADMIN']
+        }
+      },
+      {
         path: 'dashboard',
         name: 'Dashboard',
         component: () => import('@/modules/dashboard/DashboardView.vue'),
         meta: {
           title: 'Dashboard',
-          requiresAuth: true
+          requiresAuth: true,
+          roles: ['ADMIN', 'GERENTE', 'ATENDENTE']
         }
       },
       {
@@ -42,7 +53,8 @@ const routes = [
         component: () => import('@/modules/pedidos/PedidosBalcaoView.vue'),
         meta: {
           title: 'Gestão de Pedidos - Balcão',
-          requiresAuth: true
+          requiresAuth: true,
+          roles: ['ADMIN', 'GERENTE', 'ATENDENTE']
         }
       },
       {
@@ -51,7 +63,8 @@ const routes = [
         component: () => import('@/modules/produtos/ProdutosView.vue'),
         meta: {
           title: 'Gestão de Produtos',
-          requiresAuth: true
+          requiresAuth: true,
+          roles: ['ADMIN', 'GERENTE']
         }
       },
       {
@@ -60,7 +73,8 @@ const routes = [
         component: () => import('@/modules/mesas/GestaoMesasView.vue'),
         meta: {
           title: 'Gestão de Mesas',
-          requiresAuth: true
+          requiresAuth: true,
+          roles: ['ADMIN']
         }
       },
       {
@@ -69,7 +83,8 @@ const routes = [
         component: () => import('@/modules/fundos/FundosView.vue'),
         meta: {
           title: 'Fundos de Consumo',
-          requiresAuth: true
+          requiresAuth: true,
+          roles: ['ADMIN', 'GERENTE', 'ATENDENTE']
         }
       },
       {
@@ -78,7 +93,8 @@ const routes = [
         component: () => import('@/modules/fundos/FundoDetalheView.vue'),
         meta: {
           title: 'Detalhes do Fundo',
-          requiresAuth: true
+          requiresAuth: true,
+          roles: ['ADMIN', 'GERENTE', 'ATENDENTE']
         }
       },
       {
@@ -87,7 +103,8 @@ const routes = [
         component: () => import('@/modules/estoque/EstoqueView.vue'),
         meta: {
           title: 'Gestão de Estoque',
-          requiresAuth: true
+          requiresAuth: true,
+          roles: ['ADMIN', 'GERENTE']
         }
       },
       {
@@ -96,7 +113,8 @@ const routes = [
         component: () => import('@/modules/configuracoes/ConfiguracoesFinanceirasView.vue'),
         meta: {
           title: 'Configurações Financeiras',
-          requiresAuth: true
+          requiresAuth: true,
+          roles: ['ADMIN']
         }
       },
       {
@@ -105,7 +123,8 @@ const routes = [
         component: () => import('@/modules/usuarios/UsuariosView.vue'),
         meta: {
           title: 'Gestão de Usuários',
-          requiresAuth: true
+          requiresAuth: true,
+          roles: ['ADMIN']
         }
       },
       {
@@ -114,7 +133,28 @@ const routes = [
         component: () => import('@/modules/configuracoes/ConfiguracoesView.vue'),
         meta: {
           title: 'Configurações do Sistema',
-          requiresAuth: true
+          requiresAuth: true,
+          roles: ['ADMIN', 'GERENTE']
+        }
+      },
+      {
+        path: 'configuracoes/unidades-atendimento',
+        name: 'UnidadesAtendimento',
+        component: () => import('@/modules/configuracoes/UnidadesAtendimentoView.vue'),
+        meta: {
+          title: 'Unidades de Atendimento',
+          requiresAuth: true,
+          roles: ['ADMIN', 'GERENTE']
+        }
+      },
+      {
+        path: 'configuracoes/unidades-producao',
+        name: 'UnidadesProducao',
+        component: () => import('@/modules/configuracoes/UnidadesProducaoView.vue'),
+        meta: {
+          title: 'Unidades de Produção',
+          requiresAuth: true,
+          roles: ['ADMIN', 'GERENTE']
         }
       },
       {
@@ -123,7 +163,8 @@ const routes = [
         component: () => import('@/modules/auditoria/AuditoriaView.vue'),
         meta: {
           title: 'Auditoria do Sistema',
-          requiresAuth: true
+          requiresAuth: true,
+          roles: ['ADMIN']
         }
       }
     ]
@@ -160,10 +201,19 @@ router.beforeEach(async (to, from, next) => {
     // Token inválido ou expirado - redireciona para login
     console.warn('[Router] Sessão expirada - redirecionando para login')
     next('/login')
-  } else if (to.path === '/login') {
-    // Já autenticado, evita acessar login novamente
-    next('/admin/dashboard')
   } else {
+    const userRoles = authStore.user?.roles || []
+    const userRoleNames = userRoles.map(role => role.replace('ROLE_', ''))
+    const allowedRoles = to.matched
+      .flatMap(record => record.meta.roles || [])
+      .filter(Boolean)
+
+    if (allowedRoles.length > 0 && !allowedRoles.some(role => userRoleNames.includes(role))) {
+      const fallback = userRoleNames.includes('COZINHA') ? '/admin/cozinha' : '/admin/dashboard'
+      next(fallback)
+      return
+    }
+
     next()
   }
 })

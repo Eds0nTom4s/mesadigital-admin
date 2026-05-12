@@ -41,7 +41,7 @@ export function useWebSocket(_topicos = [], _onMensagem = null, _options = {}) {
 
   // Configurações padrão
   const config = {
-    url: options.url || import.meta.env.VITE_WS_URL || 'http://localhost:8080/api/ws',
+    url: options.url || import.meta.env.VITE_WS_URL || '/api/ws',
     reconnectDelay: options.reconnectDelay || 5000,
     heartbeatIncoming: options.heartbeatIncoming || 4000,
     heartbeatOutgoing: options.heartbeatOutgoing || 4000,

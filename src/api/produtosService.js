@@ -126,15 +126,7 @@ export const produtosService = {
 
   /**
    * Definir URL de imagem do produto
-   * PUT /api/produtos/{id}   body: { urlImagem: "https://..." }
-   *
-   * [BACKEND] NÃO existe endpoint multipart/form-data para upload de imagem.
-   * Solução: fazer upload para hosting externo (Cloudinary, S3, Firebase Storage)
-   * e passar a URL resultante via campo 'urlImagem' no PUT /api/produtos/{id}.
-   *
-   * @param {number} id - ID do produto
-   * @param {string} url - URL pública da imagem
-   * @returns {Promise<Object>} Produto actualizado
+   * PUT /api/produtos/{id} body: { urlImagem: "https://..." }
    */
   async setUrlImagem(id, url) {
     const response = await api.put(`/produtos/${id}`, { urlImagem: url })
@@ -142,22 +134,21 @@ export const produtosService = {
   },
 
   /**
-   * @deprecated Alias legado — use setUrlImagem(id, url)
-   * [BACKEND] NÃO existe POST /api/produtos/{id}/imagem (multipart).
+   * Upload multipart para MinIO
+   * POST /api/produtos/{id}/imagem
    */
   async uploadImagem(id, fileOrUrl) {
-    console.warn(
-      '[produtosService] uploadImagem() — multipart NÃO suportado.\n' +
-      'Faça upload para hosting externo e chame setUrlImagem(id, url).'
-    )
     if (typeof fileOrUrl === 'string') {
       return this.setUrlImagem(id, fileOrUrl)
     }
-    throw new Error(
-      'Upload de ficheiro directo não suportado. ' +
-      'Use hosting externo e passe a URL para setUrlImagem(). ' +
-      'Ver RESPOSTAS_BACKEND_PERGUNTAS.txt §6.1.'
-    )
+
+    const formData = new FormData()
+    formData.append('file', fileOrUrl)
+
+    const response = await api.post(`/produtos/${id}/imagem`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    return response.data
   },
 
   /**

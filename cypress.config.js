@@ -7,8 +7,8 @@ export default defineConfig({
     
     // URL da API para testes
     env: {
-      apiUrl: 'http://localhost:8080/api',
-      wsUrl: 'http://localhost:8080/ws',
+      apiUrl: 'https://topotypic-tari-unrelentingly.ngrok-free.dev/api',
+      wsUrl: 'https://topotypic-tari-unrelentingly.ngrok-free.dev/api/ws',
     },
     
     // Configurações de viewport

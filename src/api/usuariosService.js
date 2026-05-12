@@ -82,8 +82,8 @@ const usuariosService = {
    * @param {Object} dados - Dados do usuário
    * @param {string} dados.username - Login ID (usa telefone se omitido)
    * @param {string} dados.nomeCompleto - Nome de exibição (também aceita dados.nome por compatibilidade)
-   * @param {string} dados.email - Email (OBRIGATÓRIO pelo backend)
-   * @param {string} dados.telefone - Telefone
+   * @param {string} dados.email - Email opcional
+   * @param {string} dados.telefone - Telefone obrigatório
    * @param {string} dados.senha - Senha inicial
    * @param {string} dados.role - ADMIN | GERENTE | ATENDENTE | COZINHA (mapeado para roles: ['ROLE_...'])
    * @param {number} dados.unidadeId - ID da unidade (opcional para ADMIN)
@@ -94,8 +94,8 @@ const usuariosService = {
       console.log('[UsuariosService] Criando usuário:', dados.nomeCompleto || dados.nome || dados.username)
       
       // Validações básicas
-      if ((!dados.nome && !dados.nomeCompleto && !dados.username) || !dados.senha || (!dados.role && !dados.roles)) {
-        throw new Error('Campos obrigatórios: nome, senha e perfil de acesso')
+      if ((!dados.nome && !dados.nomeCompleto && !dados.username) || !dados.telefone || !dados.senha || (!dados.role && !dados.roles)) {
+        throw new Error('Campos obrigatórios: nome, telefone, senha e perfil de acesso')
       }
 
       // Mapear payload para o formato esperado pelo backend (CriarUsuarioRequest)
@@ -107,7 +107,8 @@ const usuariosService = {
         senha: dados.senha,
         email: dados.email || null,
         nomeCompleto: dados.nomeCompleto || dados.nome || null,
-        telefone: dados.telefone || null,
+        telefone: dados.telefone,
+        unidadeAtendimentoId: dados.unidadeAtendimentoId || dados.unidadeId || null,
         roles: dados.roles || (dados.role ? [`ROLE_${dados.role.toUpperCase()}`] : []),
         otpAutorizacao: dados.otpAutorizacao || undefined
       }
@@ -145,9 +146,10 @@ const usuariosService = {
 
       // Mapear para o formato do backend (atualização não aceita username nem senha)
       const payload = {
-        email: dados.email || null,
+        email: dados.email || '',
         nomeCompleto: dados.nomeCompleto || dados.nome || null,
         telefone: dados.telefone || null,
+        unidadeAtendimentoId: dados.unidadeAtendimentoId || dados.unidadeId || null,
         roles: dados.roles || (dados.role ? [`ROLE_${dados.role.toUpperCase()}`] : undefined)
       }
       // Remover chaves undefined para não sobrescrever valores no backend
@@ -261,27 +263,31 @@ const usuariosService = {
   },
 
   /**
-   * Reset de senha (envia token por SMS/Email)
-   * @param {string} telefone - Telefone do usuário
-   * @returns {Promise<Object>} Mensagem de sucesso
+   * Reset de senha administrativo
+   * @param {number} id - ID do usuário
+   * @returns {Promise<Object>} Dados da senha temporária
    */
-  async solicitarResetSenha(telefone) {
+  async resetSenha(id) {
     try {
-      console.log('[UsuariosService] Solicitando reset de senha para:', telefone)
+      console.log('[UsuariosService] Solicitando reset de senha para usuário:', id)
       
-      const response = await api.post('/usuarios/reset-senha', { telefone })
+      const response = await api.post(`/usuarios/${id}/reset-senha`)
       
-      console.log('[UsuariosService] Token de reset enviado')
-      return response.data
+      console.log('[UsuariosService] Senha redefinida')
+      return response.data?.data || response.data
     } catch (error) {
       console.error('[UsuariosService] Erro ao solicitar reset:', error)
       
       if (error.response?.status === 404) {
-        throw new Error('Telefone não encontrado no sistema')
+        throw new Error('Usuário não encontrado no sistema')
       }
       
       throw error
     }
+  },
+
+  async solicitarResetSenha(id) {
+    return this.resetSenha(id)
   },
 
   /**

@@ -61,6 +61,15 @@ const mesasService = {
   },
 
   /**
+   * Listar tipos de mesa/unidade de consumo disponíveis
+   * GET /api/mesas/tipos
+   */
+  async getTipos() {
+    const response = await api.get('/mesas/tipos')
+    return response.data
+  },
+
+  /**
    * Detalhe de uma mesa (inclui sessaoAtivaId se OCUPADA)
    * GET /api/mesas/{id}
    */

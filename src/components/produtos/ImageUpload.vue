@@ -93,10 +93,9 @@
     </div>
 
     <!-- Campo URL da Imagem -->
-    <!-- [BACKEND] Backend não suporta multipart/form-data. Inserir URL directamente. -->
     <div v-if="!disabled" class="url-input-section" style="margin-top:0.75rem;">
       <label class="url-input-label" style="font-size:0.8rem;color:#6b7280;display:block;margin-bottom:0.25rem;">
-        URL da imagem (Cloudinary, Imgur, etc.)
+        URL da imagem
       </label>
       <div style="display:flex;gap:0.5rem;">
         <input
@@ -138,7 +137,7 @@ import produtosService from '@/api/produtosService'
 
 const props = defineProps({
   modelValue: {
-    type: String,
+    type: [String, File],
     default: ''
   },
   produtoId: {
@@ -173,7 +172,9 @@ const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'
 
 // Watch para atualizar URL quando prop mudar
 watch(() => props.modelValue, (newValue) => {
-  currentImageUrl.value = newValue
+  if (typeof newValue === 'string') {
+    currentImageUrl.value = newValue
+  }
 })
 
 // Trigger input de arquivo
@@ -251,18 +252,32 @@ const handleFileChange = async (event) => {
   }
 }
 
-// Upload de arquivo
-// [BACKEND] NÃO existe endpoint multipart/form-data.
-// Ao seleccionar ficheiro: mostra pré-visualização local e pede URL externa.
-const uploadFile = async (_file) => {
-  // O preview local já foi definido em handleFileChange via FileReader.
-  // Instruir o operador a usar hosting externo.
-  validationMessage.value =
-    'ℹ️ O backend não suporta upload directo de ficheiros. ' +
-    'Farei upload para Cloudinary, Imgur ou similar e cole a URL no campo abaixo.'
-  validationClass.value = 'validation-warning'
-  uploading.value = false
-  uploadProgress.value = 0
+// Upload de arquivo para MinIO via backend
+const uploadFile = async (file) => {
+  uploading.value = true
+  uploadProgress.value = 30
+
+  try {
+    const response = await produtosService.uploadImagem(props.produtoId, file)
+    const produto = response.data ?? response
+    const imageUrl = produto.urlImagem
+
+    uploadProgress.value = 100
+    currentImageUrl.value = imageUrl
+    emit('update:modelValue', imageUrl)
+    emit('upload-success', imageUrl)
+    validationMessage.value = 'Imagem enviada com sucesso!'
+    validationClass.value = 'validation-success'
+  } catch (error) {
+    console.error('[ImageUpload] Erro no upload:', error)
+    validationMessage.value = error.response?.data?.message || 'Erro ao enviar imagem'
+    validationClass.value = 'validation-error'
+    emit('upload-error', error)
+  } finally {
+    uploading.value = false
+    setTimeout(() => { validationMessage.value = '' }, 4000)
+    uploadProgress.value = 0
+  }
 }
 
 // Guardar URL da imagem via PUT /api/produtos/{id}

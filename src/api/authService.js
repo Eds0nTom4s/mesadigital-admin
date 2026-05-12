@@ -12,22 +12,26 @@ const TOKEN_KEY = 'token'
 const USER_KEY = 'user'
 
 /**
- * Faz login com telefone e senha (Admin/Atendente)
+ * Faz login com username ou telefone e senha (Admin/Atendente)
  * Endpoint: POST /api/auth/admin/login
  * Fonte de Verdade: integration-docs/admin_panel_integration.md §2
  *
- * @param {string} telefone - Telefone do utilizador (+244...)
+ * @param {string} identificador - Username ou telefone do utilizador (+244...)
  * @param {string} senha - Palavra-passe
  * @returns {Promise<Object>} Dados de autenticação e usuário
  */
-export const login = async (telefone, senha) => {
+export const login = async (identificador, senha) => {
   try {
     // Endpoint: /api (prefixo) + /auth/admin/login
-    // Payload: { telefone, senha }
-    const response = await api.post('/auth/admin/login', {
-      telefone,
-      senha
-    })
+    // Payload: { username, senha } ou { telefone, senha }
+    const valor = identificador.trim()
+    const somenteNumeros = valor.replace(/\D/g, '')
+    const pareceTelefone = valor.startsWith('+') || /^\d+$/.test(valor) || somenteNumeros.length >= 9
+    const payload = pareceTelefone
+      ? { telefone: valor, senha }
+      : { username: valor, senha }
+
+    const response = await api.post('/auth/admin/login', payload)
 
     // Resposta padrão: { success, message, data: { ... } }
     const { success, data, message } = response.data
@@ -55,7 +59,7 @@ export const login = async (telefone, senha) => {
     return { success: true, user, token }
   } catch (error) {
     if (error.response?.status === 401) {
-      throw new Error('Telefone ou senha incorretos')
+      throw new Error('Usuário/telefone ou senha incorretos')
     }
     if (error.response?.status === 403) {
       throw new Error('Conta desativada ou permissão insuficiente')
