@@ -81,20 +81,22 @@
 
     <!-- Tempo Aberto (se ocupada) -->
     <div v-if="abertaEm && mesa.status === 'OCUPADA'" 
-         class="text-xs text-text-secondary mt-2 flex items-center">
+         :class="['text-xs mt-2 flex items-center rounded-lg px-2 py-1', tempoOcupacaoClass]">
       <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
       </svg>
-      {{ tempoDecorrido }}
+      Aberta há {{ tempoDecorrido }}
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useCurrency } from '@/utils/currency'
 
 const { formatCurrency } = useCurrency()
+const agora = ref(Date.now())
+let timer = null
 
 const props = defineProps({
   mesa: {
@@ -137,6 +139,23 @@ const statusBadge = computed(() => {
     'FINALIZADA': 'bg-gray-500 text-white'  // legacy alias
   }
   return badges[props.mesa.status] || 'bg-gray-500 text-white'
+})
+
+const minutosOcupacao = computed(() => {
+  if (!abertaEm.value) return 0
+  return Math.max(Math.floor((agora.value - new Date(abertaEm.value).getTime()) / 60000), 0)
+})
+
+const nivelOcupacao = computed(() => {
+  if (minutosOcupacao.value >= 180) return 'critica'
+  if (minutosOcupacao.value >= 60) return 'atencao'
+  return 'normal'
+})
+
+const tempoOcupacaoClass = computed(() => {
+  if (nivelOcupacao.value === 'critica') return 'bg-error/10 text-error font-semibold'
+  if (nivelOcupacao.value === 'atencao') return 'bg-warning/10 text-warning font-semibold'
+  return 'bg-success/10 text-success'
 })
 
 // Label do status
@@ -187,15 +206,10 @@ const modoPagamento = computed(() => {
 
 // Tempo decorrido desde abertura da sessão
 const tempoDecorrido = computed(() => {
-  const abertaEm = props.sessaoAtiva?.abertaEm || props.mesa.abertaEm
-  if (!abertaEm) return ''
-  
-  const inicio = new Date(abertaEm)
-  const agora = new Date()
-  const diff = agora - inicio
-  
-  const horas = Math.floor(diff / (1000 * 60 * 60))
-  const minutos = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
+  if (!abertaEm.value) return ''
+
+  const horas = Math.floor(minutosOcupacao.value / 60)
+  const minutos = minutosOcupacao.value % 60
   
   if (horas > 0) {
     return `${horas}h ${minutos}min`
@@ -220,4 +234,14 @@ const numeroPedidos = computed(() => {
 })
 
 const abertaEm = computed(() => props.sessaoAtiva?.abertaEm || props.mesa.abertaEm)
+
+onMounted(() => {
+  timer = setInterval(() => {
+    agora.value = Date.now()
+  }, 60000)
+})
+
+onUnmounted(() => {
+  if (timer) clearInterval(timer)
+})
 </script>

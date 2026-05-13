@@ -338,7 +338,10 @@ const cronometro = ref('--:--:--')
 let timerInterval = null
 
 const calcularCronometro = () => {
-  const dataAbertura = props.unidade.sessaoAtiva?.dataAbertura || props.unidade.sessaoAtiva?.createdAt
+  // O campo correcto no SessaoConsumoResponse é 'abertaEm'
+  const dataAbertura = props.unidade.sessaoAtiva?.abertaEm
+    || props.unidade.abertaEm
+    || props.unidade.sessaoAtiva?.createdAt  // fallback legado
   if (!dataAbertura) { cronometro.value = '--:--:--'; return }
   const inicio = new Date(dataAbertura)
   const agora = new Date()

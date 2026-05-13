@@ -228,7 +228,7 @@
                 </div>
                 <div>
                   <p class="text-sm text-text-secondary">Aberta desde:</p>
-                  <p class="font-medium text-text-primary">
+                  <p :class="['font-medium', tempoOcupacaoClass]">
                     {{ formatarDataAbertura }} ({{ tempoDecorrido }})
                   </p>
                 </div>
@@ -366,7 +366,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useCurrency } from '@/utils/currency'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
@@ -420,6 +420,8 @@ const filtroPedidoAtivo = ref('TODOS')
 const loadingQrCode = ref(false)
 const loadingConfig = ref(false)
 const editReferencia = ref('')
+const agora = ref(Date.now())
+let timerOcupacao = null
 
 watch(() => props.mesa, (n) => {
   if (n) {
@@ -554,14 +556,17 @@ const pedidosFiltrados = computed(() => {
 // Totais — prefer dados da sessão ativa
 const totais = computed(() => {
   if (props.sessao?.totalConsumo != null) {
+    // Saldo do fundo conta como "pago" (pré-pago)
+    const totalPago = props.fundo?.saldo ?? props.fundo?.saldoAtual ?? 0
+    const totalConsumido = props.sessao.totalConsumo
     return {
-      totalConsumido: props.sessao.totalConsumo,
-      totalPago: 0,
-      totalPendente: props.sessao.totalConsumo
+      totalConsumido,
+      totalPago,
+      totalPendente: Math.max(0, totalConsumido - totalPago)
     }
   }
   const pedidos = props.sessao?.pedidos || props.mesa.pedidos || []
-  
+
   const totalConsumido = pedidos.reduce((sum, p) => sum + (p.total || 0), 0)
   const totalPago = pedidos
     .filter(p => p.statusFinanceiro === 'PAGO')
@@ -569,7 +574,7 @@ const totais = computed(() => {
   const totalPendente = pedidos
     .filter(p => p.statusFinanceiro === 'NAO_PAGO')
     .reduce((sum, p) => sum + (p.total || 0), 0)
-  
+
   return { totalConsumido, totalPago, totalPendente }
 })
 
@@ -592,11 +597,8 @@ const formatarDataAbertura = computed(() => {
 const tempoDecorrido = computed(() => {
   const abertaEm = props.sessao?.abertaEm || props.mesa.abertaEm
   if (!abertaEm) return ''
-  
-  const inicio = new Date(abertaEm)
-  const agora = new Date()
-  const diff = agora - inicio
-  
+
+  const diff = Math.max(agora.value - new Date(abertaEm).getTime(), 0)
   const horas = Math.floor(diff / (1000 * 60 * 60))
   const minutos = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
   
@@ -604,6 +606,18 @@ const tempoDecorrido = computed(() => {
     return `${horas}h ${minutos}min`
   }
   return `${minutos}min`
+})
+
+const minutosOcupacao = computed(() => {
+  const abertaEm = props.sessao?.abertaEm || props.mesa.abertaEm
+  if (!abertaEm) return 0
+  return Math.max(Math.floor((agora.value - new Date(abertaEm).getTime()) / 60000), 0)
+})
+
+const tempoOcupacaoClass = computed(() => {
+  if (minutosOcupacao.value >= 180) return 'text-error'
+  if (minutosOcupacao.value >= 60) return 'text-warning'
+  return 'text-text-primary'
 })
 
 // Permissões
@@ -762,6 +776,18 @@ const confirmarLiquidar = () => {
   })
   modalLiquidarAberto.value = false
 }
+
+onMounted(() => {
+  // Actualiza imediatamente ao abrir o modal, depois a cada 30s
+  agora.value = Date.now()
+  timerOcupacao = setInterval(() => {
+    agora.value = Date.now()
+  }, 30000)
+})
+
+onUnmounted(() => {
+  if (timerOcupacao) clearInterval(timerOcupacao)
+})
 </script>
 
 <style scoped>

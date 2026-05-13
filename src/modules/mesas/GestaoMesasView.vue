@@ -18,7 +18,7 @@
     </div>
 
     <!-- Estatísticas -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-6">
       <div class="card">
         <div class="flex items-center justify-between">
           <div>
@@ -74,6 +74,20 @@
           </div>
         </div>
       </div>
+
+      <div class="card">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-text-secondary text-sm">Ocupação Crítica</p>
+            <p class="text-3xl font-bold text-error mt-2">{{ estatisticas.ocupacaoCritica }}</p>
+          </div>
+          <div class="w-12 h-12 bg-error/10 rounded-lg flex items-center justify-center">
+            <svg class="w-6 h-6 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+            </svg>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Filtros -->
@@ -92,6 +106,14 @@
             <option v-for="tipo in tiposMesa" :key="tipo.codigo" :value="tipo.codigo">
               {{ tipo.descricao }}
             </option>
+          </select>
+
+          <select v-model="ocupacaoFiltro" class="input-field w-56">
+            <option value="TODAS">Qualquer duração</option>
+            <option value="60">Abertas há mais de 1h</option>
+            <option value="180">Abertas há mais de 3h</option>
+            <option value="360">Abertas há mais de 6h</option>
+            <option value="720">Abertas há mais de 12h</option>
           </select>
         </div>
         
@@ -188,7 +210,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/store/auth'
 import { useNotificationStore } from '@/store/notifications'
@@ -213,7 +235,10 @@ const tiposMesa = ref([])
 const loading = ref(false)
 const statusFiltro = ref('TODOS')
 const tipoFiltro = ref('TODOS')
+const ocupacaoFiltro = ref('TODAS')
 const busca = ref('')
+const agora = ref(Date.now())
+let timerOcupacao = null
 
 // ── Modal Nova Mesa ────────────────────────────────────────────────────────
 const modalNovaAberto = ref(false)
@@ -238,18 +263,27 @@ const estatisticas = computed(() => {
   const total = mesas.value.length
   const ocupadas = mesas.value.filter(m => m.status === 'OCUPADA').length
   const disponiveis = mesas.value.filter(m => m.status === 'DISPONIVEL').length
+  const ocupacaoCritica = mesas.value.filter(m => minutosOcupacaoMesa(m) >= 180).length
   // Aguardando pagamento = sessão com status AGUARDANDO_PAGAMENTO (sessão interna)
   const aguardandoPagamento = mesas.value.filter(m => m.sessaoAtiva?.status === 'AGUARDANDO_PAGAMENTO').length
   const taxaOcupacao = total > 0 ? Math.round((ocupadas / total) * 100) : 0
 
-  return { total, ocupadas, disponiveis, aguardandoPagamento, taxaOcupacao }
+  return { total, ocupadas, disponiveis, aguardandoPagamento, taxaOcupacao, ocupacaoCritica }
 })
+
+const minutosOcupacaoMesa = (mesa) => {
+  if (mesa.status !== 'OCUPADA') return 0
+  const abertaEm = mesa.sessaoAtiva?.abertaEm || mesa.abertaEm
+  if (!abertaEm) return 0
+  return Math.max(Math.floor((agora.value - new Date(abertaEm).getTime()) / 60000), 0)
+}
 
 // ── Mesas filtradas ────────────────────────────────────────────────────────
 const mesasFiltradas = computed(() => {
   return mesas.value.filter(mesa => {
     if (statusFiltro.value !== 'TODOS' && mesa.status !== statusFiltro.value) return false
     if (tipoFiltro.value !== 'TODOS' && mesa.tipo !== tipoFiltro.value) return false
+    if (ocupacaoFiltro.value !== 'TODAS' && minutosOcupacaoMesa(mesa) < Number(ocupacaoFiltro.value)) return false
 
     if (busca.value) {
       const q = busca.value.toLowerCase()
@@ -678,7 +712,14 @@ const atualizarQrCode = (novoQrCode) => {
 }
 
 onMounted(async () => {
+  timerOcupacao = setInterval(() => {
+    agora.value = Date.now()
+  }, 60000)
   await Promise.all([carregarTiposMesa(), carregarMesas()])
+})
+
+onUnmounted(() => {
+  if (timerOcupacao) clearInterval(timerOcupacao)
 })
 </script>
 
